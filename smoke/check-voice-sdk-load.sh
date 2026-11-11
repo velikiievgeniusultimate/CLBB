@@ -10,9 +10,14 @@ trap 'rm -rf "$work"' EXIT
 mkdir "$work/classes"
 cat > "$work/CLBBVoiceLoad.java" <<'JAVA'
 public final class CLBBVoiceLoad {
- public static void main(String[] args) {
+ public static void main(String[] args) throws Exception {
   System.load(args[0]);
-  System.out.println("CLBB_VOICE_SDK_LOAD_OK=1");
+  Class<?> effects = Class.forName("com.ss.bytertc.audio.device.webrtc.WebRtcAudioEffects");
+  for(String name : new String[]{"isAcousticEchoCancelerSupported","isNoiseSuppressorSupported"}) {
+   java.lang.reflect.Method method=effects.getDeclaredMethod(name);method.setAccessible(true);
+   if(!Boolean.FALSE.equals(method.invoke(null)))throw new AssertionError("Unsupported host effect advertised: "+name);
+  }
+  System.out.println("CLBB_VOICE_SDK_LOAD_OK=1 effects_capabilities=unavailable_without_exception");
   System.exit(0);
  }
 }

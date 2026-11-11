@@ -2947,6 +2947,34 @@ index 4aceead..b09e390 100644
  	}
  	public interface OnBufferingUpdateListener {
  	}
+diff --git a/src/api-impl/android/media/audiofx/AudioEffect.java b/src/api-impl/android/media/audiofx/AudioEffect.java
+index df1cfa1..719effa 100644
+--- a/src/api-impl/android/media/audiofx/AudioEffect.java
++++ b/src/api-impl/android/media/audiofx/AudioEffect.java
+@@ -2,13 +2,22 @@ package android.media.audiofx;
+ 
+ public class AudioEffect {
+ 	public static final int SUCCESS = 0;
++    // Android API type identifiers, not a claim that the host implements these effects.
++    public static final java.util.UUID EFFECT_TYPE_AEC = java.util.UUID.fromString("7b491460-8d4d-11e0-bd61-0002a5d5c51b");
++    public static final java.util.UUID EFFECT_TYPE_NS = java.util.UUID.fromString("58b4b260-8e06-11e0-aa8e-0002a5d5c51b");
++    public static final java.util.UUID EFFECT_TYPE_AGC = java.util.UUID.fromString("0a8abfe0-654c-11e0-ba26-0002a5d5c51b");
+ 
+-	public static class Descriptor {}
++	public static class Descriptor {
++        public java.util.UUID type, uuid;
++        public String connectMode, name, implementor;
++    }
+ 
+ 	public static Descriptor[] queryEffects() {
+ 		return new Descriptor[0];
+ 	}
+ 
++	public void release() {}
++
+ 	public boolean getEnabled() { return false; }
+ 
+ 	public int setEnabled(boolean enable) { return SUCCESS; }
 diff --git a/src/api-impl/android/net/ConnectivityManager.java b/src/api-impl/android/net/ConnectivityManager.java
 index dd9dd7e..92f2a06 100644
 --- a/src/api-impl/android/net/ConnectivityManager.java
@@ -5956,6 +5984,48 @@ index 0000000..0bbe757
 +
 +/* Borrowed, shared by views belonging to this Android app data directory. */
 +WebKitNetworkSession *atl_webview_session_for_app(const char *app_directory, GError **error);
+diff --git a/src/api-impl/android/media/audiofx/AcousticEchoCanceler.java b/src/api-impl/android/media/audiofx/AcousticEchoCanceler.java
+new file mode 100644
+index 0000000..587379b
+--- /dev/null
++++ b/src/api-impl/android/media/audiofx/AcousticEchoCanceler.java
+@@ -0,0 +1,8 @@
++package android.media.audiofx;
++
++/** No Android hardware preprocessing effect is exposed by this host backend. */
++public final class AcousticEchoCanceler extends AudioEffect {
++ private AcousticEchoCanceler() {}
++ public static boolean isAvailable() { return false; }
++ public static AcousticEchoCanceler create(int audioSession) { return null; }
++}
+diff --git a/src/api-impl/android/media/audiofx/NoiseSuppressor.java b/src/api-impl/android/media/audiofx/NoiseSuppressor.java
+new file mode 100644
+index 0000000..9a8d711
+--- /dev/null
++++ b/src/api-impl/android/media/audiofx/NoiseSuppressor.java
+@@ -0,0 +1,8 @@
++package android.media.audiofx;
++
++/** No Android hardware preprocessing effect is exposed by this host backend. */
++public final class NoiseSuppressor extends AudioEffect {
++ private NoiseSuppressor() {}
++ public static boolean isAvailable() { return false; }
++ public static NoiseSuppressor create(int audioSession) { return null; }
++}
+diff --git a/src/api-impl/android/media/audiofx/AutomaticGainControl.java b/src/api-impl/android/media/audiofx/AutomaticGainControl.java
+new file mode 100644
+index 0000000..d1f507f
+--- /dev/null
++++ b/src/api-impl/android/media/audiofx/AutomaticGainControl.java
+@@ -0,0 +1,8 @@
++package android.media.audiofx;
++
++/** No Android hardware preprocessing effect is exposed by this host backend. */
++public final class AutomaticGainControl extends AudioEffect {
++ private AutomaticGainControl() {}
++ public static boolean isAvailable() { return false; }
++ public static AutomaticGainControl create(int audioSession) { return null; }
++}
 diff --git a/src/api-impl/android/net/http/SslCertificate.java b/src/api-impl/android/net/http/SslCertificate.java
 new file mode 100644
 index 0000000..cab307d
