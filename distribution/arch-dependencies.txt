@@ -24,3 +24,27 @@ curl
 tar
 coreutils
 zenity
+
+# Direct runtime libraries and ABI providers; system package manager supplies them.
+sdl2-compat
+libsndfile
+capstone
+libffi
+gnutls
+openssl
+ffmpeg
+libglvnd
+alsa-lib
+json-glib
+libsoup3
+libsecret
+sqlite
+vulkan-icd-loader
+libstdc++.so=6-64
+libgcc_s.so=1-64
+libatomic.so=1-64
+libcapstone.so=5-64
+libavcodec.so=63-64
+libswscale.so=10-64
+libicuuc.so=78-64
+libicui18n.so=78-64

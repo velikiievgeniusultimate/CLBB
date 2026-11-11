@@ -8,7 +8,7 @@ command -v pacman >/dev/null || { echo 'Arch-family build dependencies required'
 if [[ ${1:-} == --install-deps ]]; then
   sudo pacman -S --needed -- base-devel clang lld meson ninja git rust cargo pkgconf python \
     jdk21-openjdk asm java-getopt autoconf automake libtool gtk4 webkitgtk-6.0 libportal-gtk4 \
-    libglvnd sdl3 alsa-lib libx11 libunwind libbsd libelf libcap icu zlib lz4 xz expat fontconfig patchelf
+    libglvnd sdl3 sdl2-compat libsndfile capstone ffmpeg libffi gnutls alsa-lib libx11 libunwind libbsd libelf libcap icu zlib lz4 xz expat fontconfig patchelf
 fi
 python3 distribution/bootstrap-sources.py
 source ./env.sh

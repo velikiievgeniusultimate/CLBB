@@ -141,6 +141,8 @@ fn install(rel:&Value,root:&Path,allow_deps:bool)->Result<Value> {
     let libc=|s:&str|->Option<(u32,u32)>{let mut v=s.split('.');Some((v.next()?.parse().ok()?,v.next()?.parse().ok()?))};
     let minimum=info["min_glibc"].as_str().and_then(libc).ok_or("Missing minimum libc")?;
     if text.split_whitespace().nth(1).and_then(libc).is_none_or(|v|v<minimum){return Err(fail("System glibc is too old for this release"));}
+    let libraries=Command::new("python3").arg("-c").arg(include_str!("../../check_libraries.py")).arg(&staged).output()?;
+    if !libraries.status.success(){return Err(fail(&String::from_utf8_lossy(&libraries.stderr)));}
     fs::create_dir_all(root.join("releases"))?;let destination=root.join("releases").join(tag);
     // Never overwrite an existing release directory, especially one in use.
     if destination.exists(){verify_payload(&destination,&staged.join("release.json"))?;}
