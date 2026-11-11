@@ -1013,6 +1013,7 @@ mod tests {
         snapshot::{Flag, Text, Vector16},
     };
     use super::*;
+    use super::super::QueuedSkill;
     #[derive(Default)]
     struct TestHost {
         moves: Vec<(i32, Point)>,
