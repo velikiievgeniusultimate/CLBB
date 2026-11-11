@@ -27,6 +27,13 @@ class DistributionTests(unittest.TestCase):
                     info=tarfile.TarInfo(name);info.size=1;tar.addfile(info,io.BytesIO(b'x'))
                 with self.assertRaises(ValueError):extract.extract(archive,dest)
                 self.assertFalse(list(dest.iterdir()))
+    def test_archive_accepts_build_revision(self):
+        with tempfile.TemporaryDirectory()as temp:
+            p=Path(temp);archive=p/'x.tar.gz';dest=p/'out';dest.mkdir()
+            with tarfile.open(archive,'w:gz')as tar:
+                info=tarfile.TarInfo('REVISION');info.size=40;tar.addfile(info,io.BytesIO(b'a'*40))
+            extract.extract(archive,dest)
+            self.assertEqual((dest/'REVISION').read_text(),'a'*40)
     def test_archive_rejects_escaping_symlink(self):
         with tempfile.TemporaryDirectory()as temp:
             p=Path(temp);archive=p/'x.tar.gz';dest=p/'out';dest.mkdir()

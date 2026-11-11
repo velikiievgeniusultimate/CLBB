@@ -96,3 +96,5 @@
 /.release-workflow.lock
 /.clbb-local-launch
 /.clbb-local-runtime.json
+
+/tools/pauth-audit/artifacts/

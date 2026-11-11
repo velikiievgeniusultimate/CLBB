@@ -5,7 +5,7 @@ import sys
 import tarfile
 
 ALLOWED = {'prefix', 'bin', 'distribution', 'legal', 'LICENSES', 'VERSION', 'LICENSE',
-           'LICENSE_POLICY.md', 'THIRD_PARTY_NOTICES.txt', 'release.json', 'env.sh',
+           'REVISION', 'LICENSE_POLICY.md', 'THIRD_PARTY_NOTICES.txt', 'release.json', 'env.sh',
            'run-mlbb.sh', 'prepare-runtime.py', 'prepare-native-plugins.py',
            'prepare-system-fonts.py', 'README.md', 'README.en.md'}
 def extract(archive, destination):
