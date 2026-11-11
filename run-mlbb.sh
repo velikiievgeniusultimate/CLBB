@@ -6,6 +6,12 @@ source "$CLBB_LAUNCH_ROOT/env.sh"
 # Explicit inherited proxies would override that process routing rule.
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 export ANDROID_APP_DATA_DIR="$CLBB_STATE_ROOT/data"
+# GTK's X11 fallback frame clock assumes60Hz without compositor feedback.
+# The owned onscreen EGL context follows CLBB's actual VSync setting instead.
+case ",${GDK_DEBUG:-}," in
+    *,no-vsync,*) ;;
+    *) export GDK_DEBUG="${GDK_DEBUG:+$GDK_DEBUG,}no-vsync" ;;
+esac
 export ATL_UGLY_ENABLE_WEBVIEW=1
 export CLBB_WEBVIEW_LOGIN_POLICY="$CLBB_LAUNCH_ROOT/distribution/moonton-email-login.js"
 export ATL_WEBKIT_EXTENSIONS_DIR="$CLBB_ATL_PREFIX/lib/atl-web-extensions"

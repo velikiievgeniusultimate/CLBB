@@ -115,10 +115,13 @@ pub extern "C" fn clbb_render_frame_event(
 pub fn fps() -> f64 {
     let now=Instant::now();let m=METRICS.lock().unwrap();
     let Some(s)=m.surfaces.iter().filter(|s|s.handoff.rows.len()>1).max_by_key(|s|s.last) else{return 0.};
-    let first=s.handoff.rows.front().unwrap().0;let last=s.handoff.rows.back().unwrap().0;
-    if now.saturating_duration_since(last)>Duration::from_millis(500){return 0.}
-    let span=last.saturating_duration_since(first).as_secs_f64();
-    if span>0. {(s.handoff.rows.len()-1) as f64/span}else{0.}
+    let rows=if s.painted.rows.is_empty(){&s.handoff.rows}else{&s.painted.rows};
+    let Some((first,_))=rows.front() else{return 0.};
+    let Some((last,_))=rows.back() else{return 0.};
+    if now.saturating_duration_since(*last)>Duration::from_millis(500){return 0.}
+    let span=last.saturating_duration_since(*first).as_secs_f64();
+    if span>0. {(rows.len()-1) as f64/span}else{0.}
+
 }
 pub fn snapshot() -> Value {
     let now = Instant::now();

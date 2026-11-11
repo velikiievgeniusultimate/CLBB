@@ -7139,10 +7139,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..d514f10
+index 0000000..f940e5a
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,932 @@
+@@ -0,0 +1,1026 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7250,6 +7250,11 @@ index 0000000..d514f10
 +    char fps_text[32];
 +    GtkWidget *cursor_layer;
 +    GtkWidget *viewport;
++    gint64 present_control_at;
++    int present_requested_interval;
++    void *present_logged_display, *present_logged_context, *present_logged_surface;
++    int present_logged_interval;
++    gboolean present_logged_result, present_logged, present_skip_logged;
 +    gboolean raw_tap;
 +    double raw_x, raw_y, raw_dx, raw_dy;
 +    unsigned raw_steps;
@@ -7641,6 +7646,90 @@ index 0000000..d514f10
 +    cairo_set_font_size(cr, 11);
 +    cairo_show_text(cr, "CLBB");
 +}
++/* Experimental host presentation policy. This uses only public GTK/EGL APIs
++ * on the GTK thread; the guest's synthetic EGL surface is never inspected or
++ * rebound. Environment gating leaves the established presentation path alone. */
++static gboolean host_present_control_enabled(void)
++{
++    static gsize enabled = 0;
++    if (g_once_init_enter(&enabled)) {
++        const char *value = g_getenv("CLBB_HOST_PRESENT_CONTROL");
++        g_once_init_leave(&enabled, value && !strcmp(value, "0") ? 1 : 2);
++    }
++    return enabled == 2;
++}
++static void host_present_after_paint(GdkFrameClock *clock, GtkWindow *window)
++{
++    (void)clock;
++    ClbbHost *h = g_object_get_data(G_OBJECT(window), "clbb-mapper-attached");
++    if (!h || h->closing || !host_present_control_enabled()) return;
++    int interval = clbb_frame_pacing_vsync() ? 1 : 0;
++    gint64 now = g_get_monotonic_time();
++    if (now < h->present_control_at && interval == h->present_requested_interval) return;
++    h->present_control_at = now + 250000;
++    h->present_requested_interval = interval;
++    GskRenderer *renderer = gtk_native_get_renderer(GTK_NATIVE(window));
++    const char *renderer_name = renderer ? G_OBJECT_TYPE_NAME(renderer) : "none";
++    if (!renderer || strstr(renderer_name, "Vulkan") || strstr(renderer_name, "Cairo")) {
++        if (!h->present_skip_logged) {
++            fprintf(stderr, "[CLBB_HOST_PRESENT] skip renderer=%s reason=not-GL\n", renderer_name);
++            h->present_skip_logged = TRUE;
++        }
++        return;
++    }
++    typedef void *(*GetCurrent)(void);
++    typedef void *(*GetSurface)(unsigned int);
++    typedef unsigned int (*SetInterval)(void *, int);
++    static GetCurrent get_display, get_context;
++    static GetSurface get_surface;
++    static SetInterval set_interval;
++    static gboolean resolved;
++    if (!resolved) {
++        get_display = (GetCurrent)dlsym(RTLD_DEFAULT, "eglGetCurrentDisplay");
++        get_context = (GetCurrent)dlsym(RTLD_DEFAULT, "eglGetCurrentContext");
++        get_surface = (GetSurface)dlsym(RTLD_DEFAULT, "eglGetCurrentSurface");
++        set_interval = (SetInterval)dlsym(RTLD_DEFAULT, "eglSwapInterval");
++        resolved = TRUE;
++    }
++    void *display = get_display ? get_display() : NULL;
++    void *context = get_context ? get_context() : NULL;
++    void *surface = get_surface ? get_surface(0x3059 /* EGL_DRAW */) : NULL;
++    GdkGLContext *gdk_context = gdk_gl_context_get_current();
++    GdkSurface *window_surface = gtk_native_get_surface(GTK_NATIVE(window));
++    if (!display || !context || !surface || !set_interval || !gdk_context ||
++        gdk_gl_context_get_surface(gdk_context) != window_surface) {
++        if (!h->present_skip_logged) {
++            fprintf(stderr, "[CLBB_HOST_PRESENT] skip renderer=%s reason=no-current-window-EGL-context\n", renderer_name);
++            h->present_skip_logged = TRUE;
++        }
++        return;
++    }
++    gboolean result = set_interval(display, interval) != 0;
++    /* Refresh at most4Hz so compositor-state changes cannot silently restore
++     * an unwanted interval. Log only a changed surface, setting or outcome. */
++    if (!h->present_logged || display != h->present_logged_display ||
++        context != h->present_logged_context || surface != h->present_logged_surface ||
++        interval != h->present_logged_interval || result != h->present_logged_result) {
++        fprintf(stderr, "[CLBB_HOST_PRESENT] renderer=%s display=%p context=%p surface=%p interval=%d applied=%d\n",
++            renderer_name, display, context, surface, interval, result);
++        h->present_logged_display = display; h->present_logged_context = context;
++        h->present_logged_surface = surface; h->present_logged_interval = interval;
++        h->present_logged_result = result; h->present_logged = TRUE;
++    }
++}
++static void host_present_realized(GtkWidget *widget, gpointer data)
++{
++    (void)data;
++    if (!host_present_control_enabled()) return;
++    GdkFrameClock *clock = gtk_widget_get_frame_clock(widget);
++    if (!clock || g_object_get_data(G_OBJECT(clock), "clbb-host-present-control")) return;
++    g_object_set_data(G_OBJECT(clock), "clbb-host-present-control", widget);
++    /* The default GTK paint handler first makes its actual onscreen renderer
++     * current. We inspect that context only after the frame's paint handlers. */
++    g_signal_connect_object(clock, "after-paint", G_CALLBACK(host_present_after_paint),
++                            G_OBJECT(widget), G_CONNECT_AFTER);
++}
++
 +static gboolean tick(gpointer data) {
 +    ClbbHost *h = data;
 +    if (h->closing)
@@ -8071,6 +8160,11 @@ index 0000000..d514f10
 +    g_signal_connect(window, "notify::is-active", G_CALLBACK(focus_changed), h);
 +    g_signal_connect(window, "close-request", G_CALLBACK(close_request), h);
 +    g_object_set_data(G_OBJECT(window), "clbb-mapper-attached", h);
++    if (host_present_control_enabled()) {
++        g_signal_connect(window, "realize", G_CALLBACK(host_present_realized), NULL);
++        if (gtk_widget_get_realized(GTK_WIDGET(window)))
++            host_present_realized(GTK_WIDGET(window), NULL);
++    }
 +    h->timer = g_timeout_add_full(G_PRIORITY_HIGH, 1, tick, h, NULL);
 +    fprintf(stderr,
 +            "[CLBB mapper] Rust core attached; physical LMB preserved\n");
