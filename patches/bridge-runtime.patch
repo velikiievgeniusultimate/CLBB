@@ -1,13 +1,22 @@
 diff --git a/Makefile b/Makefile
-index fbd7368..25a4594 100644
+index fbd7368..b0bcfa8 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -49,7 +49,7 @@ install:
+@@ -43,13 +43,16 @@ install:
+ 	                                  $(TOPDIR)/libnb-qemu-guest/bionic/prebuilts/linker64 \
+ 	                                  $(BUILDDIR)/libnb-qemu-guest/libandroid.so \
+ 	                                  $(BUILDDIR)/libnb-qemu-guest/libEGL.so \
++	                                  $(BUILDDIR)/libnb-qemu-guest/libGLESv1_CM.so \
+ 	                                  $(BUILDDIR)/libnb-qemu-guest/libGLESv2.so \
+ 	                                  $(BUILDDIR)/libnb-qemu-guest/liblog.so \
+ 	                                  $(BUILDDIR)/libnb-qemu-guest/libnb-qemu-guest.so \
  	                                  $(BUILDDIR)/libnb-qemu-guest/libOpenSLES.so \
  	                                  $(BUILDDIR)/libnb-qemu-guest/libstdc++.so
  	#
 -	ln -s libGLESv2.so $(INSTALL_DIR_TARGET)/libGLESv3.so
 +	ln -sfn libGLESv2.so $(INSTALL_DIR_TARGET)/libGLESv3.so
++	# ATL implements AndroidBitmap in libandroid; expose its standard library name.
++	ln -sfn libandroid.so $(INSTALL_DIR_TARGET)/libjnigraphics.so
  
  clean:
  	rm -rf $(TOPDIR)/builddir
@@ -129,7 +138,7 @@ index b14e115..ba548a6 100644
 +EGLSurface bionic_eglGetCurrentSurface(EGLint readdraw);
  #endif
 diff --git a/libnb-qemu-guest/Makefile b/libnb-qemu-guest/Makefile
-index 6d02dcc..895b72d 100644
+index 6d02dcc..ff26050 100644
 --- a/libnb-qemu-guest/Makefile
 +++ b/libnb-qemu-guest/Makefile
 @@ -1,11 +1,16 @@
@@ -166,7 +175,7 @@ index 6d02dcc..895b72d 100644
 +	@printf '%s\n' 'CC=clang' 'CROSSFLAGS=$(CROSSFLAGS)' 'CFLAGS=$(CFLAGS)' 'LDFLAGS=$(LDFLAGS)' 'LDFLAGS_MAIN=$(LDFLAGS_MAIN)' 'LDLIBS=$(LDLIBS)' 'INCLUDES=$(INCLUDES)' 'DEPENDENCIES=MM-MP-v1' > "$@.tmp"
 +	@cmp -s "$@.tmp" "$@" && rm -f "$@.tmp" || mv -f "$@.tmp" "$@"
 +
-+GUEST_LIBS := $(addprefix $(BUILDDIR)/,libnb-qemu-guest.so libandroid.so libEGL.so libGLESv2.so liblog.so libOpenSLES.so libstdc++.so)
++GUEST_LIBS := $(addprefix $(BUILDDIR)/,libnb-qemu-guest.so libandroid.so libEGL.so libGLESv1_CM.so libGLESv2.so liblog.so libOpenSLES.so libstdc++.so)
 +target-libs: $(GUEST_LIBS)
  
 -$(BUILDDIR)/libnb-qemu-guest.so: $(CURRDIR)/bionic/libc/arch-common/bionic/crtbegin_so.c $(CURRDIR)/libnb.c $(CURRDIR)/jnienv.c $(CURRDIR)/bionic/libc/arch-common/bionic/crtend_so.S
@@ -1660,6 +1669,44 @@ index 8198336..72d6247 100644
  }
  
  extern "C" {
+diff --git a/libnb-qemu/libandroid.def b/libnb-qemu/libandroid.def
+index ee8b797..1ea1fb3 100644
+--- a/libnb-qemu/libandroid.def
++++ b/libnb-qemu/libandroid.def
+@@ -111,3 +111,8 @@ float AMotionEvent_getY (ptr:void event, size_t pointer_index)
+ int32_t AKeyEvent_getAction (ptr:void event)
+ int32_t AKeyEvent_getKeyCode (ptr:void event)
+ 
++
++# AndroidBitmap implementation is exported by ATL libandroid.
++int AndroidBitmap_getInfo (ptr:JNIEnv env, ptr:void bitmap, ptr:void info)
++int AndroidBitmap_lockPixels (ptr:JNIEnv env, ptr:void bitmap, ptr:void pixels)
++int AndroidBitmap_unlockPixels (ptr:JNIEnv env, ptr:void bitmap)
+diff --git a/libnb-qemu/libandroid.itf.h b/libnb-qemu/libandroid.itf.h
+index c32eb0a..bdcf6a7 100644
+--- a/libnb-qemu/libandroid.itf.h
++++ b/libnb-qemu/libandroid.itf.h
+@@ -1,6 +1,7 @@
+ #ifndef LIBANDROID_ITF_H_
+ #define LIBANDROID_ITF_H_
+ 
++#include <jni.h>
+ #include <android/input.h>
+ #include <android/looper.h>
+ #include <android/sensor.h>
+@@ -9,6 +10,12 @@
+ extern "C" {
+ #endif
+ 
++/* ATL places the standard jnigraphics entry points in its libandroid. */
++struct AndroidBitmapInfo;
++int AndroidBitmap_getInfo(JNIEnv *env, jobject bitmap, struct AndroidBitmapInfo *info);
++int AndroidBitmap_lockPixels(JNIEnv *env, jobject bitmap, void **pixels);
++int AndroidBitmap_unlockPixels(JNIEnv *env, jobject bitmap);
++
+ int libandroid_ALooper_addFd (ALooper* looper, int fd, int ident, int events, ALooper_callbackFunc callback, void* data);
+ ASensorEventQueue* libandroid_ASensorManager_createEventQueue (ASensorManager* manager, ALooper* looper, int ident,
+                                                                ALooper_callbackFunc callback, void* data);
 diff --git a/libnb-qemu/libnb-qemu.cpp b/libnb-qemu/libnb-qemu.cpp
 index 9e586d2..d4f8588 100644
 --- a/libnb-qemu/libnb-qemu.cpp

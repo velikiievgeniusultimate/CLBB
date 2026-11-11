@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stop only this checkout's recorded ATL instance; retire only its private diagnostic XI2 seat."""
 from pathlib import Path
-import json,os,signal,time,subprocess
+import json,os,signal,time,subprocess,socket
 ROOT=Path(__file__).resolve().parents[1]
 pid=json.loads((ROOT/'logs/current-atl-pid.json').read_text())['pid']
 proc=Path('/proc',str(pid))
@@ -16,6 +16,16 @@ def identity():
  except FileNotFoundError:return None
 birth=identity()
 if birth is not None:
+ # Normal successful exit through the exact owned runtime control socket.
+ # Older runtimes can reject this; retain bounded signals only as a fallback.
+ control=Path(os.environ.get('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}'))/'clbb'/f'mapper-{pid}.sock'
+ try:
+  if identity()==birth:
+   with socket.socket(socket.AF_UNIX) as connection:
+    connection.settimeout(.5);connection.connect(str(control));connection.sendall(b'close');connection.shutdown(socket.SHUT_WR);connection.recv(128)
+   deadline=time.monotonic()+1
+   while time.monotonic()<deadline and identity()==birth:time.sleep(.025)
+ except (OSError,RuntimeError):pass
  for sig,seconds in [(signal.SIGTERM,4),(signal.SIGKILL,3)]:
   current=identity()
   if current is None:break

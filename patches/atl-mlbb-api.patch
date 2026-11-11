@@ -2984,6 +2984,26 @@ index dd9dd7e..92f2a06 100644
  
  		return capabilities;
  	}
+diff --git a/src/api-impl/android/net/Network.java b/src/api-impl/android/net/Network.java
+index 04c98e3..81868ca 100644
+--- a/src/api-impl/android/net/Network.java
++++ b/src/api-impl/android/net/Network.java
+@@ -1,7 +1,12 @@
+ package android.net;
+ 
++/** Stable identity of the host-backed default Android network. */
+ public class Network {
+-	public long getNetworkHandle() {
+-		return 1L;
+-	}
++ private final int netId;
++ public Network() { this(100); }
++ public Network(int netId) { this.netId = netId; }
++ public long getNetworkHandle() { return ((long)netId << 32) | 0xcafed00dL; }
++ @Override public String toString() { return Integer.toString(netId); }
++ @Override public int hashCode() { return netId; }
++ @Override public boolean equals(Object other) { return other instanceof Network && ((Network)other).netId == netId; }
+ }
 diff --git a/src/api-impl/android/net/NetworkCapabilities.java b/src/api-impl/android/net/NetworkCapabilities.java
 index 3419af0..b126828 100644
 --- a/src/api-impl/android/net/NetworkCapabilities.java
@@ -6277,10 +6297,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..37fb92d
+index 0000000..67ca979
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,885 @@
+@@ -0,0 +1,891 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -6854,7 +6874,13 @@ index 0000000..37fb92d
 +        char *cmd = g_strndup(raw, length);
 +        char **args = g_strsplit_set(g_strstrip(cmd), " \t\r\n", 0);
 +        guint count = g_strv_length(args);
-+        if (count == 2 && strcmp(args[0], "read") == 0 &&
++        if (count == 1 && strcmp(args[0], "close") == 0) {
++            /* Explicit owned diagnostic stop, same successful exit as the cross. */
++            clbb_mapper_unlink_control(h->window);
++            static const char marker[]="[CLBB_EXIT] desktop_close\n";
++            (void)write(STDERR_FILENO,marker,sizeof(marker)-1);
++            _exit(0);
++        } else if (count == 2 && strcmp(args[0], "read") == 0 &&
 +            strcmp(args[1], "diagnostics.frame_pacing") == 0) {
 +            ClbbFrameConfiguration read = atomic_load_explicit(
 +                &frame_configuration, memory_order_acquire);
