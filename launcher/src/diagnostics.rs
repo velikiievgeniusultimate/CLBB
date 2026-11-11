@@ -22,6 +22,10 @@ fn sanitize(text:&str)->String {
 }
 pub fn summarize(reason:&str,errors:&str)->String {
     let text=format!("{reason}\n{errors}").to_lowercase();
+    let exit=reason.to_lowercase();
+    if exit.contains("sigkill")||exit.contains("signal: 9 (") {
+        return "Процесс CLBB принудительно завершён (SIGKILL). Сам по себе этот сигнал не указывает на ошибку OpenGL.".into();
+    }
     if text.contains("not found")&&(text.contains("glibc_")||text.contains("glibcxx_")){return "Несовместимая версия системной библиотеки glibc/libstdc++. Обновите дистрибутив; точное имя есть в отчёте.".into();}
     if text.contains("error while loading shared libraries")||text.contains("=> not found"){return "Не найдена необходимая системная библиотека. Отчёт содержит проверку зависимостей.".into();}
     if text.contains("illegal instruction")||text.contains("sigill"){return "Процесс остановился на неподдерживаемой инструкции CPU (SIGILL). Нужна проверка совместимости сборки.".into();}
@@ -68,3 +72,14 @@ pub fn show(path:&Path)->io::Result<()> {
     if choice.success(){match send(path){Ok(id)=>{eprintln!("[CLBB] Report sent: {id}");let _=Command::new("zenity").args(["--info","--no-markup","--title=CLBB — Отчёт отправлен","--text"]).arg(format!("Отчёт отправлен на StarFive.\nНомер: {id}")).status();},Err(e)=>{let _=Command::new("zenity").args(["--error","--no-markup","--title=CLBB — Ошибка отправки","--text"]).arg(e.to_string()).status();}}}Ok(())
 }
 #[cfg(test)]mod tests{use super::*;#[test]fn strips_sensitive_lines(){let text=sanitize("fatal SIGSEGV\nCookie: abc\npassword=secret\nuser@example.com\nhttps://example.com/?key=x\nlibfoo.so => not found");assert!(text.contains("SIGSEGV")&&text.contains("libfoo"));assert!(!text.contains("secret")&&!text.contains("example.com")&&!text.contains("abc"));}#[test]fn classifies_loader_and_cpu_failures(){assert!(summarize("exit127","error while loading shared libraries: libfoo.so").contains("библиотека"));assert!(summarize("SIGILL","").contains("CPU"));}}
+
+#[cfg(test)]
+mod termination_tests {
+    #[test]
+    fn killed_process_is_not_misreported_as_a_graphics_failure() {
+        let summary=super::summarize("CLBB runtime exited: signal: 9 (SIGKILL)","EGL failed during cleanup");
+        assert!(summary.contains("SIGKILL"));
+        assert!(!summary.starts_with("Ошибка графического"));
+        assert!(super::summarize("runtime failed","libGL error: cannot create context").starts_with("Ошибка графического"));
+    }
+}
