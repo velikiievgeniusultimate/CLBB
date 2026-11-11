@@ -89,6 +89,7 @@ impl Worker {
                 let mut nav_at = Instant::now() - Duration::from_secs(5);
                 let mut last_success = None;
                 let mut result_at = 0i64;
+                let mut audit_at=0i64;let mut full_frame_at=0i64;let mut frame_identity=(0,String::new());
                 while !quit.load(Ordering::Relaxed) {
                     let start = Instant::now();
                     let size = *dimensions.lock().unwrap();
@@ -102,14 +103,28 @@ impl Worker {
                                     "start_ns": f.time_ns.value-f.sample_duration_ms.value*1e6,"end_ns":f.time_ns.value,
                                     "clock_ms":sample.game_clock_ms,"epoch":f.token.as_str(),"revision":sample.plan_revision,
                                     "linked":sample.linked,"cancel_uv_valid":f.ui.cancel_uv.valid(),"cancel_uv":f.ui.cancel_uv.values.map(|v|v.value),
-                                    "buttons":f.ui.buttons.iter().take(f.ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill").map(|b|serde_json::json!({"slot":b.slot.as_str(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>(),
+                                    "buttons":f.ui.buttons.iter().take(f.ui.button_count.min(32) as usize).map(|b|serde_json::json!({"slot":b.slot.as_str(),"kind":b.kind.as_str(),"skill":b.skill_id.int(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>(),
                                     "hero":f.hero_id.int(),"hero_render":f.hero_render_xyz.values.map(|v|v.value),"hero_logic":sample.logic,"direction_visual":sample.direction_visual,"direction_source":f.direction_input.source.as_str(),
                                     "skill":f.skill_id.int(),"slot":f.ui.active_slot.as_str(),"resolution":f.ui.resolution_px.values.map(|v|v.value),"native_source":f.logical.source.as_str(),"view":f.view_matrix.values.map(|v|v.value),"projection":sample.projection,
                                     "aim":sample.aim,"center":f.ui.joystick.center_uv.values.map(|v|v.value),"radius":f.ui.joystick.radius_uv.values.map(|v|v.value),
                                     "logical_ready":f.logical.ready.get(),"input_ready":f.logical.input_ready.get(),"valid_drag":f.logical.valid_drag.get(),"first_drag":f.logical.first_drag.get(),
                                     "offset":f.logical.offset_xz.values.map(|v|v.value),"raw_touch":f.logical.raw_touch_xyz.values.map(|v|v.value),"range":f.logical.world_range.value,
+                                    "cooldown":f.ui.cooldown_state.buttons.iter().take(f.ui.cooldown_state.count.min(32)as usize).map(|b|serde_json::json!({"slot":b.slot.as_str(),"base":b.base_skill_id.int(),"active":b.active_skill_id.int(),"ready":b.ready.get(),"on_cooldown":b.on_cooldown.get()})).collect::<Vec<_>>(),
+                                    "cooldown_ready":f.ui.cooldown_state.ready.get(),"cooldown_coherent":f.ui.cooldown_state.coherent.get(),"cooldown_start_ns":f.ui.cooldown_state.sample_start_ns.value,"cooldown_end_ns":f.ui.cooldown_state.sample_end_ns.value,
+                                    "direction_coherent":f.direction_input.coherent.get(),"direction_sample_start_ns":f.direction_input.sample_start_ns.value,"direction_sample_end_ns":f.direction_input.sample_end_ns.value,"direction_token":f.direction_input.token.as_str(),"direction_hero":f.direction_input.hero_id.int(),"direction_slot":f.direction_input.slot.as_str(),"direction_skill":f.direction_input.skill_id.int(),
                                     "direction_touch":f.direction_input.raw_touch_xyz.values.map(|v|v.value),"direction_ready":f.direction_input.ready.get(),"direction":f.direction_input.direction_xz.values.map(|v|v.value)
                                 }));
+                                let identity=(f.skill_id.int(),f.ui.active_slot.as_str().to_owned());
+                                if identity!=frame_identity || now_ns()-full_frame_at>=32_000_000 {
+                                    use crate::flight_schema::Encode;
+                                    frame_identity=identity;full_frame_at=now_ns();
+                                    recorder.push(full_frame_at,"typed_frame",f.encode());
+                                }
+                                if now_ns()-audit_at>=20_000_000 {
+                                    audit_at=now_ns();
+                                    let before=now_ns();let ui=source.audit_ui_input();let controls=source.audit_control_state();
+                                    recorder.push(now_ns(),"native_ui_audit",serde_json::json!({"start_ns":before,"end_ns":now_ns(),"ui":ui,"controls":controls}));
+                                }
                                 if now_ns()-result_at >= 8_000_000 {
                                     result_at=now_ns();
                                     recorder.push(result_at,"skill_result",serde_json::json!(crate::recorder::skill_result(&mut source,sample.match_owners[2],sample.match_owners[3])));
@@ -194,6 +209,8 @@ struct Adapter {
     next_ray: u64,
     timers: [Option<i64>; 5],
     trace: bool,
+    recorder: Arc<Recorder>,
+    last_feedback_trace: Option<(String,i64)>,
 }
 impl Adapter {
     fn fresh(&self) -> Option<&Sample> {
@@ -207,8 +224,10 @@ impl Adapter {
     }
     fn touch(&self, action: i32, id: i32, p: Point) -> bool {
         if !p.x.is_finite() || !p.y.is_finite() {
+            if self.recorder.is_enabled(){self.recorder.push(now_ns(),"touch_rejected",serde_json::json!({"reason":"nonfinite_coordinate","action":action,"id":id}));}
             return false;
         }
+        let requested=p;
         let continuation = action != 0 && (0..16).contains(&id) && self.touches[id as usize];
         let p = if continuation {
             if !(-1. ..=2.).contains(&p.x) || !(-1. ..=2.).contains(&p.y) {
@@ -226,7 +245,11 @@ impl Adapter {
         } else {
             p
         };
-        unsafe { (self.callback)(self.user, action, id, p.x, p.y) != 0 }
+        let at=now_ns();
+        if self.recorder.is_enabled(){self.recorder.push(at,"touch_command",serde_json::json!({"action":action,"id":id,"requested_uv":[requested.x,requested.y],"packet_uv":[p.x,p.y],"phase":"before_callback"}));}
+        let accepted=unsafe { (self.callback)(self.user, action, id, p.x, p.y) != 0 };
+        if self.recorder.is_enabled(){self.recorder.push(now_ns(),"touch_command",serde_json::json!({"action":action,"id":id,"requested_uv":[requested.x,requested.y],"packet_uv":[p.x,p.y],"phase":"after_callback","accepted":accepted,"callback_start_ns":at}));}
+        accepted
     }
     fn gain(&self) {
         let v = if self.settings.boolean("audio.muted", 0) {
@@ -382,6 +405,15 @@ impl Host for Adapter {
         }
     }
     fn trace(&mut self, state: &Controller, event: &str, reason: &str) {
+        if self.recorder.is_enabled() {
+            let now=now_ns();
+            let repeated=event=="direction_feedback_rejected" && self.last_feedback_trace.as_ref().is_some_and(|(r,at)|r==reason&&now-*at<50_000_000);
+            if !repeated {
+                if event=="direction_feedback_rejected"{self.last_feedback_trace=Some((reason.into(),now));}
+                let v=state.inspect();
+                self.recorder.push(now,"core_decision",serde_json::json!({"event":event,"reason":reason,"skill":v.coreSkill_,"touch":v.skillTouch_,"key":v.skillKey_,"key_held":v.skillKeyHeld_,"cast_mode":v.skillCastMode_,"cast_start_ns":v.castStartedNs_,"touch_sequence":v.touchSequence_,"pending_release":v.pendingRelease_,"direction_goal_seq":v.directionGoalSequence_,"direction_matched_seq":v.directionMatchedSequence_,"observed_skill":v.observedSkillId_}));
+            }
+        }
         if self.trace {
             let s = state.inspect();
             eprintln!(
@@ -437,6 +469,9 @@ pub struct Runtime {
     debug_pointer_at: i64,
     debug_pending_since: i64,
     debug_mismatch_since: i64,
+    debug_route_reason: &'static str,
+    debug_full_state_at:i64,
+    debug_state_key:(i32,i32,u8,u32),
 }
 impl Runtime {
     fn new(callback: Touch, user: *mut c_void) -> Self {
@@ -445,7 +480,7 @@ impl Runtime {
         let recorder = Recorder::new();
         let mut v = Self {
             updates:crate::updater::Updates::new(),
-            recorder: recorder.clone(), debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0,
+            recorder: recorder.clone(), debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0, debug_route_reason:"initial", debug_full_state_at:0, debug_state_key:(0,-1,0,0),
             gestures: Default::default(),
             core: Controller::new(),
             host: Adapter {
@@ -461,7 +496,7 @@ impl Runtime {
                 wall_surface:Default::default(),
                 next_ray: 0,
                 timers: [None; 5],
-                trace,
+                trace, recorder:recorder.clone(), last_feedback_trace:None,
             },
             worker: Worker::start(recorder),
             last_sample: 0,
@@ -469,12 +504,17 @@ impl Runtime {
             read: CString::default(),
             error: String::new(),
         };
+        crate::native_debug::install(&v.recorder);
         v.host.gain();
         v.input(Input::Trace(trace));
         v.configure();
         v
     }
     fn input(&mut self, event: Input<'_>) -> bool {
+        if self.recorder.is_enabled() {
+            let reason=match &event {Input::Release=>Some("release_all"),Input::Invalid(_)=>Some("invalid_source"),Input::Enabled(false)=>Some("disabled"),_=>None};
+            if let Some(reason)=reason{self.recorder.push(now_ns(),"runtime_lifecycle",serde_json::json!({"event":reason}));}
+        }
         if matches!(&event,Input::Release|Input::Invalid(_)|Input::Enabled(false)) {self.gestures.reset(&mut self.host);}
         self.core.apply_input(&mut self.host, event, now_ns())
     }
@@ -482,6 +522,11 @@ impl Runtime {
         let recording=self.host.settings.boolean("debug.recording",0);
         if recording != self.recorder.is_enabled() {self.debug_pending_since=0;self.debug_mismatch_since=0;}
         self.recorder.set_enabled(recording);
+        crate::native_debug::enable(recording);
+        crate::native_debug::automatic_marks(self.host.settings.boolean("debug.auto_marks",0));
+        if recording {self.recorder.set_context(serde_json::json!({"pid":std::process::id(),"runtime_executable":std::env::current_exe().ok(),"version":std::env::var("CLBB_RELEASE_VERSION").unwrap_or_default(),"revision":std::env::var("CLBB_RELEASE_REVISION").unwrap_or_default(),"settings":self.host.settings.values,"schema":2,"expected_channels":["native_transport","host_event","runtime_lifecycle","input_event","input_route","touch_command","android_motion","source","typed_frame","core_decision","native_ui_audit","controller","controller_state","skill_result"]}));}
+
+        self.input(Input::Trace(self.host.trace || recording));
         if recording {self.recorder.push(now_ns(),"settings",serde_json::json!({"values":self.host.settings.values}));}
         self.input(Input::MovementMode(
             self.host.settings.integer("movement.click_mode", 0),
@@ -617,7 +662,13 @@ impl Runtime {
         if !self.recorder.is_enabled() || now-self.debug_at<8_000_000 { return; }
         self.debug_at=now;
         let v=self.core.inspect();
-        self.recorder.push(now,"controller",serde_json::json!({"input":self.input_diagnostics(&v),"aim":self.aim_diagnostics(&v),"contacts":self.host.touches.iter().enumerate().filter_map(|(i,v)|v.then_some(i)).collect::<Vec<_>>(),"linked_gestures":self.gestures.active,"linked_ignored":self.gestures.ignored_keys() }));
+        use crate::flight_schema::Encode;
+        let state_key=(v.coreSkill_,v.skillTouch_,v.pendingRelease_,v.queue_depth);
+        if state_key!=self.debug_state_key || now-self.debug_full_state_at>=32_000_000 {
+            self.debug_state_key=state_key;self.debug_full_state_at=now;
+            self.recorder.push(now,"controller_state",v.encode());
+        }
+        self.recorder.push(now,"controller",serde_json::json!({"render":crate::render_metrics::snapshot(),"queue":{"depth":v.queue_depth,"front_slot":v.queue_front_slot.as_str(),"front_key":v.queue_front_key,"front_held":v.queue_front_held},"cast":{"key":v.skillKey_,"held":v.skillKeyHeld_,"mode":v.skillCastMode_,"start_ns":v.castStartedNs_,"previous_end_ns":v.lastSkillEndNs_,"sample_start_ns":v.frameCoreSampleStartNs_,"touch_sequence":v.touchSequence_,"transport_sequence":v.verifiedTransportSequence_,"cancel_pending":v.skillCancelPending_,"cancel_ack":v.skillCancelAcknowledged_,"binding_variant":v.skillBindingVariant_,"cooldown_variant":v.skillCooldownVariant_},"input":self.input_diagnostics(&v),"aim":self.aim_diagnostics(&v),"contacts":self.host.touches.iter().enumerate().filter_map(|(i,v)|v.then_some(i)).collect::<Vec<_>>(),"linked_gestures":self.gestures.active,"linked_ignored":self.gestures.ignored_keys() }));
         if v.pendingRelease_!=0 { if self.debug_pending_since==0 {self.debug_pending_since=now;} }
         else {self.debug_pending_since=0;}
         let delta=v.direct.clamped_world(v.traceDesired_)-v.logicalObserved_;
@@ -625,7 +676,9 @@ impl Runtime {
             && delta.x.hypot(delta.y)> (v.direct.world_range*0.02).max(0.08);
         if mismatch {if self.debug_mismatch_since==0{self.debug_mismatch_since=now;}}else{self.debug_mismatch_since=0;}
         if self.host.settings.boolean("debug.auto_marks",0) {
-            let reason=if self.debug_pending_since!=0 && now-self.debug_pending_since>100_000_000 {Some("release_wait_over_100ms")}
+            let zero_native=self.host.sample.as_ref().is_some_and(|sample|sample.frame.direction_input.ready.get() && sample.frame.direction_input.raw_touch_xyz.values.iter().all(|v|v.value==0.));
+            let reason=if v.skillTouch_>=0 && v.castStartedNs_>0 && now-v.castStartedNs_>50_000_000 && v.directionGeometryFresh_!=0 && v.directionAccepted_==0 && zero_native {Some("active_native_touch_zero_over_50ms")}
+                else if self.debug_pending_since!=0 && now-self.debug_pending_since>100_000_000 {Some("release_wait_over_100ms")}
                 else if self.gestures.active.iter().any(|g|g.cancel_requested_ns.is_some_and(|t|now-t>100_000_000)) {Some("linked_cancel_wait_over_100ms")}
                 else if v.skillTouch_>=0 && now-v.lastFrameNs_>100_000_000 {Some("active_source_stale_over_100ms")}
                 else if self.debug_mismatch_since!=0 && now-self.debug_mismatch_since>150_000_000 {Some("sustained_aim_discrepancy")}
@@ -633,24 +686,38 @@ impl Runtime {
             if let Some(reason)=reason {self.recorder.mark(now,reason,true);}
         }
     }
-    fn event(&mut self, kind: i32, code: i32, down: bool, repeat: bool, p: Point) -> bool {
+    fn event(&mut self, kind:i32,code:i32,down:bool,repeat:bool,p:Point)->bool {
+        let at=now_ns();
+        let result=self.event_inner(kind,code,down,repeat,p);
+        if self.recorder.is_enabled() && kind!=0 {
+            let v=self.core.inspect();
+            self.recorder.push(now_ns(),"input_route",serde_json::json!({"input_ns":at,"kind":kind,"code":code,"down":down,"repeat":repeat,"consumed":result,"route":self.debug_route_reason,"suspended":self.suspended,"enabled":v.enabled_,"ready":v.ready_,"active_skill":v.coreSkill_,"touch":v.skillTouch_,"held":v.skillKeyHeld_,"cast_mode":v.skillCastMode_,"pending_release":v.pendingRelease_}));
+        }
+        result
+    }
+    fn event_inner(&mut self, kind: i32, code: i32, down: bool, repeat: bool, p: Point) -> bool {
+        self.debug_route_reason="core_key_dispatch";
         if self.recorder.is_enabled() && (kind!=0 || now_ns()-self.debug_pointer_at>=4_000_000) {
             self.debug_pointer_at=now_ns();self.recorder.push(self.debug_pointer_at,"input_event",serde_json::json!({"kind":kind,"code":code,"down":down,"repeat":repeat,"pointer":[p.x,p.y]}));
         }
         if kind == 0 {
+            self.debug_route_reason="pointer";
             if !self.suspended {
                 self.input(Input::Pointer(p));
             }
             return false;
         }
         if kind==1 && code!=0 && self.recorder.is_enabled() && code==self.host.settings.integer("debug.mark_shortcut",0) {
+            self.debug_route_reason="manual_debug_marker";
             if down && !repeat {self.recorder.mark(now_ns(),"manual",false);} return true;
         }
         // LMB always follows ATL's ordinary physical event path.
         if kind == 2 && code == 1 {
+            self.debug_route_reason="native_left_mouse_passthrough";
             return false;
         }
         if self.suspended {
+            self.debug_route_reason="mapper_suspended";
             return false;
         }
         let key = if kind == 2 {
@@ -659,6 +726,7 @@ impl Runtime {
             code
         };
         if key == self.host.settings.integer("movement.button", 0) {
+            self.debug_route_reason="movement_binding";
             return self.input(Input::Mouse {
                 button: 2,
                 down,
@@ -666,6 +734,7 @@ impl Runtime {
             });
         }
         if self.gestures.contains(key) {
+            self.debug_route_reason="linked_existing_gesture";
             if !down && !repeat {self.gestures.release(&mut self.host,key);}
             return true;
         }
@@ -682,8 +751,10 @@ impl Runtime {
                         let geometry=linked_geometry(&sample.frame,&link.endpoints);
                         self.recorder.push(now_ns(),"linked_admission",serde_json::json!({"key":key,"origin":origin,"passive":link.enough_energy,"parent_cooldown":link.on_cooldown[origin],"endpoints_valid":geometry.is_some(),"cancel_available":geometry.as_ref().is_some_and(|g|g.cancel.is_some()),"reason":if geometry.is_none(){"missing_endpoints"}else if !link.enough_energy{"passive_not_ready"}else{"native_down"}}));
                         if let Some(geometry)=geometry {
+                            self.debug_route_reason="linked_gesture_admission";
                             return self.gestures.begin(&mut self.host,key,origin,geometry,link,now_ns());
                         }
+                        self.debug_route_reason="linked_missing_geometry";
                         return true;
                     }
                 }
@@ -780,6 +851,7 @@ impl Runtime {
     }
     fn suspend(&mut self, value: bool) {
         if self.suspended != value {
+            if self.recorder.is_enabled(){self.recorder.push(now_ns(),"runtime_lifecycle",serde_json::json!({"event":"suspend_changed","suspended":value}));}
             self.suspended = value;
             self.input(Input::Release);
             self.configure();
@@ -788,6 +860,7 @@ impl Runtime {
 }
 impl Drop for Runtime {
     fn drop(&mut self) {
+        crate::native_debug::enable(false);
         self.recorder.set_enabled(false);
         self.input(Input::Release);
         self.worker.stop.store(true, Ordering::Relaxed);
@@ -900,6 +973,7 @@ mod tests {
         1
     }
     fn fixture(events: &mut Vec<(i32, i32, f64, f64)>) -> Runtime {
+        let recorder=Recorder::new();
         Runtime {
             updates:crate::updater::Updates::new(),
             gestures: Default::default(),
@@ -917,7 +991,7 @@ mod tests {
                 wall_surface:Default::default(),
                 next_ray: 0,
                 timers: [None; 5],
-                trace: false,
+                trace: false, recorder:recorder.clone(), last_feedback_trace:None,
             },
             worker: Worker {
                 shared: Arc::new(Mutex::new(Shared {
@@ -934,7 +1008,7 @@ mod tests {
             suspended: false,
             read: CString::default(),
             error: String::new(),
-            recorder: Recorder::new(), debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0,
+            recorder, debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0, debug_route_reason:"initial", debug_full_state_at:0, debug_state_key:(0,-1,0,0),
         }
     }
     #[test]

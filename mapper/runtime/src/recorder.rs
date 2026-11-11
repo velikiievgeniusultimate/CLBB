@@ -14,8 +14,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 const SECOND: i64 = 1_000_000_000;
-const RING_LIMIT: usize = 8192;
-const CLIP_LIMIT: usize = 32768;
+const RING_LIMIT: usize = 32768;
+const CLIP_LIMIT: usize = 131072;
 const DISK_LIMIT: u64 = 256 * 1024 * 1024;
 #[derive(Clone, Serialize)]
 struct Event {
@@ -31,6 +31,7 @@ struct Clip {
     marks: Vec<(i64, String)>,
     rows: Vec<Arc<Event>>,
     truncated: bool,
+    context: Value,
 }
 #[derive(Default)]
 struct Buffer {
@@ -38,6 +39,8 @@ struct Buffer {
     clips: Vec<Clip>,
     last_auto: i64,
     latest_ns: i64,
+    context: Value,
+    last_prune_ns:i64,
 }
 impl Buffer {
     fn push(&mut self, row: Event) -> Vec<Clip> {
@@ -45,7 +48,13 @@ impl Buffer {
         self.latest_ns = self.latest_ns.max(row.ns);
         let row = Arc::new(row);
         self.ring.push_back(row.clone());
-        self.ring.retain(|r| r.ns >= self.latest_ns - 5 * SECOND);
+        let cutoff=self.latest_ns-5*SECOND;
+        while self.ring.front().is_some_and(|r|r.ns<cutoff){self.ring.pop_front();}
+        // Timestamp disorder is bounded by producers; remove interior late rows
+        // occasionally, not by scanning thousands of entries per input packet.
+        if self.latest_ns-self.last_prune_ns>=100_000_000 {
+            self.ring.retain(|r|r.ns>=cutoff);self.last_prune_ns=self.latest_ns;
+        }
         while self.ring.len() > RING_LIMIT {
             self.ring.pop_front();
         }
@@ -93,6 +102,7 @@ impl Buffer {
                 return false;
             }
             self.clips.push(Clip {
+                context:self.context.clone(),
                 start_ns: now - 5 * SECOND,
                 end_ns: now + 5 * SECOND,
                 first_mark_ns: now,
@@ -184,6 +194,7 @@ impl Recorder {
             *self.last_error.lock().unwrap() = Some("Запись пропущена: очередь диска занята".into());
         }
     }
+    pub fn set_context(&self,context:Value){self.buffer.lock().unwrap().context=context;}
     pub fn push(&self, ns: i64, kind: &'static str, data: Value) {
         let mut buffer = self.buffer.lock().unwrap();
         if !self.is_enabled() { return; }
@@ -226,7 +237,9 @@ fn write_clip(path: &std::path::Path, name: &str, clip: &Clip, limit: u64) -> Re
     let pending=path.join(format!("{name}.partial"));
     let result=(|| -> Result<(),String> {
         let mut writer=BufWriter::new(OpenOptions::new().write(true).create_new(true).open(&pending).map_err(|e|e.to_string())?);
-        let header=json!({"format":"clbb-aim-debug","version":1,"pre_seconds":5,"post_seconds":5,"start_ns":clip.start_ns,"end_ns":clip.end_ns,"marks":clip.marks,"truncated":clip.truncated,"clock":"CLOCK_MONOTONIC nanoseconds","scope":"local gameplay telemetry; no full process-memory dump"});
+        let mut channels=std::collections::BTreeMap::<&str,usize>::new();
+        for row in &clip.rows{*channels.entry(row.kind).or_default()+=1;}
+        let header=json!({"context":clip.context,"event_count":clip.rows.len(),"channels":channels,"coverage_start_ns":clip.rows.iter().map(|r|r.ns).min(),"coverage_end_ns":clip.rows.iter().map(|r|r.ns).max(),"native_chain_observed":channels.get("android_motion").is_some_and(|n|*n>0),"format":"clbb-aim-debug","version":2,"pre_seconds":5,"post_seconds":5,"start_ns":clip.start_ns,"end_ns":clip.end_ns,"marks":clip.marks,"truncated":clip.truncated,"clock":"CLOCK_MONOTONIC nanoseconds","scope":"local gameplay telemetry; no full process-memory dump"});
         let mut written=0u64;
         for row in std::iter::once(header).chain(clip.rows.iter().map(|r|serde_json::to_value(r.as_ref()).unwrap())) {
             let bytes=serde_json::to_vec(&row).map_err(|e|e.to_string())?;
@@ -370,6 +383,27 @@ mod tests {
             b.push(row(0));
         }
         assert_eq!(b.ring.len(), RING_LIMIT);
+    }
+    #[test]
+    fn schema_two_keeps_context_and_complete_native_packet_across_ring_rotation() {
+        let dir=temp_dir("schema-two");let mut b=Buffer::default();
+        b.context=json!({"revision":"tested-build","settings":{"debug.recording":true}});
+        for i in 0..=1000 {b.push(row(i*10_000_000));}
+        for stage in ["before_dispatch","after_dispatch","motion_event_reader"] {
+            b.push(Event{ns:10*SECOND,kind:"android_motion",data:json!({"packet":42,"stage":stage,"action":261,"pointers":[{"android_id":0},{"android_id":1}]})});
+        }
+        b.mark(10*SECOND,"manual",false);
+        b.context=json!({"revision":"later"});
+        let ready=b.push(row(15*SECOND));
+        assert!(!ready[0].truncated);
+        let file=write_clip(&dir,"clip-schema-two",&ready[0],10_000_000).unwrap();
+        let rows:Vec<Value>=fs::read_to_string(file).unwrap().lines().map(|line|serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(rows[0]["version"],2);
+        assert_eq!(rows[0]["context"]["revision"],"tested-build");
+        assert_eq!(rows[0]["channels"]["android_motion"],3);
+        assert_eq!(rows[0]["native_chain_observed"],true);
+        assert_eq!(rows.iter().filter(|row|row["kind"]=="android_motion"&&row["data"]["packet"]==42).count(),3);
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn automatic_marks_are_debounced_but_manual_marks_are_kept() {

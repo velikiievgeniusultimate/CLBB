@@ -293,69 +293,61 @@ impl Controller {
         self.directionObserved_.dot(self.pendingDirection_) >= ANGLE_COS
     }
     pub(crate) fn sample_direction_input(&mut self, host: &mut impl Host, frame: &Frame) {
+        macro_rules! reject {($reason:expr)=>{{self.trace(host,"direction_feedback_rejected",$reason);return;}}}
         self.directionAccepted_ = false;
         self.directionMatchedSequence_ = 0;
         let expected = self
             .find_button(&self.activeSlot_)
             .map_or(0, |button| self.measured_direction_skill_id(button));
-        if self.skillTouch_ < 0
-            || !self.directionGeometryFresh_
-            || expected <= 0
-            || self.coreSkill_ != expected
-        {
-            return;
-        }
+        if self.skillTouch_ < 0 {return;}
+        if !self.directionGeometryFresh_ {reject!("geometry_not_fresh");}
+        if expected<=0 {reject!("no_measured_direction_contract");}
+        if self.coreSkill_!=expected {reject!("active_skill_mismatch");}
         let input = &frame.direction_input;
         let raw = &input.raw_touch_xyz;
         let world = &input.direction_xz;
         let start = input.sample_start_ns.get(-1.);
         let end = input.sample_end_ns.get(-1.);
-        if !input.ready.get()
-            || !input.coherent.get()
-            || !known_direction_source(self.heroId_,expected,input.source.as_str())
-            || input.token.as_str() != self.frameEpoch_
-            || input.hero_id.int() != self.heroId_
-            || input.slot.as_str() != self.activeSlot_
-            || input.skill_id.int() != expected
-            || !raw.valid()
-            || !world.valid()
-            || !input.sample_start_ns.is_number()
-            || !input.sample_end_ns.is_number()
-            || !start.is_finite()
-            || !end.is_finite()
-            || start < self.castStartedNs_ as f64
-            || end < start
-            || end - start > NS100
-            || self.now_ as f64 - end > NS100
-            || end > self.now_ as f64 + 10e6
-        {
-            return;
-        }
+        let reject_reason=if !input.ready.get(){Some("native_direction_not_ready")}
+            else if !input.coherent.get(){Some("native_direction_incoherent")}
+            else if !known_direction_source(self.heroId_,expected,input.source.as_str()){Some("unrecognized_direction_source")}
+            else if input.token.as_str()!=self.frameEpoch_{Some("epoch_mismatch")}
+            else if input.hero_id.int()!=self.heroId_{Some("hero_mismatch")}
+            else if input.slot.as_str()!=self.activeSlot_{Some("slot_mismatch")}
+            else if input.skill_id.int()!=expected{Some("native_skill_mismatch")}
+            else if !raw.valid()||!world.valid(){Some("native_vector_invalid")}
+            else if !input.sample_start_ns.is_number()||!input.sample_end_ns.is_number()||!start.is_finite()||!end.is_finite(){Some("sample_clock_invalid")}
+            else if start<self.castStartedNs_ as f64 {Some("sample_before_current_cast")}
+            else if end<start||end-start>NS100{Some("sample_window_invalid")}
+            else if self.now_ as f64-end>NS100{Some("sample_stale")}
+            else if end>self.now_ as f64+10e6{Some("sample_from_future")}
+            else {None};
+        if let Some(reason)=reject_reason{reject!(reason);}
         let geometry = &frame.active_joystick;
         if !same_number(input.sample_start_ns, geometry.sample_start_ns)
             || !same_number(input.sample_end_ns, geometry.sample_end_ns)
         {
-            return;
+            reject!("geometry_clock_mismatch");
         }
         if raw.values[2].value.abs() > 1.
             || (raw.values[0].value == 0. && raw.values[1].value == 0.)
         {
-            return;
+            reject!("native_touch_zero_or_invalid");
         }
         let actual = raw_command(raw, self.androidSize_);
         if distance(actual, self.pixels(self.directionCenter_))
             > self.radius_pixels(self.directionRadius_) * 2. + 4.
         {
-            return;
+            reject!("native_touch_outside_joystick");
         }
         let Some(provenance) = self.causal_.match_direction(actual, start as i64) else {
-            return;
+            reject!("command_provenance_not_matched");
         };
         let matched = provenance.sequence;
         let observed = xy(world);
         let norm = observed.length();
         if norm < 0.9 || norm > 1.1 {
-            return;
+            reject!("native_direction_not_unit");
         }
         let observed = observed / norm;
         let mut model = AngularRadialSolver::default();
@@ -366,14 +358,14 @@ impl Controller {
             1.,
             self.androidSize_,
         ) {
-            return;
+            reject!("angular_model_unavailable");
         }
         let Some(predicted) = model.forward(actual) else {
-            return;
+            reject!("angular_prediction_unavailable");
         };
         let predicted_norm = predicted.length();
         if predicted_norm < 1e-4 || (predicted / predicted_norm).dot(observed) < ANGLE_COS {
-            return;
+            reject!("native_direction_model_mismatch");
         }
         self.directionAccepted_ = true;
         self.directionAcceptedPoint_ = actual;

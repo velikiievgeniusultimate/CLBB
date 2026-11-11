@@ -55,6 +55,31 @@ fn value<M: Memory>(r: &mut Reflection<M>, object: u64, f: &Field, consumed: &mu
     }
 }
 
+fn numeric_snapshot<M:Memory>(r:&mut Reflection<M>,object:u64,metadata:&HashMap<String,Field>,consumed:&mut Checks)->Result<Value> {
+    let mut selected:Vec<_>=metadata.iter().filter_map(|(name,f)|{
+        let size=match f.kind{2=>1,8|9|12=>4,10|11|13=>8,_=>return None};
+        (!f.is_static&&f.offset<65536).then_some((name,f,size))
+    }).collect();
+    selected.sort_by_key(|(name,_,_)|*name);
+    let total=selected.len();selected.truncate(256);
+    let size=selected.iter().map(|(_,f,n)|f.offset as usize+n).max().unwrap_or(8);
+    let raw=capture(r,consumed,object,size)?;
+    let mut values=serde_json::Map::new();
+    for (name,f,size)in selected {
+        let data=&raw[f.offset as usize..f.offset as usize+size];
+        let value=match f.kind{
+            2=>if data[0]<=1{json!(data[0]!=0)}else{json!({"invalid_bool":data[0]})},
+            8=>json!(i32::from_le_bytes(data.try_into().unwrap())),
+            9=>json!(u32::from_le_bytes(data.try_into().unwrap())),
+            10=>json!(i64::from_le_bytes(data.try_into().unwrap())),
+            11=>json!(u64::from_le_bytes(data.try_into().unwrap())),
+            12=>json!(f32::from_le_bytes(data.try_into().unwrap())),
+            13=>json!(f64::from_le_bytes(data.try_into().unwrap())),_=>unreachable!()};
+        values.insert(name.clone(),json!({"kind":f.kind,"value":value}));
+    }
+    Ok(json!({"values":values,"declared_numeric_fields":total,"truncated":total>256}))
+}
+
 pub(crate) fn cast_lock_address<M: Memory>(r: &mut Reflection<M>, object: u64) -> Option<u64> {
     let (_, metadata) = fields(r, object, &mut Vec::new()).ok()?;
     let field = metadata.get("m_bIsLockForbid")?;
@@ -65,22 +90,24 @@ pub(crate) fn cast_lock_address<M: Memory>(r: &mut Reflection<M>, object: u64) -
 pub fn observe<M: Memory>(r: &mut Reflection<M>, ui: u64, buttons: &[ButtonPlan]) -> Result<Value> {
     let mut consumed = Vec::new();
     let mut rows = Vec::new();
-    for button in buttons.iter().filter(|b| b.kind == "skill") {
-        let (_, metadata) = fields(r, button.object, &mut consumed)?;
+    for button in buttons {
+        let (class_name, metadata) = fields(r, button.object, &mut consumed)?;
+        let numeric=numeric_snapshot(r,button.object,&metadata,&mut consumed)?;
         let mut values = serde_json::Map::new();
         for name in ["m_bIsLockForbid", "m_bIsStateForbid", "m_bUnStateForbid",
             "<m_iHoverButtonSkillId>k__BackingField", "<m_iLeaveButtonSkillId>k__BackingField",
             "<CancelSkillID>k__BackingField", "m_releaseButtonChooseSkillId",
             "m_releaseButtonChooseSkillId_LastValid", "m_releaseButtonChooseSkillId_LastValidTimestamp",
             "m_iUIkeySkillParaType", "sUIkeySkillPara1", "m_listExtraId",
-            "iTouchFingerID", "m_mainTouchId", "m_FingerId"] {
+            "iTouchFingerID", "m_mainTouchId", "m_FingerId", "m_bPressed", "m_bIsPressed", "bFirstDrag", "m_bVaildDraged", "m_dragged", "m_bCanUseSkill"] {
             if let Some(f) = metadata.get(name) {
-                values.insert(name.into(), value(r, button.object, f, &mut consumed)?);
+                values.insert(name.into(), match value(r, button.object, f, &mut consumed){Ok(v)=>v,Err(error)=>json!({"unavailable":error})});
             }
         }
-        rows.push(json!({"slot":button.slot,"values":values}));
+        rows.push(json!({"slot":button.slot,"class":class_name,"values":values,"numeric":numeric}));
     }
     let (_, metadata) = fields(r, ui, &mut consumed)?;
+    let numeric_ui=numeric_snapshot(r,ui,&metadata,&mut consumed)?;
     let mut curve = Value::Null;
     if let Some(f) = metadata.get("m_buttonCurveLink") {
         if f.kind != 18 || f.is_static { return Err("Control curve link type changed".into()); }
@@ -105,7 +132,7 @@ pub fn observe<M: Memory>(r: &mut Reflection<M>, ui: u64, buttons: &[ButtonPlan]
         }
     }
     check(r, &consumed)?;
-    Ok(json!({"buttons":rows,"curve":curve}))
+    Ok(json!({"buttons":rows,"curve":curve,"numeric_ui":numeric_ui}))
 }
 
 /// Cached typed offsets for the live linked-button path; no metadata walks in
