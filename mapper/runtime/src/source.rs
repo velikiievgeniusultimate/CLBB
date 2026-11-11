@@ -663,7 +663,7 @@ fn read_cooldown<M: Memory>(
     consumed: &mut Checks,
 ) -> Result<bool> {
     let class = pointer(r, consumed, timer)?;
-    r.class(class)?;
+    r.validate_class(class)?;
     let active = r.field(timer, "m_CanCountCd")?;
     let error = r.field(timer, "bIsCDError")?;
     if boolean(r, consumed, error)? {

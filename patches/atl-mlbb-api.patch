@@ -2080,10 +2080,32 @@ index 560084b..f1d378b 100644
  	gtk_widget_insert_before(GTK_WIDGET(popover), decor_view, NULL);
  	gtk_popover_present(popover);
 diff --git a/src/api-impl-jni/widgets/android_view_SurfaceView.c b/src/api-impl-jni/widgets/android_view_SurfaceView.c
-index 11b6564..e879567 100644
+index 11b6564..cb3af29 100644
 --- a/src/api-impl-jni/widgets/android_view_SurfaceView.c
 +++ b/src/api-impl-jni/widgets/android_view_SurfaceView.c
-@@ -161,6 +161,8 @@ JNIEXPORT jlong JNICALL Java_android_view_SurfaceView_native_1constructor(JNIEnv
+@@ -1,4 +1,7 @@
+ #include <gtk/gtk.h>
++#include <stdint.h>
++
++extern void clbb_render_frame_event_host(uint64_t, unsigned int, unsigned int, unsigned int, unsigned int) __attribute__((weak));
+ 
+ #include "../defines.h"
+ #include "../util.h"
+@@ -54,6 +57,13 @@ static void surface_view_widget_snapshot(GtkWidget *widget, GdkSnapshot *snapsho
+ 			gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(0, gtk_widget_get_height(widget)));
+ 			gtk_snapshot_scale(snapshot, 1, -1);
+ 		}
++        /* This records the game texture actually entering a GTK snapshot;
++         * queue handoff alone can include frames superseded before painting.
++         * Rust deduplicates repeated serials (e.g. an unrelated HUD redraw). */
++        const guint64 *frame_info = g_object_get_data(G_OBJECT(surface_view_widget->texture), "clbb-render-frame-info");
++        if (frame_info && clbb_render_frame_event_host)
++            clbb_render_frame_event_host(frame_info[0], (unsigned int)frame_info[1],
++                (unsigned int)frame_info[2], (unsigned int)frame_info[3], 2);
+ 		gtk_snapshot_append_texture(snapshot, surface_view_widget->texture, &bounds);
+ 		if (surface_view_widget->needs_flip)
+ 			gtk_snapshot_restore(snapshot);
+@@ -161,6 +171,8 @@ JNIEXPORT jlong JNICALL Java_android_view_SurfaceView_native_1constructor(JNIEnv
  	GtkWidget *dummy = surface_view_widget_new();
  	gtk_widget_set_name(dummy, "dummy widget for SurfaceView");
  	GtkWidget *graphics_offload = gtk_graphics_offload_new(dummy);
@@ -5114,7 +5136,7 @@ index 3fd5b65..85e98f6 100644
  	'android/widget/TimePicker.java',
  	'android/widget/Toast.java',
 diff --git a/src/libandroid/egl.c b/src/libandroid/egl.c
-index 30ba805..0033bc1 100644
+index 30ba805..85cf3c8 100644
 --- a/src/libandroid/egl.c
 +++ b/src/libandroid/egl.c
 @@ -8,7 +8,7 @@
@@ -5529,7 +5551,7 @@ index 30ba805..0033bc1 100644
  		glBindTexture(GL_TEXTURE_2D, 0);
  		eglDestroyImage(eglGetCurrentDisplay(), buffer->egl_image);
  		buffer->egl_image = NULL;
-@@ -448,11 +747,45 @@ static gboolean queue_texture(gpointer data)
+@@ -448,11 +747,53 @@ static gboolean queue_texture(gpointer data)
  	}
  	atl_surface->surface_view_widget->frame_callback_data = atl_surface->vsync;
  	atl_surface->surface_view_widget->frame_callback = frame_callback;
@@ -5539,6 +5561,14 @@ index 30ba805..0033bc1 100644
 +		destroy_texture(buffer);
 +		return G_SOURCE_REMOVE;
 +	}
++    /* Snapshot telemetry owns numeric values, not an ATLSurface/buffer pointer:
++     * GdkGLTexture may release its GL resources before its GObject is finalized. */
++    guint64 *frame_info = g_new(guint64, 4);
++    frame_info[0] = (guint64)(uintptr_t)atl_surface;
++    frame_info[1] = (guint64)atl_surface->width;
++    frame_info[2] = (guint64)atl_surface->height;
++    frame_info[3] = (guint64)buffer->submit_serial;
++    g_object_set_data_full(G_OBJECT(texture), "clbb-render-frame-info", frame_info, g_free);
 +	const char *capture_directory = getenv("ATL_BOOT_CAPTURE_DIR");
 +	gboolean capture = capture_directory && *capture_directory && !atl_surface->boot_capture_done &&
 +	                   buffer->submit_serial >= 128 && g_file_test(capture_directory, G_FILE_TEST_IS_DIR);
@@ -5576,7 +5606,7 @@ index 30ba805..0033bc1 100644
  EGLBoolean bionic_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
  {
  	if (getenv("ATL_DIRECT_EGL"))
-@@ -462,19 +795,49 @@ EGLBoolean bionic_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
+@@ -462,19 +803,49 @@ EGLBoolean bionic_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
  		return eglSwapBuffers(display, surface);
  	}
  	ATLSurface *atl_surface = surface;
@@ -5634,7 +5664,7 @@ index 30ba805..0033bc1 100644
  
  	return EGL_TRUE;
  }
-@@ -514,6 +877,21 @@ void bionic_glBindFramebuffer(GLenum target, GLuint framebuffer)
+@@ -514,6 +885,21 @@ void bionic_glBindFramebuffer(GLenum target, GLuint framebuffer)
  {
  	if (getenv("ATL_DIRECT_EGL") || framebuffer != 0)
  		return glBindFramebuffer(target, framebuffer);

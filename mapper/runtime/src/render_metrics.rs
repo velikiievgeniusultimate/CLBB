@@ -56,6 +56,7 @@ struct Surface {
     last: Instant,
     submit: Series,
     handoff: Series,
+    painted: Series,
 }
 #[derive(Default)]
 struct Metrics {
@@ -70,7 +71,7 @@ pub extern "C" fn clbb_render_frame_event(
     serial: u32,
     stage: u32,
 ) {
-    if key == 0 || width == 0 || height == 0 || width > 32768 || height > 32768 || stage > 1 {
+    if key == 0 || width == 0 || height == 0 || width > 32768 || height > 32768 || stage > 2 {
         return;
     }
     let now = Instant::now();
@@ -94,6 +95,7 @@ pub extern "C" fn clbb_render_frame_event(
             last: now,
             submit: Series::default(),
             handoff: Series::default(),
+            painted: Series::default(),
         });
         m.surfaces.len() - 1
     };
@@ -102,8 +104,10 @@ pub extern "C" fn clbb_render_frame_event(
     s.last = now;
     if stage == 0 {
         s.submit.observe(now, serial)
-    } else {
+    } else if stage == 1 {
         s.handoff.observe(now, serial)
+    } else {
+        s.painted.observe(now, serial)
     }
 }
 /// Rate of distinct frames handed to GTK on the most recently active surface.
@@ -119,8 +123,8 @@ pub fn fps() -> f64 {
 pub fn snapshot() -> Value {
     let now = Instant::now();
     let m = METRICS.lock().unwrap();
-    json!({"meaning":"EGL submissions and GTK texture handoffs; neither is monitor scan-out or simulation FPS",
-        "surfaces":m.surfaces.iter().enumerate().map(|(i,s)|json!({"surface":i,"size":s.size,"egl_submit":s.submit.snapshot(now),"gtk_handoff":s.handoff.snapshot(now)})).collect::<Vec<_>>()})
+    json!({"meaning":"EGL submissions, GTK texture handoffs and unique GTK snapshots; none is monitor scan-out or simulation FPS",
+        "surfaces":m.surfaces.iter().enumerate().map(|(i,s)|json!({"surface":i,"size":s.size,"egl_submit":s.submit.snapshot(now),"gtk_handoff":s.handoff.snapshot(now),"gtk_snapshot":s.painted.snapshot(now)})).collect::<Vec<_>>()})
 }
 #[cfg(test)]
 mod tests {

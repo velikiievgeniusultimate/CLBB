@@ -110,16 +110,27 @@ impl<M: Memory> Reflection<M> {
         self.classes.insert(address, value.clone());
         Ok(value)
     }
+    /// Borrow immutable reflected metadata without copying its whole field map.
+    /// Callers must still obtain a current class pointer from the live owner.
+    fn cached_class(&mut self, address: u64) -> Result<&Class> {
+        if !self.classes.contains_key(&address) {
+            self.class(address)?;
+        }
+        Ok(&self.classes[&address])
+    }
+    pub fn validate_class(&mut self, address: u64) -> Result<()> {
+        self.cached_class(address).map(|_| ())
+    }
+    pub fn class_name(&mut self, address: u64) -> Result<&str> {
+        Ok(&self.cached_class(address)?.name)
+    }
     pub fn field(&mut self, object: u64, name: &str) -> Result<u64> {
         let mut address = self.pointer(object)?;
         for _ in 0..24 {
             // Metadata is immutable for the cached class lifetime. Do not clone
             // its name and complete field table for each live-value lookup.
             // The object's class pointer above is still read on every call.
-            if !self.classes.contains_key(&address) {
-                self.class(address)?;
-            }
-            let class = &self.classes[&address];
+            let class = self.cached_class(address)?;
             if let Some(field) = class.fields.get(name) {
                 if field.offset > 1048576 {
                     return Err("Unsupported field offset".into());
@@ -423,6 +434,34 @@ mod tests {
                 .unwrap_err()
                 .contains("Missing reflected field")
         );
+    }
+    #[test]
+    fn borrowed_class_accessors_validate_misses_and_follow_current_owner() {
+        let mut r = fixture();
+        assert_eq!(r.class_name(r.pointer(16).unwrap()).unwrap(), "Hero");
+        r.memory.reads.borrow_mut().clear();
+        r.validate_class(r.pointer(16).unwrap()).unwrap();
+        assert_eq!(r.class_name(r.pointer(16).unwrap()).unwrap(), "Hero");
+        assert_eq!(&*r.memory.reads.borrow(), &[(16, 8), (16, 8)]);
+        r.classes.insert(
+            512,
+            Class {
+                address: 512,
+                name: "Other".into(),
+                parent: 0,
+                statics: 0,
+                fields: HashMap::new(),
+            },
+        );
+        r.memory.bytes.borrow_mut()[16..24].copy_from_slice(&512u64.to_le_bytes());
+        assert_eq!(r.class_name(r.pointer(16).unwrap()).unwrap(), "Other");
+        r.memory.bytes.borrow_mut()[16..24].copy_from_slice(&128u64.to_le_bytes());
+        assert!(
+            r.validate_class(r.pointer(16).unwrap())
+                .unwrap_err()
+                .contains("identity mismatch")
+        );
+        assert!(r.class_name(128).unwrap_err().contains("identity mismatch"));
     }
     /// Isolated metadata-only timing; this is not a game FPS benchmark.
     #[test]

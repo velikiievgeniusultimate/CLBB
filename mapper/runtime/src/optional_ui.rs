@@ -36,7 +36,7 @@ fn owner<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks, object: u64) -> 
         return Err("Optional UI object is absent".into());
     }
     let raw = capture(r, checks, object, 8)?;
-    r.class(u64_at(&raw, 0))?;
+    r.validate_class(u64_at(&raw, 0))?;
     Ok(())
 }
 fn link<M: Memory>(
@@ -154,7 +154,7 @@ impl Control {
         if let Some((label, gold)) = self.price {
             let string = u64_at(&capture(r, &mut state, label, 8)?, 0);
             owner(r, &mut state, string)?;
-            if r.class(r.pointer(string)?)?.name != "String" {
+            if r.class_name(r.pointer(string)?)? != "String" {
                 return Err("Invalid quick-buy label".into());
             }
             let length = i32_at(&capture(r, &mut state, string + 16, 4)?, 0);
@@ -453,7 +453,7 @@ impl OptionalUi {
             family.checks.extend(self.roots.iter().cloned());
             let mut frames = Vec::new();
             for frame in self.frames.iter().copied().filter(|v| *v != 0) {
-                if r.class(r.pointer(frame)?)?.name == "UIBattleRecEquip" {
+                if r.class_name(r.pointer(frame)?)? == "UIBattleRecEquip" {
                     frames.push(frame);
                 }
             }
@@ -496,7 +496,7 @@ impl OptionalUi {
         let result = (|| -> Result<()> {
             let attack = link(r, &mut family.checks, self.ui, "m_AttackComp")?;
             owner(r, &mut family.checks, attack)?;
-            if r.class(r.pointer(attack)?)?.name != "UIKeyAttack" {
+            if r.class_name(r.pointer(attack)?)? != "UIKeyAttack" {
                 return Err("Unknown attack control owner".into());
             }
             let info = link(r, &mut family.checks, attack, "m_UIFrameInfo")?;

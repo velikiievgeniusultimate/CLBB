@@ -25,9 +25,12 @@ while time.monotonic()-begin<a.seconds:
  for card in Path('/sys/class/drm').glob('card[0-9]*'):
   try:gpu[card.name]=int((card/'device/gpu_busy_percent').read_text())
   except OSError:pass
- rows.append({'time':t,'surface':active['surface'],'size':active['size'],'render':active['gtk_handoff'],'gpu':gpu})
+ rows.append({'time':t,'surface':active['surface'],'size':active['size'],'render':active['gtk_handoff'],'snapshot':active.get('gtk_snapshot'),'gpu':gpu})
  time.sleep(max(0,.5-(time.monotonic()-t)))
 end=tasks();elapsed=time.monotonic()-begin;hz=os.sysconf('SC_CLK_TCK');threads=sorted([{'tid':k,'name':v[1],'core_percent':round((v[0]-start.get(k,v)[0])/hz/elapsed*100,2)}for k,v in end.items()],key=lambda x:-x['core_percent'])
 interval_fps=[(b['render']['total']-c['render']['total'])/(b['time']-c['time'])for c,b in zip(rows,rows[1:])if b['surface']==c['surface']and b['render']['total']>=c['render']['total']]
 summary={'pid':pid,'seconds':elapsed,'fps_mean':statistics.mean(interval_fps),'fps_median':statistics.median(interval_fps),'fps_min':min(interval_fps),'frame_p95_ms_mean':statistics.mean(r['render']['interval_p95_ms'] for r in rows if r['render']['interval_p95_ms'] is not None),'gpu_mean':{k:statistics.mean(r['gpu'][k]for r in rows if k in r['gpu'])for k in rows[0]['gpu']},'cpu_total_cores':sum(t['core_percent']for t in threads)/100,'threads':threads[:15],'size':rows[-1]['size'],'recording':read('debug.recording'),'fps_hud':read('display.show_fps'),'frame_pacing':read('diagnostics.frame_pacing')}
+painted=[(b['snapshot']['total']-c['snapshot']['total'])/(b['time']-c['time'])for c,b in zip(rows,rows[1:])if b.get('snapshot') and c.get('snapshot') and b['surface']==c['surface'] and b['snapshot']['total']>=c['snapshot']['total']]
+summary['snapshot_fps_mean']=statistics.mean(painted)if painted else None
+summary['source_ms']=read('diagnostics.source_ms')
 a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text(json.dumps({'summary':summary,'samples':rows},ensure_ascii=False,indent=2)+'\n');print(json.dumps(summary,ensure_ascii=False))
