@@ -81,6 +81,7 @@ public class PermissionContract {
  public static void main(String[] args) throws Exception {
   PermissionContract pm = new PermissionContract();
   String primary = ATLLoadedApp.primary.pkg.packageName;
+  expect(pm,"android.permission.RECORD_AUDIO",primary,System.getenv("ATL_UGLY_ENABLE_MICROPHONE")!=null?PERMISSION_GRANTED:PERMISSION_DENIED);
   String send = "com.google.android.c2dm.permission.SEND";
   String internet = "android.permission.INTERNET";
   String storage = "android.permission.READ_EXTERNAL_STORAGE";
@@ -138,5 +139,8 @@ with tempfile.TemporaryDirectory(prefix='clbb-package-permissions-') as temporar
     subprocess.run(['javac', '-d', str(directory), str(source), str(paths)], check=True)
     environment = {key: value for key, value in os.environ.items()
                    if key not in ('ATL_UGLY_ENABLE_LOCATION', 'ATL_UGLY_ENABLE_MICROPHONE', 'ATL_ENABLE_GMS_STUB')}
-    subprocess.run(['java', '-ea', '-Dtest.installed=' + str(installed), '-cp', str(directory),
-                    'PermissionContract'], env=environment, check=True, timeout=10)
+    for mic in (False, True):
+        invocation=dict(environment)
+        if mic: invocation['ATL_UGLY_ENABLE_MICROPHONE']='1'
+        subprocess.run(['java', '-ea', '-Dtest.installed=' + str(installed), '-cp', str(directory),
+                        'PermissionContract'], env=invocation, check=True, timeout=10)

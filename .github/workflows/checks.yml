@@ -14,6 +14,12 @@ jobs:
         run: cargo test --manifest-path mapper/core/Cargo.toml --lib --locked --offline
       - name: Rust runtime and updater
         run: cargo test --manifest-path mapper/runtime/Cargo.toml --lib --locked --offline
+      - name: Materialize pinned Android API sources
+        run: |
+          git submodule update --init --depth 1 src/atl
+          git -C src/atl apply ../../patches/atl-mlbb-api.patch
+      - name: Android permission contract
+        run: python3 smoke/check-package-permissions.py
       - name: Android microphone JNI adapter
         run: python3 smoke/check-audiorecord-jni.py
       - name: Android AudioTrack buffers

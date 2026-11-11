@@ -20,6 +20,8 @@ if [[ -z "${ATL_AUDIO_DEVICE:-}" && -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/p
     export ATL_AUDIO_DEVICE=pipewire
 fi
 # Both audio backends identify themselves as this one application in desktop mixers.
+# CLBB provides a real host capture backend; expose the matching Android permission.
+export ATL_UGLY_ENABLE_MICROPHONE=1
 export SDL_APP_NAME=CLBB
 export SDL_AUDIO_DEVICE_APP_NAME=CLBB
 export SDL_AUDIO_DEVICE_STREAM_NAME="Mobile Legends"

@@ -11,6 +11,11 @@ mkdir "$work/classes"
 cat > "$work/CLBBVoiceLoad.java" <<'JAVA'
 public final class CLBBVoiceLoad {
  public static void main(String[] args) throws Exception {
+  Class<?> unsafeType=Class.forName("sun.misc.Unsafe");
+  Object unsafe=unsafeType.getMethod("getUnsafe").invoke(null);
+  // These two pure capability queries do not need an installed app context.
+  android.content.pm.PackageManager pm=(android.content.pm.PackageManager)unsafeType.getMethod("allocateInstance",Class.class).invoke(unsafe,android.content.pm.PackageManager.class);
+  if(!pm.hasSystemFeature("android.hardware.microphone"))throw new AssertionError("Microphone capability denied");
   System.load(args[0]);
   Class<?> effects = Class.forName("com.ss.bytertc.audio.device.webrtc.WebRtcAudioEffects");
   for(String name : new String[]{"isAcousticEchoCancelerSupported","isNoiseSuppressorSupported"}) {
@@ -35,7 +40,7 @@ public final class CLBBVoiceLoad {
 JAVA
 javac --release 8 -Xlint:-options -cp "$ROOT/src/atl/build/src/api-impl/hax.jar" -d "$work/classes" "$work/CLBBVoiceLoad.java"
 dx --dex --output="$work/probe.jar" "$work/classes"
-NB_QEMU_TRACE_LOADER=1 NB_QEMU_SYSROOT="$CLBB_ATL_PREFIX/share/libnb-qemu-guest" \
+ATL_UGLY_ENABLE_MICROPHONE=1 NB_QEMU_TRACE_LOADER=1 NB_QEMU_SYSROOT="$CLBB_ATL_PREFIX/share/libnb-qemu-guest" \
  timeout -k 2s 20s dalvikvm -Xforce-nb-testing -XX:NativeBridge="$CLBB_ATL_PREFIX/lib/libnb-qemu.so" \
  -cp "$work/probe.jar:$CLBB_ATL_PREFIX/lib/java/dex/android_translation_layer/api-impl.jar:$ROOT/game/split_GSDKRTC.apk:$ROOT/game/base.apk" \
  CLBBVoiceLoad "$ROOT/data/base.apk_/lib/libbyteplusaudio.so" > "$work/load.log" 2>&1 || { cat "$work/load.log"; exit 1; }
