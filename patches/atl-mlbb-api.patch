@@ -778,7 +778,7 @@ index febf9f3..922f45d 100644
 + void (*close_capture)(uint64_t)=dlsym(RTLD_DEFAULT,"clbb_capture_close");if(close_capture)close_capture(id);
  }
 diff --git a/src/api-impl-jni/audio/android_media_AudioTrack.c b/src/api-impl-jni/audio/android_media_AudioTrack.c
-index 78d094f..3b6312f 100644
+index 78d094f..4838d00 100644
 --- a/src/api-impl-jni/audio/android_media_AudioTrack.c
 +++ b/src/api-impl-jni/audio/android_media_AudioTrack.c
 @@ -2,6 +2,7 @@
@@ -926,6 +926,30 @@ index 78d094f..3b6312f 100644
  	(*env)->ReleaseShortArrayElements(env, audio_data, buffer, 0);
  
  	return frames_written;
+@@ -247,7 +270,8 @@ JNIEXPORT void JNICALL Java_android_media_AudioTrack_native_1pause(JNIEnv *env,
+ JNIEXPORT void JNICALL Java_android_media_AudioTrack_native_1release(JNIEnv *env, jobject this)
+ {
+ 	snd_pcm_t *pcm_handle = _PTR(_GET_LONG_FIELD(this, "pcm_handle"));
+-	snd_pcm_close(pcm_handle);
++	if (pcm_handle) snd_pcm_close(pcm_handle);
++    _SET_LONG_FIELD(this,"pcm_handle",0);
+ }
+ 
+ JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1getPlaybackHeadPosition(JNIEnv *env, jobject this)
+@@ -258,3 +282,13 @@ JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1getPlaybackHeadPosi
+ 
+ 	return delay;
+ }
++
++/* AudioTrack serializes Java writes so a positive availability bound cannot
++ * be consumed by a second writer before this nonblocking write is submitted. */
++JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1availableFrames(JNIEnv *env, jobject this) {
++    snd_pcm_t *handle = _PTR(_GET_LONG_FIELD(this, "pcm_handle"));
++    if (!handle) return -3;
++    snd_pcm_sframes_t available = snd_pcm_avail_update(handle);
++    if (available < 0) return -1;
++    return available > 65536 ? 65536 : (jint)available;
++}
 diff --git a/src/api-impl-jni/audio/audio.h b/src/api-impl-jni/audio/audio.h
 index 0098b29..5e870c7 100644
 --- a/src/api-impl-jni/audio/audio.h
@@ -988,6 +1012,25 @@ index d62463b..84a4565 100644
  
  /*
   * Class:     android_media_AudioRecord
+diff --git a/src/api-impl-jni/generated_headers/android_media_AudioTrack.h b/src/api-impl-jni/generated_headers/android_media_AudioTrack.h
+index 651938f..69675e2 100644
+--- a/src/api-impl-jni/generated_headers/android_media_AudioTrack.h
++++ b/src/api-impl-jni/generated_headers/android_media_AudioTrack.h
+@@ -31,6 +31,14 @@ JNIEXPORT void JNICALL Java_android_media_AudioTrack_native_1constructor
+ JNIEXPORT jint JNICALL Java_android_media_AudioTrack_getMinBufferSize
+   (JNIEnv *, jclass, jint, jint, jint);
+ 
++/*
++ * Class:     android_media_AudioTrack
++ * Method:    native_availableFrames
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1availableFrames
++  (JNIEnv *, jobject);
++
+ /*
+  * Class:     android_media_AudioTrack
+  * Method:    native_getPlaybackHeadPosition
 diff --git a/src/api-impl-jni/generated_headers/android_media_MediaCodec.h b/src/api-impl-jni/generated_headers/android_media_MediaCodec.h
 index 8e855fe..71921c6 100644
 --- a/src/api-impl-jni/generated_headers/android_media_MediaCodec.h
@@ -2748,6 +2791,21 @@ index 7d7213e..243d770 100644
  			case "layer-list": {
  				LayerDrawable drawable = new LayerDrawable();
  				drawable.inflate(resources, parser, attrs, theme);
+diff --git a/src/api-impl/android/media/AudioManager.java b/src/api-impl/android/media/AudioManager.java
+index 1469385..f2df708 100644
+--- a/src/api-impl/android/media/AudioManager.java
++++ b/src/api-impl/android/media/AudioManager.java
+@@ -97,6 +97,10 @@ public class AudioManager {
+ 		return false;
+ 	}
+ 
++	public boolean isVolumeFixed() { return false; }
++    public String getParameters(String keys) { return ""; }
++    public void setParameters(String parameters) {}
++
+ 	public boolean isMusicActive() {
+ 		return false;
+ 	}
 diff --git a/src/api-impl/android/media/AudioRecord.java b/src/api-impl/android/media/AudioRecord.java
 index ae1144c..99bb2ad 100644
 --- a/src/api-impl/android/media/AudioRecord.java
@@ -2854,6 +2912,133 @@ index ae1144c..99bb2ad 100644
  	}
  
  	public static class Builder {
+diff --git a/src/api-impl/android/media/AudioTrack.java b/src/api-impl/android/media/AudioTrack.java
+index c0faa79..a346313 100644
+--- a/src/api-impl/android/media/AudioTrack.java
++++ b/src/api-impl/android/media/AudioTrack.java
+@@ -74,7 +74,8 @@ public class AudioTrack {
+ 		return this.frames;
+ 	}
+ 
+-	public void play() {
++	public synchronized void play() {
++        if (pcm_handle == 0) throw new IllegalStateException("AudioTrack is not initialized");
+ 		System.out.println("calling AudioTrack.play()\n");
+ 		playbackState = PLAYSTATE_PLAYING;
+ 		native_play();
+@@ -89,16 +90,16 @@ public class AudioTrack {
+ 		System.out.println("STUB: AudioTrack.flush()\n");
+ 	}
+ 
+-	public void release() {
++	public synchronized void release() {
+ 		System.out.println("calling AudioTrack.release()\n");
+ 		native_release();
+ 	}
+ 
+ 	public int getState() {
+-		return 1; // TODO: fix up the native part and make this work properly
++		return pcm_handle != 0 ? 1 : 0;
+ 	}
+ 
+-	public int write(byte[] audioData, int offsetInBytes, int sizeInBytes) {
++	public synchronized int write(byte[] audioData, int offsetInBytes, int sizeInBytes) {
+ 		/* sanity check the parameters before calling native_write */
+ 		if ((audioData == null)
+ 		    || (offsetInBytes < 0) || (sizeInBytes < 0)
+@@ -107,7 +108,8 @@ public class AudioTrack {
+ 			return ERROR_BAD_VALUE;
+ 		}
+ 
+-		int framesToWrite = sizeInBytes / channels / 2; // 2 means PCM16
++		if (pcm_handle == 0 || channels <= 0) return -3;
++        int framesToWrite = sizeInBytes / channels / 2; // 2 means PCM16
+ 		int ret = native_write(audioData, offsetInBytes, framesToWrite, volume);
+ 		if (ret > 0) {
+ 			playbackHeadPosition += ret;
+@@ -115,13 +117,23 @@ public class AudioTrack {
+ 		return ret * channels * 2; // 2 means PCM16
+ 	}
+ 
+-	public int write(ByteBuffer audioData, int sizeInBytes, int writeMode) {
+-		int ret = write(audioData.array(), audioData.arrayOffset() + audioData.position(), sizeInBytes);
+-		audioData.position(audioData.position() + ret);
+-		return ret;
+-	}
+-
+-	public int write(short audioData[], int offsetInShorts, int sizeInShorts) {
++	public synchronized int write(ByteBuffer audioData, int sizeInBytes, int writeMode) {
++        if (audioData == null || sizeInBytes < 0 || sizeInBytes > audioData.remaining() || (writeMode != 0 && writeMode != 1)) return ERROR_BAD_VALUE;
++        if (pcm_handle == 0 || channels <= 0) return -3;
++        if (writeMode == 1) {
++            int available = native_availableFrames();
++            if (available < 0) return available;
++            sizeInBytes = Math.min(sizeInBytes, available * channels * 2);
++            if (sizeInBytes == 0) return 0;
++        }
++        ByteBuffer source=audioData.duplicate();
++        byte[] bytes=new byte[sizeInBytes];source.get(bytes);
++        int count=write(bytes,0,bytes.length);
++        if (count>0) audioData.position(audioData.position()+count);
++        return count;
++    }
++
++	public synchronized int write(short audioData[], int offsetInShorts, int sizeInShorts) {
+ 		/* sanity check the parameters before calling native_write */
+ 		if ((audioData == null)
+ 		    || (offsetInShorts < 0) || (sizeInShorts < 0)
+@@ -130,7 +142,8 @@ public class AudioTrack {
+ 			return ERROR_BAD_VALUE;
+ 		}
+ 
+-		int framesToWrite = sizeInShorts / channels;
++		if (pcm_handle == 0 || channels <= 0) return -3;
++        int framesToWrite = sizeInShorts / channels;
+ 		int ret = native_write(audioData, offsetInShorts, framesToWrite, volume);
+ 		if (ret > 0) {
+ 			playbackHeadPosition += ret;
+@@ -142,7 +155,13 @@ public class AudioTrack {
+ 		return sessionId;
+ 	}
+ 
+-	public int getSampleRate() {
++	public int getChannelCount() { return channels; }
++    public int getStreamType() { return streamType; }
++    public int getBufferSizeInFrames() { return channels > 0 ? bufferSizeInBytes / channels / 2 : 0; }
++    public int getBufferCapacityInFrames() { return getBufferSizeInFrames(); }
++    public int getUnderrunCount() { return 0; } // No platform underrun counter is exposed yet.
++    public static float getMaxVolume() { return 1.f; }
++    public int getSampleRate() {
+ 		return sampleRateInHz;
+ 	}
+ 
+@@ -155,7 +174,8 @@ public class AudioTrack {
+ 		return playbackState;
+ 	}
+ 
+-	public void pause() {
++	public synchronized void pause() {
++        if (pcm_handle == 0) throw new IllegalStateException("AudioTrack is not initialized");
+ 		System.out.println("calling AudioTrack.pause()\n");
+ 		playbackState = PLAYSTATE_PAUSED;
+ 		native_pause();
+@@ -174,6 +194,7 @@ public class AudioTrack {
+ 		return false;
+ 	}
+ 
++	private native int native_availableFrames();
+ 	private native int native_getPlaybackHeadPosition();
+ 	public native void native_play();
+ 	public native void native_pause();
+@@ -182,7 +203,7 @@ public class AudioTrack {
+ 	public native void native_release();
+ 
+ 	public static int getNativeOutputSampleRate(int i) {
+-		return -1;
++		return 44100;
+ 	}
+ 
+ 	// nested classes
 diff --git a/src/api-impl/android/media/MediaCodec.java b/src/api-impl/android/media/MediaCodec.java
 index 6aaa9c4..05096c1 100644
 --- a/src/api-impl/android/media/MediaCodec.java

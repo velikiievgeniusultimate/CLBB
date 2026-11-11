@@ -16,6 +16,8 @@ jobs:
         run: cargo test --manifest-path mapper/runtime/Cargo.toml --lib --locked --offline
       - name: Android microphone JNI adapter
         run: python3 smoke/check-audiorecord-jni.py
+      - name: Android AudioTrack buffers
+        run: python3 smoke/check-audiotrack-java.py
       - name: Android network identity
         run: python3 smoke/check-network-identity.py
       - name: Installer manager
