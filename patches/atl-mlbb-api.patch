@@ -6954,10 +6954,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..c53d1a2
+index 0000000..d514f10
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,905 @@
+@@ -0,0 +1,932 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7060,6 +7060,9 @@ index 0000000..c53d1a2
 +    GSocketService *control;
 +    char *socket_path;
 +    gint64 agent_until;
++    gint64 fps_refresh_at;
++    gboolean show_fps;
++    char fps_text[32];
 +    GtkWidget *cursor_layer;
 +    GtkWidget *viewport;
 +    gboolean raw_tap;
@@ -7413,9 +7416,23 @@ index 0000000..c53d1a2
 +    (void)width;
 +    (void)height;
 +    ClbbHost *h = data;
-+    if (h->agent_until <= g_get_monotonic_time())
-+        return;
 +    GtkWidget *game = game_surface(GTK_WIDGET(h->window));
++    if (h->show_fps && game && !clbb_settings_is_visible(h->settings)) {
++        graphene_point_t origin;
++        if (gtk_widget_compute_point(game,GTK_WIDGET(area),&GRAPHENE_POINT_INIT(0,0),&origin)) {
++            double x=origin.x+12,y=origin.y+12;
++            cairo_save(cr);
++            cairo_set_source_rgba(cr,.035,.025,.035,.94);
++            cairo_rectangle(cr,x,y,122,36);cairo_fill(cr);
++            cairo_set_source_rgb(cr,.93,.25,.40);
++            cairo_rectangle(cr,x,y,3,36);cairo_fill(cr);
++            cairo_select_font_face(cr,"monospace",CAIRO_FONT_SLANT_NORMAL,CAIRO_FONT_WEIGHT_BOLD);
++            cairo_set_font_size(cr,19);cairo_set_source_rgb(cr,1,1,1);
++            cairo_move_to(cr,x+12,y+25);cairo_show_text(cr,h->fps_text);
++            cairo_restore(cr);
++        }
++    }
++    if (h->agent_until <= g_get_monotonic_time()) return;
 +    if (!game)
 +        return;
 +    graphene_point_t p;
@@ -7445,6 +7462,16 @@ index 0000000..c53d1a2
 +        return G_SOURCE_REMOVE;
 +    if (h->dispatching)
 +        return G_SOURCE_CONTINUE;
++    gint64 now=g_get_monotonic_time();
++    if (now>=h->fps_refresh_at) {
++        h->fps_refresh_at=now+250000;
++        const char *enabled=h->read(h->runtime,"display.show_fps");
++        gboolean show=!strcmp(enabled,"true") || !strcmp(enabled,"1");
++        gboolean redraw=show || h->show_fps;
++        h->show_fps=show;
++        if(show)g_snprintf(h->fps_text,sizeof(h->fps_text),"FPS %s",h->read(h->runtime,"diagnostics.fps"));
++        if(redraw)gtk_widget_queue_draw(h->cursor_layer);
++    }
 +    GtkWidget *surface = game_surface(GTK_WIDGET(h->window));
 +    gboolean active = (gtk_window_is_active(h->window) ||
 +                       h->agent_until > g_get_monotonic_time()) &&

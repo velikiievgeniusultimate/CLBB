@@ -906,6 +906,7 @@ static void pacing_controls(ClbbSettings *s, GtkWidget *card) {
   g_signal_connect(s->vsync_switch, "notify::active", G_CALLBACK(vsync_changed),
                    s);
   gtk_box_append(GTK_BOX(row), s->vsync_switch);
+  switch_control(s, card, "Показывать FPS", "display.show_fps", 0);
   s->pacing_apply = gtk_button_new_with_label("Применить FPS");
   gtk_widget_add_css_class(s->pacing_apply, "clbb-bind");
   g_signal_connect(s->pacing_apply, "clicked", G_CALLBACK(pacing_apply_clicked),

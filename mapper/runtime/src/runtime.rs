@@ -806,6 +806,7 @@ impl Runtime {
                 }).to_string()
             }).unwrap_or_else(|| "{}".into()),
             k if k.starts_with("updates.")=>self.updates.read(k),
+            "diagnostics.fps"=>format!("{:.0}",crate::render_metrics::fps()),
             "diagnostics.render"=>crate::render_metrics::snapshot().to_string(),
             "diagnostics.direction_visual"=>self.host.fresh().map(|s|serde_json::json!({"spec":s.direction_visual,"hero":s.frame.hero_render_xyz.values.map(|v|v.value),"view":s.frame.view_matrix.values.map(|v|v.value),"projection":s.projection,"sample_start_ns":s.frame.direction_input.sample_start_ns.value,"sample_end_ns":s.frame.direction_input.sample_end_ns.value}).to_string()).unwrap_or_else(||"{}".into()),
             "diagnostics.hero_state"=>self.host.fresh().map(|s| {
