@@ -53,7 +53,17 @@ def source_archive(destination,tag):
         for name,pin in pins.items():
             relative=locations.get(name,'src/'+name);directory=source/relative;directory.mkdir(parents=True,exist_ok=True)
             run('git','-C',str(ROOT/relative),'archive','--format=tar','--output',str(archive),pin['commit'])
-            with tarfile.open(archive)as tar:tar.extractall(directory,filter='data')
+            # Upstream Android trees contain legitimate links to sibling source
+            # directories. Permit those only within the complete source bundle.
+            def source_filter(member,destination):
+                checked=tarfile.tar_filter(member,destination)
+                if checked.issym() or checked.islnk():
+                    parent=Path(destination)/checked.name
+                    target=(parent.parent/checked.linkname if checked.issym() else Path(destination)/checked.linkname).resolve()
+                    if not target.is_relative_to(source.resolve()):raise ValueError('Source link escapes bundle: '+checked.name)
+                if not(checked.isfile()or checked.isdir()or checked.issym()or checked.islnk()):raise ValueError('Unsupported source entry')
+                return checked
+            with tarfile.open(archive)as tar:tar.extractall(directory,filter=source_filter)
         import importlib.util
         spec=importlib.util.spec_from_file_location('exporter',ROOT/'tools/export-runtime-patches.py');module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         for _name,relative,patch,_approved in module.SPECS:
