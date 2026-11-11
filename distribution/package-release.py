@@ -75,6 +75,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-only',action='store_true');parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--main-executable',type=Path,help='Fresh ATL executable to stage without replacing an active developer runtime')
+    parser.add_argument('--api-jar',type=Path,help='Fresh ATL Android API DEX archive for isolated staging')
     parser.add_argument('--main-library',type=Path,help='Fresh ATL main library to stage without installing over a running developer copy')
     args=parser.parse_args();args.output.mkdir(parents=True,exist_ok=True)
     tag=(ROOT/'VERSION').read_text().strip()
@@ -89,7 +90,7 @@ def main():
         stage=Path(temp)/'runtime';stage.mkdir()
         for name in ['VERSION','LICENSE','LICENSE_POLICY.md','LICENSES','THIRD_PARTY_NOTICES.txt','legal','README.md','README.en.md','env.sh','run-mlbb.sh','prepare-runtime.py','prepare-native-plugins.py','prepare-system-fonts.py']:
             copy(ROOT/name,stage/name)
-        for name in ['import_game.py','verify.py','game-apk.json','launch-fallback.py','native_libs.py']:copy(ROOT/'distribution'/name,stage/'distribution'/name)
+        for name in ['import_game.py','verify.py','game-apk.json','launch-fallback.py','native_libs.py','desktop_entry.py','device_identity.py','guest_root.py']:copy(ROOT/'distribution'/name,stage/'distribution'/name)
         for name,source_binary in [('clbb-launcher',ROOT/'launcher/target/release/clbb-launcher'),('clbb-manager',ROOT/'distribution/manager/target/release/clbb-manager')]:copy(source_binary,stage/'bin'/name)
         prefix=ROOT/'prefix'
         for name in ['android-translation-layer','dalvikvm','dex2oat']:copy(prefix/'bin'/name,stage/'prefix/bin'/name)
@@ -97,6 +98,7 @@ def main():
         patterns=['libGLESv1_CM.so*','libOpenSLES.so*','libandroid.so*','libc_bio.so*','libdl_bio.so*','libpthread_bio.so*','libstdc++_bio.so*','libnb-qemu.so*','libwolfssl.so*','libclbb_*.so']
         for pattern in patterns:
             for p in sorted((prefix/'lib').glob(pattern)):copy(p,stage/'prefix/lib'/p.name)
+        if args.api_jar:copy(args.api_jar,stage/'prefix/lib/java/dex/android_translation_layer/api-impl.jar')
         if args.main_library:copy(args.main_library,stage/'prefix/lib/java/dex/android_translation_layer/natives/libtranslation_layer_main.so')
         if args.main_executable:copy(args.main_executable,stage/'prefix/bin/android-translation-layer')
         guest=prefix/'share/libnb-qemu-guest';target=stage/'prefix/share/libnb-qemu-guest';target.mkdir(parents=True)

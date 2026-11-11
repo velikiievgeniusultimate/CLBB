@@ -2848,6 +2848,36 @@ index 24b9ace..423fb37 100644
  			System.exit(0);
  		}
  
+diff --git a/src/api-impl/android/os/SystemProperties.java b/src/api-impl/android/os/SystemProperties.java
+index 814bdff..3767748 100644
+--- a/src/api-impl/android/os/SystemProperties.java
++++ b/src/api-impl/android/os/SystemProperties.java
+@@ -13,6 +13,9 @@ public class SystemProperties {
+ 		properties.put("ro.product.brand", "google");
+ 		properties.put("ro.build.tags", "release-keys");
+ 		properties.put("ro.build.type", "user");
++		String identity = System.getenv("CLBB_ANDROID_ID");
++		if (identity != null && identity.matches("[0-9a-f]{16}"))
++			properties.put("ro.serialno", identity);
+ 		// TODO how to actually get the system's supported abis?
+ 		if (System.getProperty("os.arch").equals("x86_64")) {
+ 			properties.put("ro.product.cpu.abi", "x86_64");
+diff --git a/src/api-impl/android/provider/Settings.java b/src/api-impl/android/provider/Settings.java
+index ddee1de..62b64eb 100644
+--- a/src/api-impl/android/provider/Settings.java
++++ b/src/api-impl/android/provider/Settings.java
+@@ -20,7 +20,10 @@ public class Settings {
+ 		public static String getString(ContentResolver content_resolver, String key) {
+ 			switch (key) {
+ 				case "android_id":
+-					return "_totally_an_androidID"; // TODO: is this a good ID? :P
++					String identity = java.lang.System.getenv("CLBB_ANDROID_ID");
++					if (identity == null || !identity.matches("[0-9a-f]{16}"))
++						throw new IllegalStateException("CLBB requires a private installation Android ID");
++					return identity;
+ 				case "advertising_id":
+ 					return "";
+ 				default:
 diff --git a/src/api-impl/android/telephony/TelephonyManager.java b/src/api-impl/android/telephony/TelephonyManager.java
 index 6c3b405..c86610e 100644
 --- a/src/api-impl/android/telephony/TelephonyManager.java

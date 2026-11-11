@@ -16,3 +16,8 @@ try:
 finally:
     sys.argv = original_argv
     sys.path[:] = original_path
+
+import os
+sys.path.insert(0, str(root / "distribution"))
+from guest_root import prepare
+prepare(os.environ.get("CLBB_STATE_ROOT", str(root)), root / "prefix")
