@@ -1548,7 +1548,7 @@ index 11b6564..e879567 100644
  	wrapper_widget_set_jobject(WRAPPER_WIDGET(wrapper), env, this);
  	// TODO: is this correct for all usecases? how do we know when it's not?
 diff --git a/src/api-impl-jni/widgets/android_webkit_WebView.c b/src/api-impl-jni/widgets/android_webkit_WebView.c
-index ef0513d..2565e1e 100644
+index ef0513d..e73486b 100644
 --- a/src/api-impl-jni/widgets/android_webkit_WebView.c
 +++ b/src/api-impl-jni/widgets/android_webkit_WebView.c
 @@ -1,5 +1,6 @@
@@ -1558,7 +1558,7 @@ index ef0513d..2565e1e 100644
  #include <webkit/webkit.h>
  
  #include <androidfw/androidfw_c_api.h>
-@@ -9,10 +10,108 @@
+@@ -9,10 +10,110 @@
  
  #include "../AssetInputStream.h"
  #include "WrapperWidget.h"
@@ -1656,7 +1656,9 @@ index ef0513d..2565e1e 100644
 +		(*env)->ExceptionClear(env);
 +	gchar *json = java_string_to_utf8(env, response);
 +	webkit_script_dialog_prompt_set_text(dialog, json ? json : "{\"ok\":false}");
-+	webkit_script_dialog_close(dialog);
++	/* Synchronous completion: WebKit closes on its final unref after this
++	 * signal returns. Closing here clears currentScriptDialog while WebKit
++	 * still needs it for its post-signal unref (WebKitGTK 2.54). */
 +	webkit_script_dialog_unref(dialog);
 +	g_object_unref(view);
 +	g_free(json);
@@ -1667,7 +1669,7 @@ index ef0513d..2565e1e 100644
  static void asset_uri_scheme_request_cb(WebKitURISchemeRequest *request, gpointer user_data)
  {
  	const gchar *path = webkit_uri_scheme_request_get_path(request);
-@@ -29,9 +128,129 @@ static void asset_uri_scheme_request_cb(WebKitURISchemeRequest *request, gpointe
+@@ -29,9 +130,129 @@ static void asset_uri_scheme_request_cb(WebKitURISchemeRequest *request, gpointe
  	g_object_unref(stream);
  }
  
@@ -1797,7 +1799,7 @@ index ef0513d..2565e1e 100644
  	JNIEnv *env = get_jni_env();
  	J__WebView__internalLoadChanged(env, wrapper->jobj, load_event, _JSTRING(webkit_web_view_get_uri(web_view)));
  }
-@@ -65,23 +284,238 @@ JNIEXPORT jlong JNICALL Java_android_webkit_WebView_native_1constructor(JNIEnv *
+@@ -65,23 +286,238 @@ JNIEXPORT jlong JNICALL Java_android_webkit_WebView_native_1constructor(JNIEnv *
  	if (!getenv("ATL_UGLY_ENABLE_WEBVIEW"))
  		return Java_android_view_View_native_1constructor(env, this, context, attrs);
  
@@ -2037,7 +2039,7 @@ index ef0513d..2565e1e 100644
  	webkit_web_view_load_uri(webview, _CSTRING(url));
  }
  
-@@ -91,6 +525,9 @@ JNIEXPORT void JNICALL Java_android_webkit_WebView_native_1loadDataWithBaseURL(J
+@@ -91,6 +527,9 @@ JNIEXPORT void JNICALL Java_android_webkit_WebView_native_1loadDataWithBaseURL(J
  		return;
  
  	WebKitWebView *webview = _PTR(widget_ptr);
