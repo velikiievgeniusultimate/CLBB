@@ -228,7 +228,7 @@ int main(int argc, char **argv) {
     g_assert_cmpstr(gtk_string_list_get_string(GTK_STRING_LIST(gtk_drop_down_get_model(GTK_DROP_DOWN(mic))),2),==,"Недоступно: mic.two");
     g_assert_cmpstr(read_value(&p,"audio.input_device"),==,"mic.two");
     g_assert_cmpuint(p.writes,==,audio_writes);
-    g_signal_emit_by_name(find_button(clbb_settings_panel(s),"Обновить список устройств"),"clicked");
+    g_signal_emit_by_name(find_button(clbb_settings_panel(s),"Обновить устройства"),"clicked");
     g_assert_cmpstr(read_value(&p,"audio.refresh"),==,"1");
 
     GtkWidget *record_row = find_control(clbb_settings_panel(s), "debug.recording");

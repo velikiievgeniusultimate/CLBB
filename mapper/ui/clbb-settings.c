@@ -102,6 +102,12 @@ static const char css[] =
     ".clbb-bind.capture { background: #b7365c; border-color: #ff668d; } .clbb-recording { min-width: 142px; min-height: 30px; background: #30242e; color: #e7dce4; border: 1px solid #614052; border-radius: 5px; font-weight: 700; } .clbb-recording:checked { background: #a9234b; color: white; border-color: #ff668d; }"
     "button.clbb-close { background: #2a2029; color: #eee6ec; border: 1px "
     "solid #503344; border-radius: 5px; min-width: 30px; min-height: 28px; }"
+    "button.clbb-secondary { background: #2a2029; background-image: none; "
+    "color: #d8c9d3; border: 1px solid #503344; border-radius: 5px; "
+    "box-shadow: none; text-shadow: none; padding: 6px 12px; min-height: 24px; }"
+    "button.clbb-secondary:hover { background: #382632; border-color: #99506b; color: #fff2f6; }"
+    "button.clbb-secondary:active { background: #4a2939; border-color: #ed5279; }"
+    "button.clbb-secondary:focus-visible { outline: 2px solid #ed5279; outline-offset: 2px; }"
     ".clbb-settings switch:checked { background: #de4a70; border-color: "
     "#f06788; } .clbb-settings dropdown, .clbb-settings spinbutton "
     "{ background: #2a222c; border: 1px solid #513646; color: #f0e8ee; "
@@ -1176,17 +1182,6 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   s->common_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
   gtk_box_append(GTK_BOX(b), s->common_box);
   b = page(s, "sound", "Звук", "Общий уровень, игровой звук и голосовой чат.");
-  card = section(b, "Аудиоустройства");
-  gtk_box_append(GTK_BOX(card),wrap_label("Аудиовывод", "clbb-muted"));
-  s->audio_output=gtk_drop_down_new(NULL,NULL);g_object_set_data(G_OBJECT(s->audio_output),"clbb-settings-key","audio.output_device");gtk_box_append(GTK_BOX(card),s->audio_output);
-  gtk_box_append(GTK_BOX(card),wrap_label("Аудиовход · микрофон", "clbb-muted"));
-  s->audio_input=gtk_drop_down_new(NULL,NULL);g_object_set_data(G_OBJECT(s->audio_input),"clbb-settings-key","audio.input_device");gtk_box_append(GTK_BOX(card),s->audio_input);
-  g_signal_connect(s->audio_input,"notify::selected",G_CALLBACK(audio_selected),s);
-  g_signal_connect(s->audio_output,"notify::selected",G_CALLBACK(audio_selected),s);
-  GtkWidget *audio_scan=gtk_button_new_with_label("Обновить список устройств");gtk_box_append(GTK_BOX(card),audio_scan);
-  g_signal_connect(audio_scan,"clicked",G_CALLBACK(audio_refresh_clicked),s);
-  s->audio_status=wrap_label("Поиск аудиоустройств…","clbb-muted");gtk_box_append(GTK_BOX(card),s->audio_status);
-  gtk_box_append(GTK_BOX(card),wrap_label("Выбор применяется только к CLBB. Включите микрофон в самой игре для голосового чата.","clbb-muted"));
   card = section(b, "Громкость CLBB");
   const char *volume_titles[] = {"Общий уровень", "Игра", "Голосовой чат"};
   const char *volume_keys[] = {"audio.volume", "audio.game_volume", "audio.voice_volume"};
@@ -1204,6 +1199,21 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
       GTK_BOX(card),
       wrap_label("Общий уровень управляет обоими каналами. Голосовой чат — громкость собеседников; громкость микрофона не меняется.",
                  "clbb-muted"));
+  card = section(b, "Аудиоустройства");
+  gtk_box_append(GTK_BOX(card),wrap_label("Аудиовывод", "clbb-muted"));
+  s->audio_output=gtk_drop_down_new(NULL,NULL);g_object_set_data(G_OBJECT(s->audio_output),"clbb-settings-key","audio.output_device");gtk_box_append(GTK_BOX(card),s->audio_output);
+  gtk_box_append(GTK_BOX(card),wrap_label("Аудиовход · микрофон", "clbb-muted"));
+  s->audio_input=gtk_drop_down_new(NULL,NULL);g_object_set_data(G_OBJECT(s->audio_input),"clbb-settings-key","audio.input_device");gtk_box_append(GTK_BOX(card),s->audio_input);
+  g_signal_connect(s->audio_input,"notify::selected",G_CALLBACK(audio_selected),s);
+  g_signal_connect(s->audio_output,"notify::selected",G_CALLBACK(audio_selected),s);
+  GtkWidget *audio_scan=gtk_button_new_with_label("Обновить устройства");
+  gtk_widget_add_css_class(audio_scan,"clbb-secondary");
+  gtk_widget_set_halign(audio_scan,GTK_ALIGN_END);
+  gtk_widget_set_margin_top(audio_scan,8);
+  gtk_box_append(GTK_BOX(card),audio_scan);
+  g_signal_connect(audio_scan,"clicked",G_CALLBACK(audio_refresh_clicked),s);
+  s->audio_status=wrap_label("Поиск аудиоустройств…","clbb-muted");gtk_box_append(GTK_BOX(card),s->audio_status);
+  gtk_box_append(GTK_BOX(card),wrap_label("Выбор применяется только к CLBB. Включите микрофон в самой игре для голосового чата.","clbb-muted"));
   b = page(s, "hotkeys", "Горячие клавиши",
            "Системные действия можно назначить на удобные кнопки.");
   card = section(b, "Окно и курсор");
