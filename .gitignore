@@ -91,3 +91,8 @@
 
 # Android font compatibility links generated in a development checkout.
 /vendor/etc/
+
+# Local release workbench state; never ship private profiles or shortcut state.
+/.release-workflow.lock
+/.clbb-local-launch
+/.clbb-local-runtime.json

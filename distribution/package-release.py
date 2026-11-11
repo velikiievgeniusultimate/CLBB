@@ -69,7 +69,11 @@ def source_archive(destination,tag):
         for _name,relative,patch,_approved in module.SPECS:
             run('git','apply',str(ROOT/'patches'/patch),cwd=source/relative)
         (source/'SOURCE_RELEASE').write_text(tag+'\n')
+        (source/'SOURCE_REVISION').write_text(revision()+'\n')
         tar_tree(source,destination)
+
+def revision():
+    return subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -90,6 +94,7 @@ def main():
         stage=Path(temp)/'runtime';stage.mkdir()
         for name in ['VERSION','LICENSE','LICENSE_POLICY.md','LICENSES','THIRD_PARTY_NOTICES.txt','legal','README.md','README.en.md','env.sh','run-mlbb.sh','prepare-runtime.py','prepare-native-plugins.py','prepare-system-fonts.py']:
             copy(ROOT/name,stage/name)
+        (stage/'REVISION').write_text(revision()+'\n')
         for name in ['import_game.py','verify.py','game-apk.json','launch-fallback.py','native_libs.py','desktop_entry.py','device_identity.py','guest_root.py','moonton-email-login.js']:copy(ROOT/'distribution'/name,stage/'distribution'/name)
         for name,source_binary in [('clbb-launcher',ROOT/'launcher/target/release/clbb-launcher'),('clbb-manager',ROOT/'distribution/manager/target/release/clbb-manager')]:copy(source_binary,stage/'bin'/name)
         prefix=ROOT/'prefix'
@@ -121,7 +126,7 @@ def main():
                 needs=versions.split('Version needs section',1)[1]
                 for major,minor in re.findall(r'Name: GLIBC_(\d+)\.(\d+)\b',needs):maximum=max(maximum,(int(major),int(minor)))
         dependencies=[line.strip()for line in (ROOT/'distribution/arch-dependencies.txt').read_text().splitlines()if line.strip()and not line.startswith('#')]
-        info={'schema':1,'version':tag,'platform':'linux-x86_64','min_glibc':'.'.join(map(str,maximum)),
+        info={'schema':1,'source_commit':revision(),'version':tag,'platform':'linux-x86_64','min_glibc':'.'.join(map(str,maximum)),
               'arch_dependencies':dependencies,'game_included':False,'source_asset':source.name,
               'files':file_manifest(stage)}
         (stage/'release.json').write_text(json.dumps(info,indent=2)+'\n')

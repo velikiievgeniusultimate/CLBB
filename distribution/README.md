@@ -65,21 +65,58 @@ prefix по upstream-инструкциям. Первичный native bootstrap
 операцией; для изменения готового runtime используйте `build-runtime.sh`.
 Образцы установки и обновления проходят изолированные проверки без реального аккаунта.
 
-Порядок для сопровождающего:
+Рабочая копия исходников и запускаемый пакет теперь различаются явно. Ярлык
+разработчика запускает выбранный неизменный пакет из `~/.local/share/clbb-workbench/`,
+а его игровые данные остаются в прежней папке проекта. Сборочный `prefix/` не
+подменяет этот пакет. Локальная проверочная копия переключается через workbench;
+обновление через F7 предназначено для обычной установки тестера.
+
+Проверить исходники и выбранную локальную версию:
 
 ```sh
-python3 tools/export-runtime-patches.py --write
-python3 tools/collect-license-notices.py
-# Проверьте и зафиксируйте все исходники перед упаковкой соответствующего source archive.
-python3 distribution/package-release.py --output /tmp/clbb-release
-python3 distribution/package-release.py --source-only --output /tmp/clbb-release
-sha256sum /tmp/clbb-release/clbb-* > /tmp/clbb-release/SHA256SUMS
+python3 distribution/release.py status
 ```
 
-В публикуемом `SHA256SUMS` должны быть только базовые имена файлов, а не локальные
-пути: выполняйте финальную команду в каталоге релизных файлов. Релиз создаётся
-черновиком, загружаются все четыре файла, затем он публикуется. Нельзя удалять
-соответствующие исходники, пока раздаётся связанная с ними сборка.
+Порядок следующего выпуска:
+
+1. Изменить код и `VERSION` на новый номер. Выгрузить патчи и зафиксировать
+   исходники: `python3 tools/export-runtime-patches.py --write`, затем Git commit.
+   Убедиться, что нужные лицензии и уведомления обновлены.
+2. Собрать кандидата одной командой ниже. Перед сборкой закрыть локальную игру:
+   существующий сборочный скрипт проверяет использование библиотек. Первичная
+   подготовка зависимостей по-прежнему выполняется `build-from-source.sh`;
+   после смены upstream-версий сначала нужен полный bootstrap.
+3. Переключить локальный ярлык на кандидата и проверить реальную игру. Запись
+   `accept` — это описание реально проведённых проверок, а не замена тестированию.
+4. Опубликовать те же архивы. Повторная сборка между проверкой и публикацией не нужна.
+
+```sh
+python3 distribution/release.py prepare "$HOME/.local/share/clbb-candidates/v0.1.0-alpha.8"
+python3 distribution/release.py use-local "$HOME/.local/share/clbb-candidates/v0.1.0-alpha.8"
+# После реальных проверок указать их фактический результат:
+python3 distribution/release.py accept "$HOME/.local/share/clbb-candidates/v0.1.0-alpha.8" --note "Описать проверенные экраны и управление"
+python3 distribution/release.py publish "$HOME/.local/share/clbb-candidates/v0.1.0-alpha.8" --notes /absolute/path/release-notes.md
+```
+
+`prepare` требует чистые зафиксированные исходники и совпадение сохранённых патчей
+с внешними деревьями, собирает runtime, запускает проверки, создаёт бинарный пакет,
+соответствующие исходники и `SHA256SUMS`. `candidate.json` фиксирует коммит и хеши.
+Новые пакеты содержат `REVISION` и `source_commit` в `release.json`; номер коммита
+виден в F7 и через `clbb --build-info`. Старые выпуски этих полей не имели.
+
+`verify` проверяет архивы и извлечённый runtime, включая отсутствие лишних файлов.
+`use-local` сохраняет проверенную копию пакета в постоянную папку workbench,
+поэтому удаление временного каталога не ломает ярлык. `accept` привязывает запись
+проверки к хешам. `publish` отказывается публиковать изменившиеся файлы или другой
+коммит под существующим тегом; загружает все четыре файла в черновик, сверяет
+серверные хеши и требует успешные проверки GitHub. Прерванную загрузку черновика
+можно продолжить повторным `publish`.
+
+Для выбора уже опубликованного выпуска сначала скачать четыре его файла в одну
+папку, затем выполнить `import-release <папка> --tag <версия>` и `use-local <папка>`.
+Импорт сверяет хеши с GitHub и коммит тега. Соответствующие исходники нельзя удалять,
+пока раздаётся связанная с ними бинарная сборка. Инструмент не выполняет очистку
+игровых данных и никогда не добавляет их в публикуемые файлы.
 
 ## English
 
@@ -129,3 +166,23 @@ without installing and stage new artifacts using package-release.py flags
 Не заменяйте бинарники активной рабочей копии: эти флаги включают новые сборочные
 артефакты только в релизный архив. Обычная сборка из исходников устанавливает
 актуальные артефакты в prefix и в этих флагах не нуждается.
+
+### Maintainer workbench
+
+Use `python3 distribution/release.py status` to distinguish the source checkout
+from the selected local runtime. Developer shortcuts run an immutable package in
+`~/.local/share/clbb-workbench/` while keeping the existing project game profile.
+The development build prefix remains separate. Tester installations keep the
+normal F7 update flow; developer packages are selected through the workbench.
+
+Commit the changed code, exported patches and a new VERSION, then use the
+`prepare`, `use-local`, `accept --note`, and `publish --notes` commands shown above.
+Close the local game before rebuilding the prefix. Upstream dependency changes
+require the full source bootstrap first. Preparation runs checks and creates both
+binary and corresponding-source archives once. Candidates contain revision and
+asset hashes; local selection survives removal of temporary build directories.
+Actual game testing is required before recording acceptance. Publication uploads
+the exact accepted files as a draft, checks remote digests and successful GitHub
+checks, then publishes. Draft uploads can be resumed; existing published versions
+cannot be replaced. `import-release` verifies an existing release before local use.
+New packages expose the source revision in F7 and `clbb --build-info`.

@@ -11,7 +11,10 @@ impl Updates {
         let mut manager=std::env::var_os("CLBB_UPDATE_MANAGER").map(PathBuf::from).unwrap_or_default();
         if !manager.is_file(){if let Some(root)=root{manager=root.join("distribution/manager/target/release/clbb-manager");}}
         let managed=std::env::var("CLBB_MANAGED_INSTALL").as_deref()==Ok("1");
-        let version=std::env::var("CLBB_RELEASE_VERSION").unwrap_or_else(|_|"dev".into());
+        let mut version=std::env::var("CLBB_RELEASE_VERSION").unwrap_or_else(|_|"dev".into());
+        if let Ok(revision)=std::env::var("CLBB_RELEASE_REVISION") {
+            if revision.len()==40 && revision.bytes().all(|c|c.is_ascii_hexdigit()) { version.push_str(&format!(" · {}",&revision[..12])); }
+        }
         Self {state:Arc::new(Mutex::new(State{status:if managed{"Нажмите «Проверить обновления»."}else{"Версия из исходников. Автообновление доступно после установки CLBB установщиком."}.into(),..Default::default()})),manager,managed,version}
     }
     pub fn read(&self,key:&str)->String {

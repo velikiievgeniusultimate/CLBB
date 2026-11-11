@@ -4,10 +4,12 @@ from pathlib import Path
 import json,os,signal,time,subprocess
 ROOT=Path(__file__).resolve().parents[1]
 pid=json.loads((ROOT/'logs/current-atl-pid.json').read_text())['pid']
-proc=Path('/proc',str(pid));expected=ROOT/'prefix/bin/android-translation-layer'
+proc=Path('/proc',str(pid))
+from runtime_identity import runtime_executable_is_owned
 def identity():
  try:
-  if (proc/'exe').resolve(strict=True)!=expected:raise RuntimeError('Recorded PID is not owned ATL')
+  if not (proc/'exe').exists():return None
+  if not runtime_executable_is_owned(pid,ROOT):raise RuntimeError('Recorded PID is not owned ATL')
   stat=(proc/'stat').read_text().rsplit(')',1)[1].split()
   if stat[0] in ('Z','X','x'):return None
   return stat[19]

@@ -115,6 +115,13 @@ fn main() {
         })();
         if let Err(e)=result{eprintln!("CLBB diagnostics: {e}");std::process::exit(1);}return;
     }
+    if args.first().map(String::as_str)==Some("--build-info") {
+        let info=runtime_root().ok().map(|root|serde_json::json!({
+            "version":fs::read_to_string(root.join("VERSION")).unwrap_or_default().trim(),
+            "source_commit":fs::read_to_string(root.join("REVISION")).unwrap_or_default().trim(),
+            "runtime":root}));
+        println!("{}",info.unwrap_or(serde_json::Value::Null));return;
+    }
     if args.first().map(String::as_str)==Some("--version") {
         match runtime_root().and_then(|r|fs::read_to_string(r.join("VERSION"))) {Ok(v)=>print!("CLBB {}",v),Err(_)=>println!("CLBB dev")};return;
     }

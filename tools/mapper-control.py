@@ -3,7 +3,8 @@
 import json,os,pathlib,socket,sys
 root=pathlib.Path(__file__).resolve().parents[1]
 pid=json.loads((root/'logs/current-atl-pid.json').read_text())['pid']
-if pathlib.Path(f'/proc/{pid}/exe').resolve()!=root/'prefix/bin/android-translation-layer':
+from runtime_identity import runtime_executable_is_owned
+if not runtime_executable_is_owned(pid,root):
     raise SystemExit('Owned ATL identity changed')
 path=pathlib.Path(os.environ.get('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}'))/'clbb'/f'mapper-{pid}.sock'
 command=' '.join(sys.argv[1:])

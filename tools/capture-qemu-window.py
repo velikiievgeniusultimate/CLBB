@@ -19,7 +19,8 @@ import re
 if not re.fullmatch(r':[0-9]{1,5}(?:\.[0-9]{1,3})?', options.display):
     raise SystemExit('Explicit local X11 display required')
 pid = options.pid or json.loads((root / 'logs/current-atl-pid.json').read_text())['pid']
-if pathlib.Path('/proc', str(pid), 'exe').resolve() != root / 'prefix/bin/android-translation-layer':
+from runtime_identity import runtime_executable_is_owned
+if not runtime_executable_is_owned(pid, root):
     raise SystemExit('Runtime identity mismatch')
 X = C.CDLL(ctypes.util.find_library('X11'))
 D, W, I, U = C.c_void_p, C.c_ulong, C.c_int, C.c_uint

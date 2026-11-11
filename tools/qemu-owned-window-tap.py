@@ -19,7 +19,8 @@ def verify():
     proc = Path('/proc',str(a.pid))
     f = (proc/'stat').read_text().rsplit(')',1)[1].split()
     assert f[0] not in ('Z','X','x') and int(f[19]) == a.birth_ticks
-    assert (proc/'exe').resolve(strict=True) == R/'prefix/bin/android-translation-layer'
+    from runtime_identity import runtime_executable_is_owned
+    assert runtime_executable_is_owned(a.pid, R)
 
 verify()
 path = Path('/run/user',str(os.getuid()),'clbb',f'mapper-{a.pid}.sock')
