@@ -211,3 +211,22 @@ bash launcher/check-update-handoff.sh
 bash mapper/ui/check-update-window.sh
 bash mapper/ui/check-preview.sh
 ```
+
+## Первый переход со старых выпусков / First upgrade from older releases
+
+Сначала закройте игру. Для alpha.6/7 используйте свежий установщик поверх текущей
+обычной установки; старый встроенный распаковщик не принимает файл REVISION новых
+пакетов. Та же команда подходит alpha.8. Ничего удалять не нужно: существующие APK,
+аккаунт и настройки сохраняются. Для установки в нестандартный каталог укажите
+тот же CLBB_INSTALL_ROOT, что использовался ранее.
+
+```sh
+curl -fL --progress-bar https://raw.githubusercontent.com/velikiievgeniusultimate/CLBB/main/install.sh | sh
+```
+
+Close the game first. For alpha.6/7, rerun the current installer over the existing
+managed installation: their embedded extractor rejects REVISION in new packages.
+The command above also works for alpha.8. Do not uninstall or clear data; existing
+APK/account/settings are retained. Keep the original CLBB_INSTALL_ROOT for a custom
+installation location. Alpha.8 also supports `~/.local/bin/clbb --update`; after the
+first upgrade, use the new F7 → Main update window.
