@@ -1,5 +1,5 @@
 diff --git a/meson.build b/meson.build
-index 2c31844..b961470 100644
+index 2c31844..5df47c8 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -107,6 +107,13 @@ upcalls_header = declare_dependency(sources: upcalls_header_tgt)
@@ -62,7 +62,7 @@ index 2c31844..b961470 100644
                                          install: true,
                                          dependencies: [
 -                                        	dependency('gtk4'), dependency('jni'), declare_dependency(link_with: libtranslationlayer_so), libart_dep, dependency('dl'), libdl_bio_dep, libc_bio_dep, dependency('libportal'), dependency('fontconfig'), upcalls_header
-+                                        	dependency('gtk4'), dependency('jni'), declare_dependency(link_with: libtranslationlayer_so), libart_dep, dependency('dl'), libdl_bio_dep, libc_bio_dep, dependency('libportal'), dependency('fontconfig'), dependency('x11'), upcalls_header
++                                        	dependency('gtk4'), dependency('jni'), declare_dependency(link_with: libtranslationlayer_so), libart_dep, dependency('dl'), libdl_bio_dep, libc_bio_dep, dependency('libportal'), dependency('fontconfig'), dependency('x11'), cc.find_library('m'), upcalls_header
                                          ],
                                          link_args: [
                                          	'-rdynamic'
@@ -5910,10 +5910,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..b911b2c
+index 0000000..3638783
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,878 @@
+@@ -0,0 +1,877 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -6112,21 +6112,8 @@ index 0000000..b911b2c
 +    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(h->window));
 +    if (!GDK_IS_X11_SURFACE(surface))
 +        return FALSE;
-+    GtkWidget *game = game_surface(GTK_WIDGET(h->window));
-+    if (!game || !gtk_widget_get_mapped(game))
++    if (!clbb_viewport_get_surface_content_rect(h->viewport,rect))
 +        return FALSE;
-+    graphene_point_t p, end;
-+    if (!gtk_widget_compute_point(game, GTK_WIDGET(h->window),
-+                                  &GRAPHENE_POINT_INIT(0, 0), &p) ||
-+        !gtk_widget_compute_point(
-+            game, GTK_WIDGET(h->window),
-+            &GRAPHENE_POINT_INIT(gtk_widget_get_width(game),
-+                                 gtk_widget_get_height(game)), &end))
-+        return FALSE;
-+    double off_x = 0, off_y = 0;
-+    gtk_native_get_surface_transform(GTK_NATIVE(h->window), &off_x, &off_y);
-+    *rect = (GdkRectangle){(int)(p.x + off_x), (int)(p.y + off_y),
-+                            (int)(end.x - p.x), (int)(end.y - p.y)};
 +    if (rect->width < 32 || rect->height < 32)
 +        return FALSE;
 +    *xid = gdk_x11_surface_get_xid(surface);
@@ -6180,10 +6167,14 @@ index 0000000..b911b2c
 +    Window root, child;
 +    int rx, ry, px, py;
 +    unsigned mask;
++    GdkSurface *surface=gtk_native_get_surface(GTK_NATIVE(h->window));
++    int scale=gdk_surface_get_scale_factor(surface);
 +    if (!XQueryPointer(display, xid, &root, &child, &rx, &ry, &px, &py, &mask) ||
-+        px < rect.x || py < rect.y || px >= rect.x + rect.width ||
-+        py >= rect.y + rect.height)
++        px < 0 || py < 0 || px >= gdk_surface_get_width(surface)*scale ||
++        py >= gdk_surface_get_height(surface)*scale)
 +        return;
++    // Explicit F12 in a letterbox/header still activates confinement. X11
++    // brings the pointer into the game rectangle as part of this grab.
 +    h->display = display;
 +    h->fence_parent = xid;
 +    h->fence_rect = rect;
@@ -6509,6 +6500,14 @@ index 0000000..b911b2c
 +                game ? gtk_widget_get_width(game) : 0, game ? gtk_widget_get_height(game) : 0,
 +                rect.origin.x, rect.origin.y, rect.size.width, rect.size.height,
 +                gtk_window_is_fullscreen(h->window));
++        } else if (count == 2 && strcmp(args[0], "read") == 0 &&
++                   strcmp(args[1], "diagnostics.cursor_fence") == 0) {
++            GdkRectangle rect; Window xid; Display *display;
++            gboolean valid = fence_geometry(h, &rect, &xid, &display);
++            reply = valid ? g_strdup_printf("{\"rect\":[%d,%d,%d,%d],\"locked\":%s,\"scale\":%d}",
++                rect.x,rect.y,rect.width,rect.height,h->locked ? "true":"false",
++                gdk_surface_get_scale_factor(gtk_native_get_surface(GTK_NATIVE(h->window))))
++                : g_strdup("{\"rect\":null,\"locked\":false}");
 +        } else if (count == 2 && strcmp(args[0], "fullscreen") == 0 &&
 +                   (strcmp(args[1], "1") == 0 || strcmp(args[1], "0") == 0)) {
 +            gboolean desired = strcmp(args[1], "1") == 0;

@@ -68,6 +68,17 @@ static void check_allocation(GtkWidget *viewport, GtkWidget *stack,
         g_assert_true(gtk_widget_pick(viewport, 0.5, height/2., GTK_PICK_DEFAULT) == viewport);
     if (rect.origin.y>1.)
         g_assert_true(gtk_widget_pick(viewport, width/2., 0.5, GTK_PICK_DEFAULT) == viewport);
+    GdkRectangle fence;
+    g_assert_true(clbb_viewport_get_surface_content_rect(viewport,&fence));
+    graphene_point_t native_origin;
+    GtkNative *root=gtk_widget_get_native(viewport);
+    g_assert_true(gtk_widget_compute_point(viewport,GTK_WIDGET(root),&rect.origin,&native_origin));
+    double ox=0,oy=0;gtk_native_get_surface_transform(root,&ox,&oy);
+    int factor=gdk_surface_get_scale_factor(gtk_native_get_surface(root));
+    g_assert_cmpint(fence.x,==,(int)ceil((native_origin.x+ox)*factor));
+    g_assert_cmpint(fence.y,==,(int)ceil((native_origin.y+oy)*factor));
+    g_assert_cmpint(fence.width,<=,(int)ceil(rect.size.width*factor));
+    g_assert_cmpint(fence.height,<=,(int)ceil(rect.size.height*factor));
     g_print("CLBB_VIEWPORT_OK physical=%dx%d logical=%dx%d content=%.3f,%.3f %.3fx%.3f\n",
             width,height,logical_width,logical_height,rect.origin.x,rect.origin.y,rect.size.width,rect.size.height);
 }
@@ -106,6 +117,19 @@ int main(void)
     clbb_viewport_set_resolution(viewport,1920,1080);
     gtk_window_set_default_size(GTK_WINDOW(window),800,600);
     check_allocation(viewport,stack,next,800,600,1920,1080);
+    /* Window title/header controls never belong to the game fence. */
+    GtkWidget *framed=gtk_window_new();gtk_window_set_decorated(GTK_WINDOW(framed),FALSE);
+    GtkWidget *column=gtk_box_new(GTK_ORIENTATION_VERTICAL,0);
+    GtkWidget *header=gtk_drawing_area_new();gtk_widget_set_size_request(header,-1,48);
+    GtkWidget *content=clbb_viewport_new(gtk_drawing_area_new(),4000,3111);
+    gtk_box_append(GTK_BOX(column),header);gtk_box_append(GTK_BOX(column),content);
+    gtk_window_set_child(GTK_WINDOW(framed),column);gtk_window_set_default_size(GTK_WINDOW(framed),800,600);
+    gtk_window_present(GTK_WINDOW(framed));wait_size(content,800,552);
+    GdkRectangle confined;g_assert_true(clbb_viewport_get_surface_content_rect(content,&confined));
+    g_assert_cmpint(confined.y,>=,48);g_assert_cmpint(confined.x,>,0);
+    g_assert_cmpint(confined.y+confined.height,<=,600);
+    g_print("CLBB_FENCE_HEADER_OK rect=%d,%d %dx%d\n",confined.x,confined.y,confined.width,confined.height);
+    gtk_window_destroy(GTK_WINDOW(framed));
     gboolean viewport_gone=FALSE, stack_gone=FALSE, first_gone=FALSE, next_gone=FALSE;
     g_object_weak_ref(G_OBJECT(viewport),destroyed,&viewport_gone);
     g_object_weak_ref(G_OBJECT(stack),destroyed,&stack_gone);

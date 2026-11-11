@@ -15,4 +15,7 @@ void clbb_viewport_get_resolution(GtkWidget *widget, int *width, int *height);
  * Returns FALSE until the viewport has a nonzero allocation. */
 gboolean clbb_viewport_get_content_rect(GtkWidget *widget, graphene_rect_t *rect);
 
+/* Inward-rounded content bounds in native surface device pixels, excluding CSD. */
+gboolean clbb_viewport_get_surface_content_rect(GtkWidget *widget, GdkRectangle *rect);
+
 G_END_DECLS

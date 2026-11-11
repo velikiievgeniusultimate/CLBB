@@ -1,6 +1,7 @@
 /* CLBB-owned fixed Android logical viewport. GTK carries the transform through
  * rendering, picking and compute_point; input does not need a second mapping. */
 #include "clbb-viewport.h"
+#include <math.h>
 
 struct _ClbbViewport {
     GtkWidget parent_instance;
@@ -138,4 +139,23 @@ gboolean clbb_viewport_get_content_rect(GtkWidget *widget, graphene_rect_t *rect
     g_return_val_if_fail(rect != NULL, FALSE);
     return content_rect(CLBB_VIEWPORT(widget), gtk_widget_get_width(widget),
                         gtk_widget_get_height(widget), rect, NULL);
+}
+
+gboolean clbb_viewport_get_surface_content_rect(GtkWidget *widget, GdkRectangle *rect)
+{
+    graphene_rect_t content;
+    GtkNative *native=gtk_widget_get_native(widget);
+    GdkSurface *surface=native ? gtk_native_get_surface(native) : NULL;
+    if (!surface || !gtk_widget_get_mapped(widget) ||
+        !clbb_viewport_get_content_rect(widget,&content)) return FALSE;
+    graphene_point_t p,end;
+    if (!gtk_widget_compute_point(widget,GTK_WIDGET(native),&content.origin,&p) ||
+        !gtk_widget_compute_point(widget,GTK_WIDGET(native),
+            &GRAPHENE_POINT_INIT(content.origin.x+content.size.width,content.origin.y+content.size.height),&end)) return FALSE;
+    double x=0,y=0;gtk_native_get_surface_transform(native,&x,&y);
+    int scale=gdk_surface_get_scale_factor(surface);
+    int left=(int)ceil((p.x+x)*scale),top=(int)ceil((p.y+y)*scale);
+    int right=(int)floor((end.x+x)*scale),bottom=(int)floor((end.y+y)*scale);
+    *rect=(GdkRectangle){left,top,right-left,bottom-top};
+    return rect->width>0 && rect->height>0;
 }

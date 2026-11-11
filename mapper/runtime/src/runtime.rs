@@ -330,8 +330,9 @@ impl Host for Adapter {
     fn skill_direction_world(&mut self,p:Point,skill:i32)->Option<Point> {
         let (visual,hero,view,projection,token)={let s=self.fresh()?;(s.direction_visual,s.frame.hero_render_xyz.values.map(|n|n.value),s.frame.view_matrix.values.map(|n|n.value),s.projection,s.frame.token)};
         if let Some(spec)=visual.filter(|v|v.skill==skill) {
-            let offset=self.wall_surface.offset(token.as_str(),hero,spec.wall);
+            let offset=self.wall_surface.offset_for_input(token.as_str(),hero,spec.wall,p,spec.observed);
             let direction=projection::direction_input(&view,&projection,hero,p,spec,offset)?;
+            if self.recorder.is_enabled() {self.recorder.push(now_ns(),"direction_projection",serde_json::json!({"skill":skill,"pointer":[p.x,p.y],"hero":hero,"wall_offset":[offset.x,offset.y],"native_wall_hit":spec.wall.is_some(),"direction":[direction.x,direction.y],"observed":spec.observed,"surface_y":spec.surface_y,"epoch":token.as_str()}));}
             return Some(Point::new(hero[0]+direction.x,hero[2]+direction.y));
         }
         if skill==8410{return None;}

@@ -81,3 +81,9 @@ When DOWN did not open an indicator, ordinary direction UP may use the owned
 current button geometry/camera from a frame no older than 100 ms. It still sends
 final MOVE then UP and is not a native aim receipt. Held/instant gestures and a
 changed range form cannot use this path. Trace: `final_geometry_from_fresh_button`.
+
+`direction_projection` records the actual computed direction and wall correction
+for native visual skills. A learned face correction survives HIT/MISS preview
+changes only while cursor/caster/scene/surface identity stay unchanged; camera
+projection remains live. Pointer/caster movement, scene/owner/pose changes or an
+unobserved preview invalidate this input anchor immediately.

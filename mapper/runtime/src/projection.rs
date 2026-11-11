@@ -67,11 +67,11 @@ pub fn ray(inverse: &[f64; 16], p: Point) -> Option<Ray> {
         direction: std::array::from_fn(|i| far[i] - near[i]),
     })
 }
-#[derive(Clone,Copy,Debug,serde::Serialize)]
+#[derive(Clone,Copy,Debug,serde::Serialize,serde::Deserialize)]
 pub struct WallHit {pub owner:u64,pub native:u64,pub pose:[f64;12],pub point:[f64;3],pub radius:f64,pub width:f64,pub direction:[f64;2]}
 /// Native arrow geometry. Offsets are world-space values read in the same
 /// coherent sample as the caster and camera, never fixed pixel corrections.
-#[derive(Clone,Copy,Debug,serde::Serialize)]
+#[derive(Clone,Copy,Debug,serde::Serialize,serde::Deserialize)]
 pub struct DirectionVisual { pub skill:i32, pub range:f64, pub start:[f64;3], pub end:[f64;3], pub observed:bool, pub target:Option<[f64;3]>, pub wall:Option<WallHit>, pub angular_cell:f64, pub surface_y:Option<f64>, pub envelope_range:f64, pub envelope_end:[f64;3] }
 impl DirectionVisual {
     pub fn new(skill:i32,range:f64,start:[f64;3],end:[f64;3])->Self {Self{skill,range,start,end,observed:false,target:None,wall:None,angular_cell:0.,surface_y:None,envelope_range:range,envelope_end:end}}
@@ -81,8 +81,24 @@ impl DirectionVisual {
 /// Only the swept contact offset changes the physical origin. No wall target
 /// projection, reach clamp or selected-point lock is applied to cursor intent.
 #[derive(Default)]
-pub struct WallSurface {epoch:String,key:Option<(u64,u64)>,pose:Option<[f64;12]>,a:Option<[f64;3]>,b:Option<[f64;3]>}
+pub struct WallSurface {epoch:String,key:Option<(u64,u64)>,pose:Option<[f64;12]>,a:Option<[f64;3]>,b:Option<[f64;3]>,input_anchor:Option<(Point,[f64;3],Point)>}
 impl WallSurface {
+    /// Preserve an established face correction across HIT/MISS preview toggles
+    /// for stationary input/caster. Camera is deliberately NOT cached: its fresh
+    /// inverse projection still runs below. New input, caster, scene, owner or
+    /// pose invalidates the preview anchor immediately, without a time delay.
+    pub fn offset_for_input(&mut self,epoch:&str,hero:[f64;3],hit:Option<WallHit>,pointer:Point,observed:bool)->Point {
+        let same_input=self.input_anchor.is_some_and(|(p,h,_)|
+            (p.x-pointer.x).abs()<1e-10&&(p.y-pointer.y).abs()<1e-10&&
+            (0..3).all(|i|(h[i]-hero[i]).abs()<1e-6));
+        let same_surface=hit.is_none_or(|h|self.key==Some((h.owner,h.native))&&self.pose==Some(h.pose));
+        if !observed||!same_input||!same_surface||self.epoch!=epoch {self.input_anchor=None;}
+        let offset=self.offset(epoch,hero,hit);
+        if observed && offset.x.hypot(offset.y)>1e-8 {
+            self.input_anchor=Some((pointer,hero,offset));
+        }
+        self.input_anchor.map_or(offset,|(_,_,value)|value)
+    }
     pub fn offset(&mut self,epoch:&str,hero:[f64;3],hit:Option<WallHit>)->Point {
         if self.epoch!=epoch {*self=Self::default();self.epoch=epoch.into();}
         let Some(h)=hit else{return Point::default();};
@@ -152,6 +168,36 @@ pub fn visual_direction(view:&[f64;16],projection:&[f64;16],hero:[f64;3],pointer
 mod tests {
     use super::*;
     #[test]
+    fn stationary_recorded_cursor_does_not_toggle_wall_face_correction_on_miss() {
+        let frames:serde_json::Value=serde_json::from_str(include_str!("../test-data/ling-stationary-hit-miss.json")).unwrap();
+        let mut old=WallSurface::default();let mut fixed=WallSurface::default();
+        let mut previous:Option<(Point,Point)>=None;let mut old_jump=0f64;let mut new_jump=0f64;let mut count=0;
+        for f in frames.as_array().unwrap() {
+            let view=serde_json::from_value(f["view"].clone()).unwrap();
+            let projection=serde_json::from_value(f["projection"].clone()).unwrap();
+            let hero=serde_json::from_value(f["hero"].clone()).unwrap();
+            let pointer:[f64;2]=serde_json::from_value(f["pointer"].clone()).unwrap();let pointer=Point::new(pointer[0],pointer[1]);
+            let spec:DirectionVisual=serde_json::from_value(f["spec"].clone()).unwrap();
+            let a=old.offset("replay",hero,spec.wall);
+            let b=fixed.offset_for_input("replay",hero,spec.wall,pointer,spec.observed);
+            let a=direction_input(&view,&projection,hero,pointer,spec,a).unwrap();
+            let b=direction_input(&view,&projection,hero,pointer,spec,b).unwrap();
+            if fixed.input_anchor.is_some() {
+                if let Some((pa,pb))=previous {
+                    old_jump=old_jump.max((pa.x*a.x+pa.y*a.y).clamp(-1.,1.).acos().to_degrees());
+                    new_jump=new_jump.max((pb.x*b.x+pb.y*b.y).clamp(-1.,1.).acos().to_degrees());count+=1;
+                }
+                previous=Some((a,b));
+            }
+        }
+        eprintln!("STATIONARY_REPLAY pairs={count} old_jump_deg={old_jump:.6} new_jump_deg={new_jump:.6}");
+        assert!(count>80);assert!(old_jump>1.);assert!(new_jump<old_jump*0.5);
+        let f=&frames[frames.as_array().unwrap().len()-1];let hero=serde_json::from_value(f["hero"].clone()).unwrap();
+        let p=Point::new(0.21766094863414764,0.6214907765388489);
+        assert!(fixed.offset_for_input("replay",hero,None,p,true).x.hypot(fixed.input_anchor.unwrap().2.y)>0.01);
+        assert_eq!(fixed.offset_for_input("replay",hero,None,Point::new(p.x+0.01,p.y),true),Point::default(),"new cursor remains free");
+    }
+    #[test]
     fn actual_recorded_marker_center_reconstructs_native_heading() {
         let frames:serde_json::Value=serde_json::from_str(include_str!("../test-data/ling-marker-center.json")).unwrap();
         let mut worst=1f64;let mut old_bad=0;
@@ -169,6 +215,13 @@ mod tests {
             assert!((offset.x.hypot(offset.y)-width).abs()<1e-8);
             let p=crate::math::project(&view,&projection,point,false).unwrap();
             let mut spec=DirectionVisual::new(8410,12.,[0.;3],[0.,1.5,0.]);spec.surface_y=Some(point[1]);
+            let cursor=Point::new(p[0],p[1]);
+            assert_eq!(surface.offset_for_input("scene",hero,Some(hit),cursor,true),offset);
+            assert_eq!(surface.offset_for_input("scene",hero,None,cursor,true),offset);
+            assert_eq!(surface.offset_for_input("scene",hero,None,cursor,false),Point::default());
+            surface.offset_for_input("scene",hero,Some(hit),cursor,true);
+            let moved=[hero[0]+0.1,hero[1],hero[2]];
+            assert_eq!(surface.offset_for_input("scene",moved,None,cursor,true),Point::default());
             let direction=direction_input(&view,&projection,hero,Point::new(p[0],p[1]),spec,offset).unwrap();
             let old=visual_direction(&view,&projection,hero,Point::new(p[0],p[1]),spec.envelope()).unwrap();
             if old.x*native[0]+old.y*native[1]<0.9999619230641713{old_bad+=1;}
