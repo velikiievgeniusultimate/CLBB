@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Exercise the actual shell installer with isolated release/network fixtures."""
-import hashlib,json,os,re
+import hashlib,json,os
 from pathlib import Path
 import subprocess,sys,tempfile,unittest
 ROOT=Path(__file__).resolve().parents[2]
@@ -29,17 +29,11 @@ flag='--output'if '--output'in args else '-o';shutil.copyfile(p/name,args[args.i
             env=os.environ.copy()
             for key in ['CLBB_APK_FILE','CLBB_APK_URL','CLBB_APK_SHA256','CLBB_INSTALL_GAME','CLBB_STATE_ROOT']:env.pop(key,None)
             env.update(HOME=str(home),CLBB_INSTALL_ROOT=str(install),CLBB_FIXTURE=str(p),PATH=str(bin)+':'+env['PATH']);env.update(override or {})
-            candidate=p/'install-candidate.sh'
-            candidate.write_text(re.sub(r'# BEGIN INSTALLATION SUSPENSION.*?# END INSTALLATION SUSPENSION\n','',(ROOT/'install.sh').read_text(),flags=re.S))
-            result=subprocess.run(['sh',str(candidate)],env=env,capture_output=True,text=True,timeout=10)
+            result=subprocess.run(['sh',str(ROOT/'install.sh')],env=env,capture_output=True,text=True,timeout=10)
             calls=[json.loads(line)for line in (p/'calls').read_text().splitlines()]if(p/'calls').exists()else[]
             requests=(p/'requests').read_text().splitlines()if(p/'requests').exists()else[]
             preserved=(install/'state/game/base.apk').read_bytes()if existing else None
             return result,calls,requests,preserved
-    def test_public_installer_is_suspended_during_isolation_audit(self):
-        result=subprocess.run(['sh',str(ROOT/'install.sh')],capture_output=True,text=True)
-        self.assertNotEqual(result.returncode,0)
-        self.assertIn('Installation suspended',result.stderr)
     def test_clean_install_automatically_requests_apk_import(self):
         result,calls,requests,_=self.run_installer();self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(calls,[['--install'],['--import-game-url','https://fixture.invalid/game.apk','a'*64]])
