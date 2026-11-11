@@ -943,7 +943,7 @@ index 0098b29..5e870c7 100644
  
  void helper_hw_params_init(snd_pcm_t *pcm_handle, snd_pcm_hw_params_t *params, unsigned int rate, int channel_config, snd_pcm_format_t format, unsigned int *channels);
 diff --git a/src/api-impl-jni/generated_headers/android_media_AudioRecord.h b/src/api-impl-jni/generated_headers/android_media_AudioRecord.h
-index d62463b..eb62e71 100644
+index d62463b..84a4565 100644
 --- a/src/api-impl-jni/generated_headers/android_media_AudioRecord.h
 +++ b/src/api-impl-jni/generated_headers/android_media_AudioRecord.h
 @@ -13,6 +13,16 @@ extern "C" {
@@ -963,6 +963,18 @@ index d62463b..eb62e71 100644
  /*
   * Class:     android_media_AudioRecord
   * Method:    native_constructor
+@@ -24,9 +34,9 @@ JNIEXPORT jlong JNICALL Java_android_media_AudioRecord_native_1constructor
+ /*
+  * Class:     android_media_AudioRecord
+  * Method:    native_record
+- * Signature: (J)V
++ * Signature: (J)I
+  */
+-JNIEXPORT void JNICALL Java_android_media_AudioRecord_native_1record
++JNIEXPORT jint JNICALL Java_android_media_AudioRecord_native_1record
+   (JNIEnv *, jobject, jlong);
+ 
+ /*
 @@ -40,10 +50,10 @@ JNIEXPORT void JNICALL Java_android_media_AudioRecord_native_1stop
  /*
   * Class:     android_media_AudioRecord
@@ -2737,10 +2749,10 @@ index 7d7213e..243d770 100644
  				LayerDrawable drawable = new LayerDrawable();
  				drawable.inflate(resources, parser, attrs, theme);
 diff --git a/src/api-impl/android/media/AudioRecord.java b/src/api-impl/android/media/AudioRecord.java
-index ae1144c..5b0d714 100644
+index ae1144c..99bb2ad 100644
 --- a/src/api-impl/android/media/AudioRecord.java
 +++ b/src/api-impl/android/media/AudioRecord.java
-@@ -6,6 +6,9 @@ public class AudioRecord {
+@@ -6,20 +6,25 @@ public class AudioRecord {
  	public static final int RECORDSTATE_RECORDING = 3;
  
  	public static final int ERROR_BAD_VALUE = -2;
@@ -2750,8 +2762,9 @@ index ae1144c..5b0d714 100644
  
  	private long pcm_handle;
  	private int channels; // set by native constructor
-@@ -13,9 +16,9 @@ public class AudioRecord {
+ 	private int recordingState = RECORDSTATE_STOPPED;
  	private int sampleRateInHz;
++    private int bufferSizeInBytes;
  
  	private native long native_constructor(int streamType, int sampleRateInHz, int num_channels, int audioFormat, int bufferSizeInBytes);
 -	private native void native_record(long pcm_handle);
@@ -2762,7 +2775,12 @@ index ae1144c..5b0d714 100644
  	private native void native_release(long pcm_handle);
  
  	public AudioRecord(int streamType, int sampleRateInHz, int channelConfig, int audioFormat, int bufferSizeInBytes) {
-@@ -30,19 +33,27 @@ public class AudioRecord {
+ 		this.sampleRateInHz = sampleRateInHz;
++        this.bufferSizeInBytes = bufferSizeInBytes;
+ 		pcm_handle = native_constructor(streamType, sampleRateInHz, channelConfig, audioFormat, bufferSizeInBytes);
+ 	}
+ 
+@@ -30,19 +35,28 @@ public class AudioRecord {
  	}
  
  	public int getState() {
@@ -2772,6 +2790,7 @@ index ae1144c..5b0d714 100644
  
 -	public int getRecordingState() {
 +	public int getChannelCount() {return channels;}
++ public int getBufferSizeInFrames() {return channels > 0 ? bufferSizeInBytes / (2 * channels) : 0;}
 + public int getAudioFormat() {return 2;}
 + public int getAudioSessionId() {return 1;}
 + public int getAudioSource() {return 1;}
@@ -2795,7 +2814,7 @@ index ae1144c..5b0d714 100644
  		/* sanity check the parameters before calling native_write */
  		if ((audioData == null)
  		    || (offsetInShorts < 0) || (sizeInShorts < 0)
-@@ -51,17 +62,36 @@ public class AudioRecord {
+@@ -51,17 +65,36 @@ public class AudioRecord {
  			return ERROR_BAD_VALUE;
  		}
  

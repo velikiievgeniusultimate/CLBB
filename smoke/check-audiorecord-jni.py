@@ -15,7 +15,7 @@ public class Test {
   check(AudioRecord.getMinBufferSize(48000,16,2)==1920);
   check(AudioRecord.getMinBufferSize(48000,123,2)==-2);
   AudioRecord invalid=new AudioRecord(1,48000,123,2,1920);check(invalid.getState()==0);check(invalid.read(new short[10],0,10)==-3);invalid.release();
-  AudioRecord a=new AudioRecord(1,48000,16,2,1920);check(a.getState()==1);a.startRecording();check(a.getRecordingState()==3);
+  AudioRecord a=new AudioRecord(1,48000,16,2,1920);check(a.getState()==1);check(a.getBufferSizeInFrames()==960);a.startRecording();check(a.getRecordingState()==3);
   short[] s=new short[12];check(a.read(s,2,6)==6);check(s[0]==0&&s[2]==0x1234&&s[7]==0x1234&&s[8]==0);check(a.read(s,Integer.MAX_VALUE,10)==-2);
   byte[] b=new byte[14];check(a.read(b,2,8)==8);check(b[2]==0x34&&b[3]==0x12&&b[10]==0);
   ByteBuffer direct=ByteBuffer.allocateDirect(10);direct.position(3);check(a.read(direct,8)==8);check(direct.position()==3&&direct.get(0)==0x34&&direct.get(1)==0x12);check(a.read(ByteBuffer.allocate(10),8)==-2);
