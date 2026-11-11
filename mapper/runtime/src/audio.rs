@@ -597,3 +597,17 @@ mod ownership_tests {
         assert!(s[0]["properties"]["application.process.id"].is_null());
     }
 }
+
+// Android stream volume belongs to the virtual application, never the host mixer.
+static STREAM_VOLUME: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(100);
+#[unsafe(no_mangle)]
+pub extern "C" fn clbb_audio_stream_volume() -> i32 {
+    STREAM_VOLUME.load(std::sync::atomic::Ordering::Relaxed)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn clbb_audio_set_stream_volume(value: i32) {
+    STREAM_VOLUME.store(value.clamp(0, 100), std::sync::atomic::Ordering::Relaxed);
+}
+pub fn stream_gain() -> f32 {
+    clbb_audio_stream_volume() as f32 / 100.0
+}

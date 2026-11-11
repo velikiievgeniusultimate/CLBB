@@ -28,7 +28,7 @@ type Touch = unsafe extern "C" fn(*mut c_void, i32, i32, f64, f64) -> i32;
 static GAIN: AtomicU32 = AtomicU32::new(1f32.to_bits());
 #[unsafe(no_mangle)]
 pub extern "C" fn clbb_audio_gain() -> f32 {
-    f32::from_bits(GAIN.load(Ordering::Relaxed))
+    f32::from_bits(GAIN.load(Ordering::Relaxed)) * crate::audio::stream_gain()
 }
 #[derive(Default)]
 struct Shared {

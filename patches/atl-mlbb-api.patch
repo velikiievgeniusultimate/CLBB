@@ -609,6 +609,59 @@ index 3eb505c..34a72dc 100644
  }
  
  JNIEXPORT void JNICALL Java_android_app_Dialog_nativeShow(JNIEnv *env, jobject this, jlong ptr)
+diff --git a/src/api-impl-jni/audio/android_media_AudioManager.c b/src/api-impl-jni/audio/android_media_AudioManager.c
+index d0e27de..a80def3 100644
+--- a/src/api-impl-jni/audio/android_media_AudioManager.c
++++ b/src/api-impl-jni/audio/android_media_AudioManager.c
+@@ -1,42 +1,9 @@
+-#include <alsa/asoundlib.h>
+-#include <gio/gio.h>
+-#include <stdio.h>
+-
++#include <dlfcn.h>
+ #include "../generated_headers/android_media_AudioManager.h"
+-
+-static void set_stream_volume(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable)
+-{
+-	snd_mixer_t *handle;
+-	snd_mixer_selem_id_t *sid;
+-	long minv, maxv;
+-	int volume = GPOINTER_TO_INT(task_data);
+-
+-	snd_mixer_open(&handle, 0);
+-	snd_mixer_attach(handle, "default");
+-	snd_mixer_selem_register(handle, NULL, NULL);
+-	snd_mixer_load(handle);
+-
+-	snd_mixer_selem_id_malloc(&sid);
+-	snd_mixer_selem_id_set_index(sid, 0);
+-	snd_mixer_selem_id_set_name(sid, "Master");
+-
+-	snd_mixer_elem_t *elem = snd_mixer_find_selem(handle, sid);
+-	if (!elem) {
+-		fprintf(stderr, "AudioManager: Unable to find alsamixer Master element\n");
+-		return;
+-	}
+-
+-	snd_mixer_selem_get_playback_volume_range(elem, &minv, &maxv);
+-	snd_mixer_selem_set_playback_volume_all(elem, volume * (maxv - minv) / 100 + minv);
+-
+-	snd_mixer_close(handle);
+-	snd_mixer_selem_id_free(sid);
++/* Android volume is per CLBB; do not attach to the desktop ALSA Master mixer. */
++JNIEXPORT void JNICALL Java_android_media_AudioManager_nativeSetStreamVolume(JNIEnv *env,jobject self,jint volume) {
++ void (*set)(int)=dlsym(RTLD_DEFAULT,"clbb_audio_set_stream_volume");if(set)set(volume);
+ }
+-
+-JNIEXPORT void JNICALL Java_android_media_AudioManager_nativeSetStreamVolume(JNIEnv *env, jobject clazz, jint volume)
+-{
+-	GTask *task = g_task_new(NULL, NULL, NULL, NULL);
+-	g_task_set_task_data(task, GINT_TO_POINTER(volume), NULL);
+-	g_task_run_in_thread(task, set_stream_volume);
+-	g_object_unref(task);
++JNIEXPORT jint JNICALL Java_android_media_AudioManager_nativeGetStreamVolume(JNIEnv *env,jobject self) {
++ int (*get)(void)=dlsym(RTLD_DEFAULT,"clbb_audio_stream_volume");return get?get():100;
+ }
 diff --git a/src/api-impl-jni/audio/android_media_AudioRecord.c b/src/api-impl-jni/audio/android_media_AudioRecord.c
 index febf9f3..922f45d 100644
 --- a/src/api-impl-jni/audio/android_media_AudioRecord.c
@@ -966,6 +1019,25 @@ index 0098b29..5e870c7 100644
 +#define PCM_DEVICE atl_audio_device()
  
  void helper_hw_params_init(snd_pcm_t *pcm_handle, snd_pcm_hw_params_t *params, unsigned int rate, int channel_config, snd_pcm_format_t format, unsigned int *channels);
+diff --git a/src/api-impl-jni/generated_headers/android_media_AudioManager.h b/src/api-impl-jni/generated_headers/android_media_AudioManager.h
+index 414e5af..59f4c93 100644
+--- a/src/api-impl-jni/generated_headers/android_media_AudioManager.h
++++ b/src/api-impl-jni/generated_headers/android_media_AudioManager.h
+@@ -51,6 +51,14 @@ extern "C" {
+ JNIEXPORT void JNICALL Java_android_media_AudioManager_nativeSetStreamVolume
+   (JNIEnv *, jobject, jint);
+ 
++/*
++ * Class:     android_media_AudioManager
++ * Method:    nativeGetStreamVolume
++ * Signature: ()I
++ */
++JNIEXPORT jint JNICALL Java_android_media_AudioManager_nativeGetStreamVolume
++  (JNIEnv *, jobject);
++
+ #ifdef __cplusplus
+ }
+ #endif
 diff --git a/src/api-impl-jni/generated_headers/android_media_AudioRecord.h b/src/api-impl-jni/generated_headers/android_media_AudioRecord.h
 index d62463b..84a4565 100644
 --- a/src/api-impl-jni/generated_headers/android_media_AudioRecord.h
@@ -2377,6 +2449,54 @@ index 4adf5b4..9c695b3 100644
  	public <T extends android.view.View> T findViewById(int id) {
  		View view = window.findViewById(id);
  
+diff --git a/src/api-impl/android/app/ActivityManager.java b/src/api-impl/android/app/ActivityManager.java
+index 4fe0d85..9ee831e 100644
+--- a/src/api-impl/android/app/ActivityManager.java
++++ b/src/api-impl/android/app/ActivityManager.java
+@@ -47,12 +47,9 @@ public class ActivityManager {
+ 	public boolean isLowRamDevice() { return false; }
+ 
+ 	public static class MemoryInfo implements Parcelable {
+-		/* For now, just always report there's 10GB free RAM */
+-		public long availMem = 10000;
+-
+-		public long totalMem = 10000;
+-
+-		public long threshold = 200;
++        public long availMem;
++        public long totalMem;
++        public long threshold;
+ 
+ 		public boolean lowMemory = false;
+ 
+@@ -88,7 +85,26 @@ public class ActivityManager {
+ 	}
+ 
+ 	public void getMemoryInfo(MemoryInfo outInfo) {
+-		outInfo = new MemoryInfo();
++        if(outInfo==null)throw new NullPointerException("outInfo");
++        try(java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.FileReader("/proc/meminfo"))) {
++            String line;long available=-1,free=0;
++            while((line=reader.readLine())!=null) {
++                String[] fields=line.trim().split("\\s+");if(fields.length<2)continue;
++                if("MemTotal:".equals(fields[0]))outInfo.totalMem=Long.parseLong(fields[1])*1024L;
++                else if("MemAvailable:".equals(fields[0]))available=Long.parseLong(fields[1])*1024L;
++                else if("MemFree:".equals(fields[0]))free=Long.parseLong(fields[1])*1024L;
++            }
++            outInfo.availMem=available>=0?available:free;
++            outInfo.threshold=Math.min(outInfo.totalMem/20,256L*1024*1024);
++            outInfo.lowMemory=outInfo.availMem<outInfo.threshold;
++        }catch(java.io.IOException | NumberFormatException ignored) {}
++    }
++
++    public android.os.Debug.MemoryInfo[] getProcessMemoryInfo(int[] pids) {
++        if(pids==null)throw new NullPointerException("pids");
++        android.os.Debug.MemoryInfo[] result=new android.os.Debug.MemoryInfo[pids.length];
++        for(int i=0;i<pids.length;i++)result[i]=new android.os.Debug.MemoryInfo(pids[i]);
++        return result;
+ 	}
+ 
+ 	public ConfigurationInfo getDeviceConfigurationInfo() {
 diff --git a/src/api-impl/android/app/ContextImpl.java b/src/api-impl/android/app/ContextImpl.java
 index ee1870f..c005c1d 100644
 --- a/src/api-impl/android/app/ContextImpl.java
@@ -2792,10 +2912,27 @@ index 7d7213e..243d770 100644
  				LayerDrawable drawable = new LayerDrawable();
  				drawable.inflate(resources, parser, attrs, theme);
 diff --git a/src/api-impl/android/media/AudioManager.java b/src/api-impl/android/media/AudioManager.java
-index 1469385..f2df708 100644
+index 1469385..d2f1fc8 100644
 --- a/src/api-impl/android/media/AudioManager.java
 +++ b/src/api-impl/android/media/AudioManager.java
-@@ -97,6 +97,10 @@ public class AudioManager {
+@@ -9,6 +9,7 @@ public class AudioManager {
+ 	public static final int STREAM_MUSIC = 0x3;
+ 
+ 	private native void nativeSetStreamVolume(int volume);
++    private native int nativeGetStreamVolume();
+ 
+ 	public boolean isBluetoothA2dpOn() {
+ 		return false;
+@@ -56,7 +57,7 @@ public class AudioManager {
+ 	}
+ 
+ 	public int getStreamVolume(int streamType) {
+-		return 0; // arbitrary, shouldn't matter too much?
++		return nativeGetStreamVolume();
+ 	}
+ 
+ 	public int getStreamMaxVolume(int streamType) {
+@@ -97,6 +98,10 @@ public class AudioManager {
  		return false;
  	}
  
@@ -3364,10 +3501,10 @@ index 244ca92..0782db1 100644
  
  	public boolean isWifiEnabled() {
 diff --git a/src/api-impl/android/os/BatteryManager.java b/src/api-impl/android/os/BatteryManager.java
-index 10d720a..b008e6b 100644
+index 10d720a..f3faf89 100644
 --- a/src/api-impl/android/os/BatteryManager.java
 +++ b/src/api-impl/android/os/BatteryManager.java
-@@ -1,9 +1,11 @@
+@@ -1,12 +1,18 @@
  package android.os;
  
  public class BatteryManager {
@@ -3379,7 +3516,55 @@ index 10d720a..b008e6b 100644
 +		return id == BATTERY_PROPERTY_CAPACITY ? 99 : -1;
  	}
  
- 	public boolean isCharging() {
+-	public boolean isCharging() {
++	public long getLongProperty(int id) {
++        return id == BATTERY_PROPERTY_CAPACITY ? 99L : Long.MIN_VALUE;
++    }
++
++    public boolean isCharging() {
+ 		return false;
+ 	}
+ }
+diff --git a/src/api-impl/android/os/Debug.java b/src/api-impl/android/os/Debug.java
+index c287378..062f025 100644
+--- a/src/api-impl/android/os/Debug.java
++++ b/src/api-impl/android/os/Debug.java
+@@ -5,12 +5,22 @@ import java.io.IOException;
+ 
+ public final class Debug {
+ 	public static class MemoryInfo {
+-		public int getTotalPss() {
+-			return 0;
+-		}
++        private int totalPss;
++        public MemoryInfo() { this(android.os.Process.myPid()); }
++        public MemoryInfo(int pid) { readProcess(pid); }
++        private void readProcess(int pid) {
++            totalPss=0;
++            if(pid<=0)return;
++            try(java.io.BufferedReader reader=new java.io.BufferedReader(new java.io.FileReader("/proc/"+pid+"/smaps_rollup"))) {
++                String line;while((line=reader.readLine())!=null) {
++                    if(line.startsWith("Pss:")) {long value=Long.parseLong(line.substring(4).trim().split("\\s+")[0]);totalPss=(int)Math.min(Integer.MAX_VALUE,Math.max(0,value));break;}
++                }
++            } catch(java.io.IOException | NumberFormatException ignored) {}
++        }
++        public int getTotalPss() { return totalPss; }
+ 
+ 		public String getMemoryStat(String statName) {
+-			return "fixme getMemoryStat";
++			return "summary.total-pss".equals(statName) ? Integer.toString(totalPss) : null;
+ 		}
+ 	}
+ 
+@@ -57,7 +67,7 @@ public final class Debug {
+ 		return VMDebug.threadCpuTimeNanos();
+ 	}
+ 
+-	public static void getMemoryInfo(MemoryInfo memoryInfo) {}
++	public static void getMemoryInfo(MemoryInfo memoryInfo) { if(memoryInfo!=null)memoryInfo.readProcess(android.os.Process.myPid()); }
+ 
+ 	public static void stopAllocCounting() {}
+ 
 diff --git a/src/api-impl/android/os/Looper.java b/src/api-impl/android/os/Looper.java
 index 7af7428..5f4665e 100644
 --- a/src/api-impl/android/os/Looper.java
@@ -3433,6 +3618,22 @@ index c0950d9..e8876ef 100644
  				return null; // thread is managed by glib, so return instead of blocking
  
  			synchronized (this) {
+diff --git a/src/api-impl/android/os/PowerManager.java b/src/api-impl/android/os/PowerManager.java
+index d80a778..191f412 100644
+--- a/src/api-impl/android/os/PowerManager.java
++++ b/src/api-impl/android/os/PowerManager.java
+@@ -1,6 +1,11 @@
+ package android.os;
+ 
+ public final class PowerManager {
++    public interface OnThermalStatusChangedListener { void onThermalStatusChanged(int status); }
++    public int getCurrentThermalStatus() { return 0; }
++    public void addThermalStatusListener(OnThermalStatusChangedListener listener) { if(listener==null)throw new NullPointerException("listener"); }
++    public void removeThermalStatusListener(OnThermalStatusChangedListener listener) {}
++
+ 	public final class WakeLock {
+ 		private boolean held;
+ 		private boolean refCounted = true;
 diff --git a/src/api-impl/android/os/Process.java b/src/api-impl/android/os/Process.java
 index 24b9ace..423fb37 100644
 --- a/src/api-impl/android/os/Process.java
