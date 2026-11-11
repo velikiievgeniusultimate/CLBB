@@ -76,10 +76,17 @@ fn devices(items: &[Value], input: bool) -> String {
         if input && name.ends_with(".monitor") {
             continue;
         }
-        let label = item["description"]
-            .as_str()
-            .unwrap_or(name)
-            .replace(['\t', '\n', '\r'], " ");
+        let label = [
+            item["description"].as_str(),
+            item["properties"]["device.description"].as_str(),
+            item["properties"]["node.nick"].as_str(),
+            item["properties"]["alsa.card_name"].as_str(),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|s| !s.is_empty() && *s != "(null)")
+        .unwrap_or(name)
+        .replace(['\t', '\n', '\r'], " ");
         out.push_str(&format!("{name}\t{label}\n"));
     }
     out
@@ -226,11 +233,11 @@ pub extern "C" fn clbb_capture_open(rate: u32, channels: u32) -> u64 {
     };
     let mut error = 0;
     let attr = BufferAttr {
-        maxlength: rate * channels * 2 / 5,
+        maxlength: (rate / 5) * channels * 2,
         tlength: u32::MAX,
         prebuf: u32::MAX,
         minreq: u32::MAX,
-        fragsize: rate * channels * 2 / 100,
+        fragsize: (rate / 100) * channels * 2,
     };
     let spec = SampleSpec {
         format: 3,
@@ -295,7 +302,7 @@ pub extern "C" fn clbb_capture_open(rate: u32, channels: u32) -> u64 {
                     let excess = q
                         .samples
                         .len()
-                        .saturating_sub(rate as usize * channels as usize / 5);
+                        .saturating_sub((rate as usize / 5) * channels as usize);
                     q.samples.drain(..excess);
                     worker.1.notify_all();
                 }
