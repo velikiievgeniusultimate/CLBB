@@ -2958,7 +2958,7 @@ index 1469385..d2f1fc8 100644
  		return false;
  	}
 diff --git a/src/api-impl/android/media/AudioRecord.java b/src/api-impl/android/media/AudioRecord.java
-index ae1144c..99bb2ad 100644
+index ae1144c..39885d7 100644
 --- a/src/api-impl/android/media/AudioRecord.java
 +++ b/src/api-impl/android/media/AudioRecord.java
 @@ -6,20 +6,25 @@ public class AudioRecord {
@@ -2969,9 +2969,11 @@ index ae1144c..99bb2ad 100644
 + public static final int STATE_UNINITIALIZED = 0, STATE_INITIALIZED = 1;
 + public static final int READ_BLOCKING = 0, READ_NON_BLOCKING = 1;
  
- 	private long pcm_handle;
+-	private long pcm_handle;
++	private volatile long pcm_handle;
  	private int channels; // set by native constructor
- 	private int recordingState = RECORDSTATE_STOPPED;
+-	private int recordingState = RECORDSTATE_STOPPED;
++	private volatile int recordingState = RECORDSTATE_STOPPED;
  	private int sampleRateInHz;
 +    private int bufferSizeInBytes;
  
@@ -2989,7 +2991,7 @@ index ae1144c..99bb2ad 100644
  		pcm_handle = native_constructor(streamType, sampleRateInHz, channelConfig, audioFormat, bufferSizeInBytes);
  	}
  
-@@ -30,19 +35,28 @@ public class AudioRecord {
+@@ -30,19 +35,33 @@ public class AudioRecord {
  	}
  
  	public int getState() {
@@ -3017,19 +3019,24 @@ index ae1144c..99bb2ad 100644
  
 -	public int read(short[] audioData, int offsetInShorts, int sizeInShorts) {
 +	public int read(short[] audioData,int offsetInShorts,int sizeInShorts) {return read(audioData,offsetInShorts,sizeInShorts,READ_BLOCKING);}
-+ public synchronized int read(short[] audioData, int offsetInShorts, int sizeInShorts,int mode) {
++ public int read(short[] audioData, int offsetInShorts, int sizeInShorts,int mode) {
 +        if (mode != READ_BLOCKING && mode != READ_NON_BLOCKING) return ERROR_BAD_VALUE;
-+        if (pcm_handle == 0 || recordingState != RECORDSTATE_RECORDING) return ERROR_INVALID_OPERATION;
++        final long handle;
++        final int countChannels;
++        synchronized(this) {
++            if (pcm_handle == 0 || recordingState != RECORDSTATE_RECORDING) return ERROR_INVALID_OPERATION;
++            handle=pcm_handle;countChannels=channels;
++        }
  		/* sanity check the parameters before calling native_write */
  		if ((audioData == null)
  		    || (offsetInShorts < 0) || (sizeInShorts < 0)
-@@ -51,17 +65,36 @@ public class AudioRecord {
+@@ -51,17 +70,36 @@ public class AudioRecord {
  			return ERROR_BAD_VALUE;
  		}
  
 -		return native_read(pcm_handle, audioData, offsetInShorts, sizeInShorts / channels) * channels;
-+		int result = native_read(pcm_handle, audioData, offsetInShorts, Math.min(sizeInShorts / channels, 8192),mode);
-+        return result < 0 ? result : result * channels;
++		int result = native_read(handle, audioData, offsetInShorts, Math.min(sizeInShorts / countChannels, 8192),mode);
++        return result < 0 ? result : result * countChannels;
  	}
  
 -	public void stop() {

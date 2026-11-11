@@ -40,13 +40,32 @@ pub fn configure(input: String, output: String) {
 pub fn read(key: &str) -> String {
     if key == "audio.capture_status" {
         let map = captures().lock().unwrap();
-        return serde_json::json!({"streams":map.iter().map(|(id,c)|{let q=c.queue.0.lock().unwrap();serde_json::json!({"id":id,"active":q.active,"failed":q.failed,"samples":q.total,"queued":q.samples.len(),"channels":c.channels})}).collect::<Vec<_>>()}).to_string();
+        return serde_json::json!({"streams":map.iter().map(|(id,c)|{let q=c.queue.0.lock().unwrap();serde_json::json!({"id":id,"active":q.active,"failed":q.failed,"samples":q.total,"queued":q.samples.len(),"channels":c.channels,"epoch":q.epoch,"delivered_samples":q.delivered,"dropped_samples":q.dropped,"cancelled_samples":q.cancelled,"reads":q.reads,"short_blocking_reads":q.short_reads,"requested_frames":q.requested,"returned_frames":q.returned,"peak":q.peak,"peak_max":q.peak_max,"rms":q.rms,"rms_max":q.rms_max,"last_read_age_ms":q.last_read.map(|t|t.elapsed().as_millis())})}).collect::<Vec<_>>()}).to_string();
     }
     let s = state().lock().unwrap();
     match key {
         "audio.input_devices" => s.inputs.clone(),
         "audio.output_devices" => s.outputs.clone(),
-        _ => s.status.clone(),
+        _ => {
+            let mut status = s.status.clone();
+            drop(s);
+            let map = captures().lock().unwrap();
+            for capture in map.values() {
+                let q = capture.queue.0.lock().unwrap();
+                if q.active {
+                    let db = if q.rms > 0.0 {
+                        20.0 * (q.rms / 32768.0).log10()
+                    } else {
+                        -120.0
+                    };
+                    status.push_str(&format!(
+                        "\nВход: {db:.1} дБ · блок SDK: {}/{} кадров · коротких: {}",
+                        q.returned, q.requested, q.short_reads
+                    ));
+                }
+            }
+            status
+        }
     }
 }
 pub fn refresh() {
@@ -244,6 +263,20 @@ struct Samples {
     closed: bool,
     failed: bool,
     total: u64,
+    epoch: u64,
+    delivered: u64,
+    dropped: u64,
+    cancelled: u64,
+    reads: u64,
+    short_reads: u64,
+    requested: u32,
+    returned: i32,
+    peak: u32,
+    peak_max: u32,
+    rms: f64,
+    rms_max: f64,
+    last_read: Option<std::time::Instant>,
+    last_log: Option<std::time::Instant>,
 }
 struct Capture {
     channels: usize,
@@ -335,6 +368,7 @@ pub extern "C" fn clbb_capture_open(rate: u32, channels: u32) -> u64 {
                         .len()
                         .saturating_sub((rate as usize / 5) * channels as usize);
                     q.samples.drain(..excess);
+                    q.dropped += excess as u64;
                     worker.1.notify_all();
                 }
             }
@@ -364,6 +398,9 @@ pub extern "C" fn clbb_capture_active(id: u64, active: c_int) -> c_int {
     if q.failed {
         return -1;
     }
+    if q.active != (active != 0) {
+        q.epoch = q.epoch.wrapping_add(1);
+    }
     q.active = active != 0;
     q.samples.clear();
     c.queue.1.notify_all();
@@ -392,33 +429,77 @@ pub unsafe extern "C" fn clbb_capture_read(
         (c.channels, c.queue.clone())
     };
     let mut q = queue.0.lock().unwrap();
-    if !q.active || q.closed {
-        return -3;
+    let epoch = q.epoch;
+    let mut count = 0usize;
+    let mut energy = 0u64;
+    let mut peak = 0u32;
+    q.reads += 1;
+    q.requested = frames;
+    while count < frames as usize {
+        if !q.active || q.closed || q.epoch != epoch || q.failed {
+            let error = if q.failed { -1 } else { -3 };
+            q.returned = error;
+            q.cancelled += (count * channels) as u64;
+            return error;
+        }
+        if q.samples.len() < channels && blocking != 0 {
+            let waited = queue
+                .1
+                .wait_timeout_while(q, Duration::from_millis(100), |q| {
+                    q.samples.len() < channels
+                        && q.active
+                        && !q.closed
+                        && !q.failed
+                        && q.epoch == epoch
+                })
+                .unwrap();
+            q = waited.0;
+            if !q.active || q.closed || q.failed || q.epoch != epoch {
+                continue;
+            }
+            if waited.1.timed_out() && q.samples.len() < channels {
+                break;
+            }
+        }
+        let take = (q.samples.len() / channels).min(frames as usize - count);
+        for i in 0..take * channels {
+            let sample = q.samples.pop_front().unwrap();
+            unsafe { data.add(count * channels + i).write(sample) };
+            let value = sample as i64;
+            energy += (value * value) as u64;
+            peak = peak.max(value.unsigned_abs() as u32);
+        }
+        count += take;
+        if blocking == 0 {
+            break;
+        }
     }
-    if q.failed {
-        return -1;
+    q.returned = count as i32;
+    q.delivered += (count * channels) as u64;
+    if blocking != 0 && count < frames as usize {
+        q.short_reads += 1;
     }
-    if blocking != 0 {
-        let result = queue
-            .1
-            .wait_timeout_while(q, Duration::from_millis(100), |q| {
-                q.samples.len() < channels && q.active && !q.closed && !q.failed
-            })
-            .unwrap();
-        q = result.0;
-    }
-    if !q.active || q.closed {
-        return -3;
-    }
-    if q.failed {
-        return -1;
-    }
-    let count = (q.samples.len() / channels).min(frames as usize);
-    for i in 0..count * channels {
-        unsafe { data.add(i).write(q.samples.pop_front().unwrap()) };
+    q.peak = peak;
+    q.peak_max = q.peak_max.max(peak);
+    q.rms = if count > 0 {
+        (energy as f64 / (count * channels) as f64).sqrt()
+    } else {
+        0.0
+    };
+    q.rms_max = q.rms_max.max(q.rms);
+    q.last_read = Some(std::time::Instant::now());
+    if q.last_log
+        .is_none_or(|t| t.elapsed() >= Duration::from_secs(1))
+    {
+        q.last_log = q.last_read;
+        eprintln!(
+            "[CLBB_AUDIO] transfer id={id} epoch={} frames={count}/{frames} blocking={blocking} peak={peak} rms={:.1} delivered={} short={} dropped={}",
+            q.epoch, q.rms, q.delivered, q.short_reads, q.dropped
+        );
     }
     count as c_int
 }
+
 #[unsafe(no_mangle)]
 pub extern "C" fn clbb_capture_close(id: u64) {
     if let Some(c) = captures().lock().unwrap().remove(&id) {
@@ -610,4 +691,87 @@ pub extern "C" fn clbb_audio_set_stream_volume(value: i32) {
 }
 pub fn stream_gain() -> f32 {
     clbb_audio_stream_volume() as f32 / 100.0
+}
+
+#[cfg(test)]
+mod read_contract_tests {
+    use super::*;
+    fn fixture(id: u64, initial: Vec<i16>) -> Arc<(Mutex<Samples>, std::sync::Condvar)> {
+        let queue = Arc::new((
+            Mutex::new(Samples {
+                active: true,
+                samples: initial.into(),
+                ..Default::default()
+            }),
+            std::sync::Condvar::new(),
+        ));
+        captures().lock().unwrap().insert(
+            id,
+            Capture {
+                channels: 1,
+                queue: queue.clone(),
+            },
+        );
+        queue
+    }
+    #[test]
+    fn blocking_twenty_ms_read_waits_for_both_ten_ms_chunks() {
+        let id = 900001;
+        let queue = fixture(id, vec![111; 160]);
+        let producer = queue.clone();
+        let thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            producer.0.lock().unwrap().samples.extend([222i16; 160]);
+            producer.1.notify_all();
+        });
+        let mut output = [0i16; 320];
+        let count = unsafe { clbb_capture_read(id, output.as_mut_ptr(), 320, 1) };
+        thread.join().unwrap();
+        assert_eq!(
+            count, 320,
+            "blocking read must fill SDK packet, not return first capture fragment"
+        );
+        assert_eq!(&output[..160], &[111; 160]);
+        assert_eq!(&output[160..], &[222; 160]);
+        let q = queue.0.lock().unwrap();
+        assert_eq!(q.delivered, 320);
+        assert_eq!(q.short_reads, 0);
+        assert_eq!(q.peak, 222);
+        drop(q);
+        clbb_capture_close(id);
+    }
+    #[test]
+    fn nonblocking_read_returns_available_fragment_immediately() {
+        let id = 900002;
+        let queue = fixture(id, vec![123; 160]);
+        let mut output = [0i16; 320];
+        assert_eq!(
+            unsafe { clbb_capture_read(id, output.as_mut_ptr(), 320, 0) },
+            160
+        );
+        assert_eq!(queue.0.lock().unwrap().short_reads, 0);
+        clbb_capture_close(id);
+    }
+    #[test]
+    fn stop_interrupts_partial_block_and_does_not_deliver_stale_audio() {
+        let id = 900003;
+        let queue = fixture(id, vec![123; 160]);
+        let reader = std::thread::spawn(move || {
+            let mut output = [0i16; 320];
+            unsafe { clbb_capture_read(id, output.as_mut_ptr(), 320, 1) }
+        });
+        for _ in 0..100 {
+            if queue.0.lock().unwrap().reads > 0 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        clbb_capture_active(id, 0);
+        assert_eq!(reader.join().unwrap(), -3);
+        let q = queue.0.lock().unwrap();
+        assert_eq!(q.delivered, 0);
+        assert_eq!(q.cancelled, 160);
+        drop(q);
+        clbb_capture_close(id);
+    }
 }
