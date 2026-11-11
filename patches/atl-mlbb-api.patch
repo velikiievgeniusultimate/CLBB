@@ -1548,7 +1548,7 @@ index 11b6564..e879567 100644
  	wrapper_widget_set_jobject(WRAPPER_WIDGET(wrapper), env, this);
  	// TODO: is this correct for all usecases? how do we know when it's not?
 diff --git a/src/api-impl-jni/widgets/android_webkit_WebView.c b/src/api-impl-jni/widgets/android_webkit_WebView.c
-index ef0513d..e73486b 100644
+index ef0513d..b7af23c 100644
 --- a/src/api-impl-jni/widgets/android_webkit_WebView.c
 +++ b/src/api-impl-jni/widgets/android_webkit_WebView.c
 @@ -1,5 +1,6 @@
@@ -1799,7 +1799,7 @@ index ef0513d..e73486b 100644
  	JNIEnv *env = get_jni_env();
  	J__WebView__internalLoadChanged(env, wrapper->jobj, load_event, _JSTRING(webkit_web_view_get_uri(web_view)));
  }
-@@ -65,23 +286,238 @@ JNIEXPORT jlong JNICALL Java_android_webkit_WebView_native_1constructor(JNIEnv *
+@@ -65,23 +286,249 @@ JNIEXPORT jlong JNICALL Java_android_webkit_WebView_native_1constructor(JNIEnv *
  	if (!getenv("ATL_UGLY_ENABLE_WEBVIEW"))
  		return Java_android_view_View_native_1constructor(env, this, context, attrs);
  
@@ -1859,6 +1859,17 @@ index ef0513d..e73486b 100644
  	g_signal_connect(webview, "decide-policy", G_CALLBACK(decide_policy), wrapper);
 +	g_signal_connect_object(webview, "script-dialog", G_CALLBACK(javascript_dialog), wrapper, 0);
 +	WebKitUserContentManager *manager = webkit_web_view_get_user_content_manager(WEBKIT_WEB_VIEW(webview));
++	/* CLBB-owned UI preference; scoped to the official MOONTON account origin. */
++	const char *login_policy = g_getenv("CLBB_WEBVIEW_LOGIN_POLICY");
++	gchar *login_source = NULL;
++	if (login_policy && g_path_is_absolute(login_policy) && g_file_get_contents(login_policy, &login_source, NULL, NULL)) {
++		const char *allowed[] = { "https://mtacc.mobilelegends.com/*", NULL };
++		WebKitUserScript *preference = webkit_user_script_new(login_source,
++		    WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END, allowed, NULL);
++		webkit_user_content_manager_add_script(manager, preference);
++		webkit_user_script_unref(preference);
++		g_free(login_source);
++	}
 +	g_signal_connect_object(manager, "script-message-received::atlJavascript", G_CALLBACK(javascript_message), wrapper, 0);
 +	webkit_user_content_manager_register_script_message_handler(manager, "atlJavascript", NULL);
  	return _INTPTR(webview);
@@ -2039,7 +2050,7 @@ index ef0513d..e73486b 100644
  	webkit_web_view_load_uri(webview, _CSTRING(url));
  }
  
-@@ -91,6 +527,9 @@ JNIEXPORT void JNICALL Java_android_webkit_WebView_native_1loadDataWithBaseURL(J
+@@ -91,6 +538,9 @@ JNIEXPORT void JNICALL Java_android_webkit_WebView_native_1loadDataWithBaseURL(J
  		return;
  
  	WebKitWebView *webview = _PTR(widget_ptr);

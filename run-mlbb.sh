@@ -7,6 +7,7 @@ source "$CLBB_LAUNCH_ROOT/env.sh"
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 export ANDROID_APP_DATA_DIR="$CLBB_STATE_ROOT/data"
 export ATL_UGLY_ENABLE_WEBVIEW=1
+export CLBB_WEBVIEW_LOGIN_POLICY="$CLBB_LAUNCH_ROOT/distribution/moonton-email-login.js"
 export ATL_WEBKIT_EXTENSIONS_DIR="$CLBB_ATL_PREFIX/lib/atl-web-extensions"
 export CLBB_WEBKIT_PROCESS_DIR="${CLBB_WEBKIT_PROCESS_DIR:-$CLBB_ATL_PREFIX/lib/webkitgtk-6.0}"
 if [[ ! -d "$CLBB_WEBKIT_PROCESS_DIR" ]]; then

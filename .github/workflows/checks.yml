@@ -18,6 +18,8 @@ jobs:
         run: cargo test --manifest-path launcher/Cargo.toml --locked --offline
       - name: Report receiver
         run: cargo test --manifest-path distribution/report-server/Cargo.toml --locked --offline
+      - name: Email login route preference
+        run: node smoke/test-email-login-policy.cjs
       - name: Distribution checks
         run: python3 -m unittest discover -s distribution/tests -v
       - name: Shell syntax
