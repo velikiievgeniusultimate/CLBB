@@ -5957,10 +5957,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..3638783
+index 0000000..37fb92d
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,877 @@
+@@ -0,0 +1,885 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -6132,6 +6132,14 @@ index 0000000..3638783
 +    ClbbHost *h = user;
 +    if (h->dispatching)
 +        return FALSE;
++    if (!strcmp(key,"updates.open") && !strcmp(value,"1")) {
++        unlock(h);
++        h->suspend(h->runtime,1);
++        clbb_mapper_unlink_control(h->window);
++        static const char marker[]="[CLBB_EXIT] update_requested\n";
++        (void)write(STDERR_FILENO,marker,sizeof(marker)-1);
++        _exit(0);
++    }
 +    h->dispatching = TRUE;
 +    int result = h->write(h->runtime, key, value);
 +    h->dispatching = FALSE;

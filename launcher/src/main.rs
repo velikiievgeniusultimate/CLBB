@@ -87,9 +87,34 @@ fn launch() -> io::Result<()> {
     let status = child.wait()?;
     fs::write(run.join("exit.json"), format!("{{\"success\":{},\"code\":{}}}\n", status.success(), status.code().map_or("null".to_owned(), |x| x.to_string())))?;
     drop(lock);
-    let desktop_close=fs::read_to_string(run.join("runtime.log")).unwrap_or_default().contains("[CLBB_EXIT] desktop_close");
+    let runtime_log=fs::read_to_string(run.join("runtime.log")).unwrap_or_default();
+    if wants_update_window(status.success(),&runtime_log) {
+        return update_window(&root,&state);
+    }
+    let desktop_close=runtime_log.contains("[CLBB_EXIT] desktop_close");
     if status.success() && (lifetime.elapsed().as_secs()>=3||desktop_close){Ok(())}
     else {Err(io::Error::other(format!("CLBB runtime exited: {status}; elapsed={:.2}s",lifetime.elapsed().as_secs_f64())))}
+}
+
+fn wants_update_window(success:bool,log:&str)->bool {
+    success && log.contains("[CLBB_EXIT] update_requested\n")
+}
+#[cfg(test)]mod update_handoff_tests {
+    #[test]fn only_successful_explicit_handoff_opens_updater(){
+        assert!(super::wants_update_window(true,"runtime ready\n[CLBB_EXIT] update_requested\n"));
+        assert!(!super::wants_update_window(false,"[CLBB_EXIT] update_requested\n"));
+        assert!(!super::wants_update_window(true,"[CLBB_EXIT] desktop_close\n"));
+    }
+}
+
+fn update_window(root:&std::path::Path,state:&std::path::Path)->io::Result<()> {
+    let status=std::process::Command::new(root.join("bin/clbb-update-ui"))
+        .env("CLBB_ROOT",root).env("CLBB_ATL_ROOT",root).env("CLBB_STATE_ROOT",state)
+        .env("CLBB_UPDATE_MANAGER",root.join("bin/clbb-manager"))
+        .env("CLBB_RELEASE_VERSION",fs::read_to_string(root.join("VERSION"))?.trim())
+        .env("CLBB_RELEASE_REVISION",fs::read_to_string(root.join("REVISION")).unwrap_or_default().trim())
+        .env_remove("CLBB_NATIVE_LOCK_HELD").env_remove("LD_PRELOAD").env_remove("LD_LIBRARY_PATH").status()?;
+    if status.success(){Ok(())}else{Err(io::Error::other("Не удалось открыть окно обновления CLBB"))}
 }
 
 fn runtime_root() -> io::Result<PathBuf> {
@@ -124,6 +149,10 @@ fn main() {
     }
     if args.first().map(String::as_str)==Some("--version") {
         match runtime_root().and_then(|r|fs::read_to_string(r.join("VERSION"))) {Ok(v)=>print!("CLBB {}",v),Err(_)=>println!("CLBB dev")};return;
+    }
+    if args.first().map(String::as_str)==Some("--update-window") {
+        let result=runtime_root().and_then(|root|{let state=env::var_os("CLBB_STATE_ROOT").map(PathBuf::from).unwrap_or_else(||root.clone());update_window(&root,&state)});
+        if let Err(e)=result {eprintln!("CLBB: {e}");std::process::exit(1);}return;
     }
     if matches!(args.first().map(String::as_str),Some("--update"|"--check-updates"|"--import-game")) {
         let command=if args[0]=="--check-updates"{"--check"}else{&args[0]};

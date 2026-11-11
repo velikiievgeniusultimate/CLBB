@@ -22,7 +22,7 @@ export GTK_A11Y=none
 /tmp/clbb-settings-preview --self-test
 if [[ ${1:-} == --screenshots ]]; then
   mkdir -p preview
-  for page in main controls hero sound hotkeys updates; do
+  for page in main controls hero sound hotkeys; do
     /tmp/clbb-settings-preview --tab "$page" --timeout 3 >"$work_dir/$page.log" 2>&1 &
     preview_pid=$!
     sleep 1

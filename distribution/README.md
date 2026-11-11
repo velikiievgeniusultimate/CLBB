@@ -186,3 +186,28 @@ the exact accepted files as a draft, checks remote digests and successful GitHub
 checks, then publishes. Draft uploads can be resumed; existing published versions
 cannot be replaced. `import-release` verifies an existing release before local use.
 New packages expose the source revision in F7 and `clbb --build-info`.
+
+## Окно обновления / Update window
+
+F7 → Основное → «Обновить CLBB» завершает игру и открывает отдельное окно.
+До подтверждения «Обновиться» загрузка и установка не начинаются. Полоса сверху
+показывает загрузку, строка состояния — текущий этап (проверка, распаковка,
+активация). После успеха предлагается запуск CLBB; ошибка оставляет возможность
+повторить попытку. При установке окно нельзя закрыть посередине активации.
+Реальные игровые данные и настройки хранятся отдельно от обновляемой версии.
+Локальная рабочая сборка (`CLBB_MANAGED_INSTALL=0`) не перезаписывается менеджером:
+это окно объясняет ограничение; обычные установки тестеров обновляются через него.
+
+F7 → Main → Update CLBB closes the game and opens a separate Rust/GTK window.
+No installation starts until Update is confirmed. Download progress and the
+current stage remain visible; success offers a launch of the newly selected
+release, failure allows retry. Busy activation cannot be interrupted by closing
+the window. Development workbench builds retain their explicit no-overwrite
+policy; managed tester installations use the normal updater.
+
+Validation without game/account/network access:
+```sh
+bash launcher/check-update-handoff.sh
+bash mapper/ui/check-update-window.sh
+bash mapper/ui/check-preview.sh
+```

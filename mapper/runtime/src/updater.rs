@@ -3,7 +3,7 @@
 //! the next launch; running releases and persistent game data are untouched.
 use std::{path::PathBuf, process::{Command,Stdio},io::Read, sync::{Arc,Mutex}};
 #[derive(Default)]
-struct State {busy:bool,available:bool,status:String,progress:Option<f64>}
+struct State {busy:bool,available:bool,status:String,progress:Option<f64>,outcome:String,installed_version:String}
 pub struct Updates {state:Arc<Mutex<State>>,manager:PathBuf,managed:bool,version:String}
 impl Updates {
     pub fn new()->Self {
@@ -19,14 +19,14 @@ impl Updates {
     }
     pub fn read(&self,key:&str)->String {
         let state=self.state.lock().unwrap_or_else(|e|e.into_inner());
-        match key {"updates.progress"=>state.progress.unwrap_or(-1.0).to_string(),"updates.version"=>self.version.clone(),"updates.status"=>state.status.clone(),"updates.busy"=>state.busy.to_string(),"updates.available"=>(self.managed&&state.available&&!state.busy).to_string(),_=>String::new()}
+        match key {"updates.installed_version"=>state.installed_version.clone(),"updates.outcome"=>state.outcome.clone(),"updates.progress"=>state.progress.unwrap_or(-1.0).to_string(),"updates.version"=>self.version.clone(),"updates.status"=>state.status.clone(),"updates.busy"=>state.busy.to_string(),"updates.available"=>(self.managed&&state.available&&!state.busy).to_string(),_=>String::new()}
     }
     pub fn request(&self,key:&str)->bool {
         if !matches!(key,"updates.check"|"updates.install"){return false;}
         let install=key=="updates.install";let mut state=self.state.lock().unwrap_or_else(|e|e.into_inner());
         if state.busy||install&&!self.managed{return false;}
         if !self.manager.is_file(){state.status="Менеджер обновлений не найден. Запустите установщик CLBB.".into();return false;}
-        state.busy=true;state.progress=None;state.status=if install{"Загружается обновление. Игра продолжает работать."}else{"Проверяем новые версии…"}.into();drop(state);
+        state.busy=true;state.progress=None;state.outcome.clear();state.status=if install{"Загружается обновление…"}else{"Проверяем новые версии…"}.into();drop(state);
         let shared=self.state.clone();let manager=self.manager.clone();
         let spawn=std::thread::Builder::new().name("clbb-updater".into()).spawn(move||{
             let result=(||->std::io::Result<std::process::Output>{
@@ -53,14 +53,16 @@ impl Updates {
                     let value=serde_json::from_slice::<serde_json::Value>(&output.stdout);
                     match value {
                         Ok(v) if output.status.success()=>{
+                            if install {state.installed_version=v["version"].as_str().unwrap_or("").into();}
+                            state.outcome=if install {if v["state"]=="installed"{"installed"}else{"current"}} else if v["available"].as_bool().unwrap_or(false){"available"}else{"current"}.into();
                             if install {state.available=false;state.status=if v["state"]=="installed"{format!("Версия {} установлена. Она включится при следующем запуске CLBB.",v["version"].as_str().unwrap_or(""))}else{"Установлена актуальная версия.".into()};}
                             else{state.available=v["available"].as_bool().unwrap_or(false);state.status=if state.available {format!("Доступна версия {}.",v["latest"].as_str().unwrap_or(""))}else{"Установлена актуальная версия.".into()};}
                         }
-                        Ok(v)=>state.status=format!("Не удалось обновить: {}",v["error"].as_str().unwrap_or("ошибка менеджера").chars().take(700).collect::<String>()),
-                        Err(_)=>state.status="Менеджер обновлений вернул ошибку. Текущая версия сохранена.".into(),
+                        Ok(v)=>{state.outcome="error".into();state.status=format!("Не удалось обновить: {}",v["error"].as_str().unwrap_or("ошибка менеджера").chars().take(700).collect::<String>());},
+                        Err(_)=>{state.outcome="error".into();state.status="Менеджер обновлений вернул ошибку. Текущая версия сохранена.".into();},
                     }
                 }
-                Err(e)=>state.status=format!("Не удалось запустить менеджер: {e}"),
+                Err(e)=>{state.outcome="error".into();state.status=format!("Не удалось запустить менеджер: {e}");},
             }
         });
         if spawn.is_err(){let mut state=self.state.lock().unwrap_or_else(|e|e.into_inner());state.busy=false;state.status="Не удалось начать обновление.".into();return false;}

@@ -96,7 +96,7 @@ def main():
             copy(ROOT/name,stage/name)
         (stage/'REVISION').write_text(revision()+'\n')
         for name in ['import_game.py','verify.py','game-apk.json','launch-fallback.py','native_libs.py','desktop_entry.py','device_identity.py','guest_root.py','moonton-email-login.js']:copy(ROOT/'distribution'/name,stage/'distribution'/name)
-        for name,source_binary in [('clbb-launcher',ROOT/'launcher/target/release/clbb-launcher'),('clbb-manager',ROOT/'distribution/manager/target/release/clbb-manager')]:copy(source_binary,stage/'bin'/name)
+        for name,source_binary in [('clbb-launcher',ROOT/'launcher/target/release/clbb-launcher'),('clbb-manager',ROOT/'distribution/manager/target/release/clbb-manager'),('clbb-update-ui',ROOT/'mapper/runtime/target/x86_64-unknown-linux-gnu/release/clbb-update-ui')]:copy(source_binary,stage/'bin'/name)
         prefix=ROOT/'prefix'
         for name in ['android-translation-layer','dalvikvm','dex2oat']:copy(prefix/'bin'/name,stage/'prefix/bin'/name)
         for name in ['art','java/dex','atl-web-extensions','libnb-qemu-thunks']:copy(prefix/'lib'/name,stage/'prefix/lib'/name)

@@ -625,7 +625,7 @@ static void nav_selected(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
   if (!row)
     return;
   ClbbSettings *s = data;
-  const char *names[] = {"main", "controls", "hero", "sound", "hotkeys", "updates"};
+  const char *names[] = {"main", "controls", "hero", "sound", "hotkeys"};
   int i = gtk_list_box_row_get_index(row);
   if (i >= 0 && i < 5) {
     stop_capture(s);
@@ -957,8 +957,8 @@ static void display_card(ClbbSettings *s, GtkWidget *box) {
 }
 static void update_clicked(GtkButton *button, gpointer data) {
   ClbbSettings *s = data;
-  const char *key = GTK_WIDGET(button) == s->update_install ? "updates.install" : "updates.check";
-  if (s->callbacks.write) s->callbacks.write(s->callbacks.user, key, "1");
+  (void)button;
+  if (s->callbacks.write) s->callbacks.write(s->callbacks.user, "updates.open", "1");
   clbb_settings_refresh(s);
 }
 static void display_refresh(ClbbSettings *s) {
@@ -1043,7 +1043,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_widget_set_size_request(sidebar, 185, -1);
   gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar), GTK_SELECTION_SINGLE);
   const char *items[] = {"Основное", "Управление", "Герой", "Звук",
-                         "Горячие клавиши", "Обновления"};
+                         "Горячие клавиши"};
   for (guint i = 0; i < G_N_ELEMENTS(items); ++i)
     gtk_list_box_append(GTK_LIST_BOX(sidebar),
                         label(items[i], "clbb-nav-label"));
@@ -1067,7 +1067,16 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
                  wrap_label("Профиль героя выбирается автоматически в матче. В "
                             "меню игровые назначения не перехватывают ввод.",
                             "clbb-muted"));
-  display_card(s, b);
+  card = section(b, "Обновление CLBB");
+  s->update_version = label("", "clbb-label");
+  gtk_box_append(GTK_BOX(card), s->update_version);
+  gtk_box_append(GTK_BOX(card), wrap_label("Игра закроется. Обновление продолжится в отдельном окне.", "clbb-muted"));
+  GtkWidget *update_open=gtk_button_new_with_label("Обновить CLBB");
+  gtk_widget_add_css_class(update_open,"clbb-bind");
+  g_signal_connect(update_open,"clicked",G_CALLBACK(update_clicked),s);
+  gtk_box_append(GTK_BOX(card),update_open);
+  display_card(s,b);
+
   card = section(b, "Состояние");
   s->hero_title = label("Герой не определён", "clbb-label");
   gtk_box_append(GTK_BOX(card), s->hero_title);
@@ -1180,27 +1189,6 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_event_controller_set_propagation_phase(ec, GTK_PHASE_CAPTURE);
   g_signal_connect(ec, "event", G_CALLBACK(on_mouse), s);
   gtk_widget_add_controller(s->panel, ec);
-  b = page(s, "updates", "Обновления CLBB", "Новые версии без потери данных игры и настроек.");
-  card = section(b, "Версия приложения");
-  s->update_version = label("", "clbb-label");
-  gtk_box_append(GTK_BOX(card), s->update_version);
-  s->update_status = wrap_label("", "clbb-info");
-  gtk_box_append(GTK_BOX(card), s->update_status);
-  s->update_progress = gtk_progress_bar_new();
-  gtk_widget_add_css_class(s->update_progress, "clbb-progress");
-  gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(s->update_progress), TRUE);
-  gtk_box_append(GTK_BOX(card), s->update_progress);
-  GtkWidget *update_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-  s->update_check = gtk_button_new_with_label("Проверить обновления");
-  s->update_install = gtk_button_new_with_label("Установить обновление");
-  gtk_widget_add_css_class(s->update_check, "clbb-bind");
-  gtk_widget_add_css_class(s->update_install, "clbb-bind");
-  g_signal_connect(s->update_check, "clicked", G_CALLBACK(update_clicked), s);
-  g_signal_connect(s->update_install, "clicked", G_CALLBACK(update_clicked), s);
-  gtk_box_append(GTK_BOX(update_row), s->update_check);
-  gtk_box_append(GTK_BOX(update_row), s->update_install);
-  gtk_box_append(GTK_BOX(card), update_row);
-  gtk_box_append(GTK_BOX(card), wrap_label("Загрузка выполняется в фоне. Установленная версия включится при следующем запуске CLBB.", "clbb-muted"));
   g_signal_connect(sidebar, "row-selected", G_CALLBACK(nav_selected), s);
   gtk_list_box_select_row(GTK_LIST_BOX(sidebar), gtk_list_box_get_row_at_index(
                                                      GTK_LIST_BOX(sidebar), 0));
@@ -1216,18 +1204,6 @@ void clbb_settings_refresh(ClbbSettings *s) {
   char *update_label = g_strdup_printf("CLBB · %s", update_text);
   gtk_label_set_text(GTK_LABEL(s->update_version), update_label);
   g_free(update_label); g_free(update_text);
-  update_text = read_text(s, "updates.status", "Обновления доступны в установленной версии CLBB.");
-  gtk_label_set_text(GTK_LABEL(s->update_status), update_text); g_free(update_text);
-  gboolean update_busy = read_bool(s, "updates.busy", FALSE);
-  char *progress_text = read_text(s, "updates.progress", "-1");
-  double percent = g_ascii_strtod(progress_text, NULL);g_free(progress_text);
-  gtk_widget_set_visible(s->update_progress, update_busy);
-  if (update_busy) {
-    if (percent >= 0) {gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(s->update_progress), CLAMP(percent / 100.0, 0.0, 1.0));char *text = g_strdup_printf("%.1f%%",percent);gtk_progress_bar_set_text(GTK_PROGRESS_BAR(s->update_progress),text);g_free(text);}
-    else {gtk_progress_bar_set_text(GTK_PROGRESS_BAR(s->update_progress),"Выполняется…");gtk_progress_bar_pulse(GTK_PROGRESS_BAR(s->update_progress));}
-  }
-  gtk_widget_set_sensitive(s->update_check, !read_bool(s, "updates.busy", FALSE));
-  gtk_widget_set_sensitive(s->update_install, read_bool(s, "updates.available", FALSE));
   }
   display_refresh(s);
   pacing_refresh(s);
