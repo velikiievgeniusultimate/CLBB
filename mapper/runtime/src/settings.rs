@@ -188,7 +188,7 @@ impl Settings {
             "movement.hold_ms" => "150".into(),
             "movement.button" => (MOUSE | 2).to_string(),
             "audio.input_device" | "audio.output_device" => "default".into(),
-            "audio.volume" => "100".into(),
+            "audio.volume" | "audio.game_volume" | "audio.voice_volume" => "100".into(),
             "audio.muted" => "false".into(),
             "hotkeys.settings" => F7.to_string(),
             "hotkeys.confine" => F12.to_string(),
@@ -307,7 +307,7 @@ impl Settings {
             "display.vsync" => matches!(value, "true" | "false" | "0" | "1"),
             "enabled" | "audio.muted" | "debug.recording" | "debug.auto_marks" => matches!(value, "true" | "false" | "0" | "1"),
             "audio.input_device" | "audio.output_device" => !value.is_empty() && value.len() <= 255 && value.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b)),
-            "audio.volume" => integer.is_some_and(|v| (0..=100).contains(&v)),
+            "audio.volume" | "audio.game_volume" | "audio.voice_volume" => integer.is_some_and(|v| (0..=100).contains(&v)),
             "movement.click_mode" => matches!(value, "0" | "1"),
             "movement.click_distance_percent" => integer.is_some_and(|v| (0..=500).contains(&v)),
             "movement.hold_ms" => integer.is_some_and(|v| (40..=600).contains(&v)),
@@ -428,6 +428,23 @@ pub fn tap_only(slot: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn audio_channels_are_independent_and_old_settings_default_full_volume() {
+        let mut s=Settings::default();
+        s.set("audio.volume","72",0).unwrap();
+        assert_eq!(s.integer("audio.game_volume",0),100);
+        assert_eq!(s.integer("audio.voice_volume",0),100);
+        s.set("audio.game_volume","0",0).unwrap();
+        s.set("audio.voice_volume","35",0).unwrap();
+        let restored:Settings=serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(restored.integer("audio.volume",0),72);
+        assert_eq!(restored.integer("audio.game_volume",0),0);
+        assert_eq!(restored.integer("audio.voice_volume",0),35);
+        for key in ["audio.volume","audio.game_volume","audio.voice_volume"] {
+            for bad in ["-1","101","NaN"] {assert!(s.set(key,bad,0).is_err());}
+        }
+    }
+
     #[test]
     fn debug_shortcuts_preserve_modifiers_and_do_not_steal_plain_s() {
         let mut s=Settings::default();assert!(!s.boolean("debug.recording",25));assert!(s.boolean("debug.auto_marks",25));

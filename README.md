@@ -176,6 +176,17 @@ F7 → **Sound** lets you select the output and microphone. Choices persist;
 Output monitors are excluded from the microphone picker. Disconnected selections
 remain visible as unavailable. Enable voice chat inside the game itself.
 
+Громкость разделена на **Общий уровень**, **Игра** и **Голосовой чат**.
+Общий уровень умножается на уровень каждого канала. Голосовой регулятор меняет
+громкость собеседников, а не микрофона. Настройки сохраняются; новые каналы по
+умолчанию имеют 100%, прежняя общая громкость сохраняется.
+
+Volume has separate **Master**, **Game** and **Voice chat** sliders. Master gain
+multiplies both channel gains. Voice controls received speech, not microphone
+capture. Channel settings persist and default to 100%; existing master volume is
+preserved. Android VOICE_CALL/BLUETOOTH_SCO playback is routed to voice gain;
+other AudioTrack streams and the game's OpenSL ES playback use game gain.
+
 AudioRecord PCM16 capture is implemented in Rust with a bounded 200 ms queue and
 10 ms capture fragments. Java/JNI adapters support short arrays, byte arrays and
 direct buffers, blocking/nonblocking reads, and explicit initialization failures.

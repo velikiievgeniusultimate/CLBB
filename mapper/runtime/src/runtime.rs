@@ -30,6 +30,20 @@ static GAIN: AtomicU32 = AtomicU32::new(1f32.to_bits());
 pub extern "C" fn clbb_audio_gain() -> f32 {
     f32::from_bits(GAIN.load(Ordering::Relaxed)) * crate::audio::stream_gain()
 }
+static GAME_GAIN: AtomicU32 = AtomicU32::new(1f32.to_bits());
+static VOICE_GAIN: AtomicU32 = AtomicU32::new(1f32.to_bits());
+#[unsafe(no_mangle)]
+pub extern "C" fn clbb_audio_game_gain() -> f32 {
+    clbb_audio_gain() * f32::from_bits(GAME_GAIN.load(Ordering::Relaxed))
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn clbb_audio_voice_gain() -> f32 {
+    clbb_audio_gain() * f32::from_bits(VOICE_GAIN.load(Ordering::Relaxed))
+}
+fn configure_channel_gains(settings: &Settings) {
+    GAME_GAIN.store((settings.integer("audio.game_volume", 0) as f32 / 100.).to_bits(), Ordering::Relaxed);
+    VOICE_GAIN.store((settings.integer("audio.voice_volume", 0) as f32 / 100.).to_bits(), Ordering::Relaxed);
+}
 #[derive(Default)]
 struct Shared {
     sample: Option<Arc<Sample>>,
@@ -258,6 +272,7 @@ impl Adapter {
             self.settings.integer("audio.volume", 0) as f32 / 100.
         };
         GAIN.store(v.to_bits(), Ordering::Relaxed);
+        configure_channel_gains(&self.settings);
     }
 }
 fn android_packet_point(p: Point, size: [f64; 2]) -> Point {
@@ -1221,6 +1236,7 @@ pub unsafe extern "C" fn clbb_mapper_config_resolution(width: *mut i32, height: 
         settings.integer("audio.volume", 0) as f32 / 100.
     };
     GAIN.store(gain.to_bits(), Ordering::Relaxed);
+    configure_channel_gains(&settings);
     crate::pacing::clbb_frame_pacer_configure(
         settings.integer("display.fps_limit", 0) as u32,
         i32::from(settings.boolean("display.vsync", 0)),

@@ -831,7 +831,7 @@ index febf9f3..922f45d 100644
 + void (*close_capture)(uint64_t)=dlsym(RTLD_DEFAULT,"clbb_capture_close");if(close_capture)close_capture(id);
  }
 diff --git a/src/api-impl-jni/audio/android_media_AudioTrack.c b/src/api-impl-jni/audio/android_media_AudioTrack.c
-index 78d094f..4838d00 100644
+index 78d094f..beedd30 100644
 --- a/src/api-impl-jni/audio/android_media_AudioTrack.c
 +++ b/src/api-impl-jni/audio/android_media_AudioTrack.c
 @@ -2,6 +2,7 @@
@@ -910,12 +910,12 @@ index 78d094f..4838d00 100644
  
  	// TODO: snd_pcm_hw_params_free(params) causes segfault, is it not supposed to be called?
  	snd_pcm_close(pcm_handle);
-@@ -196,24 +210,33 @@ JNIEXPORT void JNICALL Java_android_media_AudioTrack_native_1play(JNIEnv *env, j
+@@ -196,24 +210,40 @@ JNIEXPORT void JNICALL Java_android_media_AudioTrack_native_1play(JNIEnv *env, j
  	/*--↑*/
  }
  
 -static int write_frames(snd_pcm_t *pcm_handle, const void *buffer, int frames_to_write, float volume)
-+static int write_frames(snd_pcm_t *pcm_handle, const void *buffer, int frames_to_write, int channels, float volume)
++static int write_frames(snd_pcm_t *pcm_handle, const void *buffer, int frames_to_write, int channels, float volume, int stream_type)
  {
 -	if (volume != 1.f) {
 -		for (int i = 0; i < frames_to_write * 2; i++)
@@ -934,11 +934,18 @@ index 78d094f..4838d00 100644
 -	}
 -	return frames_written;
 +    /* Keep Java PCM intact: a short-write retry must not apply gain twice. */
-+    static gsize gain_symbol = 0;
-+    if (g_once_init_enter(&gain_symbol)) {
-+        void *p = dlsym(RTLD_DEFAULT, "clbb_master_gain");
-+        g_once_init_leave(&gain_symbol, p ? (gsize)p : 1);
++    /* Android VOICE_CALL=0 and BLUETOOTH_SCO=6 are received speech.
++       Classify by stream semantics, never by sample rate or desktop stream name. */
++    static gsize game_symbol = 0, voice_symbol = 0;
++    if (g_once_init_enter(&game_symbol)) {
++        void *p = dlsym(RTLD_DEFAULT, "clbb_game_gain");
++        g_once_init_leave(&game_symbol, p ? (gsize)p : 1);
 +    }
++    if (g_once_init_enter(&voice_symbol)) {
++        void *p = dlsym(RTLD_DEFAULT, "clbb_voice_gain");
++        g_once_init_leave(&voice_symbol, p ? (gsize)p : 1);
++    }
++    gsize gain_symbol = (stream_type == 0 || stream_type == 6) ? voice_symbol : game_symbol;
 +    if (gain_symbol > 1) volume *= ((float (*)(void))gain_symbol)();
 +    if (frames_to_write < 0 || channels < 1 || channels > 8 || frames_to_write > 1048576) return 0;
 +    jshort *scaled = NULL;
@@ -961,25 +968,25 @@ index 78d094f..4838d00 100644
  }
  
  JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1write___3BIIF(JNIEnv *env, jobject this, jbyteArray audio_data, jint offset_in_bytes, jint frames_to_write, jfloat volume)
-@@ -221,7 +244,7 @@ JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1write___3BIIF(JNIEn
+@@ -221,7 +251,7 @@ JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1write___3BIIF(JNIEn
  	snd_pcm_t *pcm_handle = _PTR(_GET_LONG_FIELD(this, "pcm_handle"));
  
  	jbyte *buffer = _GET_BYTE_ARRAY_ELEMENTS(audio_data);
 -	snd_pcm_sframes_t frames_written = write_frames(pcm_handle, buffer + offset_in_bytes, frames_to_write, volume);
-+	snd_pcm_sframes_t frames_written = write_frames(pcm_handle, buffer + offset_in_bytes, frames_to_write, _GET_INT_FIELD(this,"channels"), volume);
++	snd_pcm_sframes_t frames_written = write_frames(pcm_handle, buffer + offset_in_bytes, frames_to_write, _GET_INT_FIELD(this,"channels"), volume, _GET_INT_FIELD(this,"streamType"));
  	_RELEASE_BYTE_ARRAY_ELEMENTS(audio_data, buffer);
  
  	return frames_written;
-@@ -232,7 +255,7 @@ JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1write___3SIIF(JNIEn
+@@ -232,7 +262,7 @@ JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1write___3SIIF(JNIEn
  	snd_pcm_t *pcm_handle = _PTR(_GET_LONG_FIELD(this, "pcm_handle"));
  
  	jshort *buffer = (*env)->GetShortArrayElements(env, audio_data, NULL);
 -	snd_pcm_sframes_t frames_written = write_frames(pcm_handle, buffer + offset_in_shorts, frames_to_write, volume);
-+	snd_pcm_sframes_t frames_written = write_frames(pcm_handle, buffer + offset_in_shorts, frames_to_write, _GET_INT_FIELD(this,"channels"), volume);
++	snd_pcm_sframes_t frames_written = write_frames(pcm_handle, buffer + offset_in_shorts, frames_to_write, _GET_INT_FIELD(this,"channels"), volume, _GET_INT_FIELD(this,"streamType"));
  	(*env)->ReleaseShortArrayElements(env, audio_data, buffer, 0);
  
  	return frames_written;
-@@ -247,7 +270,8 @@ JNIEXPORT void JNICALL Java_android_media_AudioTrack_native_1pause(JNIEnv *env,
+@@ -247,7 +277,8 @@ JNIEXPORT void JNICALL Java_android_media_AudioTrack_native_1pause(JNIEnv *env,
  JNIEXPORT void JNICALL Java_android_media_AudioTrack_native_1release(JNIEnv *env, jobject this)
  {
  	snd_pcm_t *pcm_handle = _PTR(_GET_LONG_FIELD(this, "pcm_handle"));
@@ -989,7 +996,7 @@ index 78d094f..4838d00 100644
  }
  
  JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1getPlaybackHeadPosition(JNIEnv *env, jobject this)
-@@ -258,3 +282,13 @@ JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1getPlaybackHeadPosi
+@@ -258,3 +289,13 @@ JNIEXPORT jint JNICALL Java_android_media_AudioTrack_native_1getPlaybackHeadPosi
  
  	return delay;
  }
@@ -6774,10 +6781,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..67ca979
+index 0000000..c53d1a2
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,891 @@
+@@ -0,0 +1,905 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -6801,6 +6808,8 @@ index 0000000..67ca979
 +extern int clbb_view_cancel_mouse(GtkWidget *, int);
 +typedef float (*ClbbGain)(void);
 +static _Atomic(ClbbGain) master_gain;
++static _Atomic(ClbbGain) game_gain;
++static _Atomic(ClbbGain) voice_gain;
 +typedef void (*ClbbFrameWait)(void);
 +typedef unsigned int (*ClbbFrameConfiguration)(void);
 +static _Atomic(ClbbFrameWait) frame_wait;
@@ -6846,6 +6855,14 @@ index 0000000..67ca979
 +float clbb_master_gain(void) {
 +    ClbbGain gain = atomic_load_explicit(&master_gain, memory_order_relaxed);
 +    return gain ? gain() : 1.f;
++}
++float clbb_game_gain(void) {
++    ClbbGain gain = atomic_load_explicit(&game_gain, memory_order_relaxed);
++    return gain ? gain() : clbb_master_gain();
++}
++float clbb_voice_gain(void) {
++    ClbbGain gain = atomic_load_explicit(&voice_gain, memory_order_relaxed);
++    return gain ? gain() : clbb_master_gain();
 +}
 +typedef struct {
 +    GtkWindow *window;
@@ -7578,6 +7595,8 @@ index 0000000..67ca979
 +    atomic_store_explicit(&master_gain,
 +                          (ClbbGain)dlsym(library, "clbb_audio_gain"),
 +                          memory_order_relaxed);
++    atomic_store_explicit(&game_gain, (ClbbGain)dlsym(library, "clbb_audio_game_gain"), memory_order_relaxed);
++    atomic_store_explicit(&voice_gain, (ClbbGain)dlsym(library, "clbb_audio_voice_gain"), memory_order_relaxed);
 +    atomic_store_explicit(&render_event,
 +                         (ClbbRenderEvent)dlsym(library,"clbb_render_frame_event"), memory_order_release);
 +    atomic_store_explicit(&frame_wait,
@@ -7654,6 +7673,8 @@ index 0000000..67ca979
 +    atomic_store_explicit(&master_gain,
 +                          (ClbbGain)dlsym(h->library, "clbb_audio_gain"),
 +                          memory_order_relaxed);
++    atomic_store_explicit(&game_gain, (ClbbGain)dlsym(h->library, "clbb_audio_game_gain"), memory_order_relaxed);
++    atomic_store_explicit(&voice_gain, (ClbbGain)dlsym(h->library, "clbb_audio_voice_gain"), memory_order_relaxed);
 +    h->keys = g_hash_table_new(g_direct_hash, g_direct_equal);
 +    h->claimed = g_hash_table_new(g_direct_hash, g_direct_equal);
 +    ClbbSettingsCallbacks cb = {read_setting, write_setting, visibility, h};

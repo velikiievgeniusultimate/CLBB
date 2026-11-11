@@ -1175,7 +1175,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_box_append(GTK_BOX(b), s->hero_box);
   s->common_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
   gtk_box_append(GTK_BOX(b), s->common_box);
-  b = page(s, "sound", "Звук", "Единая громкость приложения.");
+  b = page(s, "sound", "Звук", "Общий уровень, игровой звук и голосовой чат.");
   card = section(b, "Аудиоустройства");
   gtk_box_append(GTK_BOX(card),wrap_label("Аудиовывод", "clbb-muted"));
   s->audio_output=gtk_drop_down_new(NULL,NULL);g_object_set_data(G_OBJECT(s->audio_output),"clbb-settings-key","audio.output_device");gtk_box_append(GTK_BOX(card),s->audio_output);
@@ -1188,18 +1188,21 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   s->audio_status=wrap_label("Поиск аудиоустройств…","clbb-muted");gtk_box_append(GTK_BOX(card),s->audio_status);
   gtk_box_append(GTK_BOX(card),wrap_label("Выбор применяется только к CLBB. Включите микрофон в самой игре для голосового чата.","clbb-muted"));
   card = section(b, "Громкость CLBB");
-  c = new_control(s, card, "Общий уровень", "audio.volume", CONTROL_VOLUME,
-                  100);
-  c->widget = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1);
-  gtk_scale_set_draw_value(GTK_SCALE(c->widget), TRUE);
-  gtk_scale_set_value_pos(GTK_SCALE(c->widget), GTK_POS_RIGHT);
-  gtk_widget_set_size_request(c->widget, 280, -1);
-  g_signal_connect(c->widget, "value-changed", G_CALLBACK(changed_volume), c);
-  gtk_box_append(GTK_BOX(c->row), c->widget);
+  const char *volume_titles[] = {"Общий уровень", "Игра", "Голосовой чат"};
+  const char *volume_keys[] = {"audio.volume", "audio.game_volume", "audio.voice_volume"};
+  for (guint i = 0; i < G_N_ELEMENTS(volume_keys); ++i) {
+    c = new_control(s, card, volume_titles[i], volume_keys[i], CONTROL_VOLUME, 100);
+    c->widget = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1);
+    gtk_scale_set_draw_value(GTK_SCALE(c->widget), TRUE);
+    gtk_scale_set_value_pos(GTK_SCALE(c->widget), GTK_POS_RIGHT);
+    gtk_widget_set_size_request(c->widget, 280, -1);
+    g_signal_connect(c->widget, "value-changed", G_CALLBACK(changed_volume), c);
+    gtk_box_append(GTK_BOX(c->row), c->widget);
+  }
   switch_control(s, card, "Выключить звук", "audio.muted", 0);
   gtk_box_append(
       GTK_BOX(card),
-      wrap_label("Регулятор применяется к игровому звуку и видеороликам.",
+      wrap_label("Общий уровень управляет обоими каналами. Голосовой чат — громкость собеседников; громкость микрофона не меняется.",
                  "clbb-muted"));
   b = page(s, "hotkeys", "Горячие клавиши",
            "Системные действия можно назначить на удобные кнопки.");

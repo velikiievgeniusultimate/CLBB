@@ -155,6 +155,8 @@ int main(int argc, char **argv) {
   put(&p, "common.bindings.attack.key", "32");
   put(&p, "common.bindings.extra:2.key", "70");
   put(&p, "audio.volume", "72");
+  put(&p, "audio.game_volume", "100");
+  put(&p, "audio.voice_volume", "100");
   put(&p,"audio.input_device","default");put(&p,"audio.output_device","default");
   put(&p,"audio.input_devices","default\tDefault\nmic.one\tМикрофон гарнитуры\nmic.two\tВнешний микрофон\n");
   put(&p,"audio.output_devices","default\tDefault\nsink.one\tНаушники\nsink.two\tКолонки\n");
@@ -201,6 +203,16 @@ int main(int argc, char **argv) {
     clbb_settings_refresh(s);
   }
   if (selftest) {
+    const char *volume_keys[]={"audio.volume","audio.game_volume","audio.voice_volume"};
+    for (guint i=0;i<G_N_ELEMENTS(volume_keys);i++) {
+      GtkWidget *row=find_control(clbb_settings_panel(s),volume_keys[i]);
+      GtkWidget *slider=find_type(row,GTK_TYPE_SCALE);g_assert_nonnull(slider);
+      gtk_range_set_value(GTK_RANGE(slider),20+i*10);
+      char expected[16];g_snprintf(expected,sizeof(expected),"%u",20+i*10);
+      g_assert_cmpstr(read_value(&p,volume_keys[i]),==,expected);
+    }
+    guint volume_writes=p.writes;clbb_settings_refresh(s);
+    g_assert_cmpuint(p.writes,==,volume_writes);
     GtkWidget *mic=find_control(clbb_settings_panel(s),"audio.input_device");
     GtkWidget *speaker=find_control(clbb_settings_panel(s),"audio.output_device");
     g_assert_nonnull(mic);g_assert_nonnull(speaker);
