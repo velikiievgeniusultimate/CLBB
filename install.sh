@@ -122,6 +122,10 @@ if [ -f "$CLBB_GAME_STATE/game/base.apk" ]; then
     fi
     python3 "$CLBB_NATIVE_HELPER" "$CLBB_GAME_STATE"
 fi
-clbb_stage '[8/8] Готово / Complete' 
+clbb_stage '[8/8] Регистрация ярлыка в меню приложений / Registering application shortcut'
+curl --fail --location --progress-bar --show-error --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 60 \
+    "https://raw.githubusercontent.com/$CLBB_REPO/main/distribution/desktop_entry.py" -o "$CLBB_TMP/desktop_entry.py"
+python3 "$CLBB_TMP/desktop_entry.py"
+clbb_stage 'Готово / Complete'  
 printf 'Журнал установки / Installation log: %s\n' "$CLBB_LOG"
 printf '%s\n' 'CLBB установлен / installed. Запустите CLBB из меню приложений / Launch CLBB from your application menu.'

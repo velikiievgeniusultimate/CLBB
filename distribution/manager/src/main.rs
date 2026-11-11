@@ -137,10 +137,9 @@ exit "$CLBB_EXIT"
 "#);
 
     write_atomic(&bin.join("clbb"),script.as_bytes())?;fs::set_permissions(bin.join("clbb"),fs::Permissions::from_mode(0o755))?;
-    let data=env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(||home.join(".local/share"));
-    let exe=bin.join("clbb").to_string_lossy().replace('\\',"\\\\").replace('"',"\\\"").replace('`',"\\`").replace('$',"\\$").replace('%',"%%");
-    let desktop=format!("[Desktop Entry]\nType=Application\nName=CLBB\nComment=Computer Legends Bang Bang\nComment[ru]=Computer Legends Bang Bang — Linux-клиент\nExec=\"{exe}\"\nTerminal=false\nCategories=Game;\nIcon=applications-games\nStartupNotify=true\n");
-    write_atomic(&data.join("applications/org.clbb.CLBB.desktop"),desktop.as_bytes())?;Ok(())
+    let result=Command::new("python3").arg("-c").arg(include_str!("../../desktop_entry.py")).output()?;
+    if !result.status.success(){return Err(fail(&String::from_utf8_lossy(&result.stderr)));}
+    eprint!("{}",String::from_utf8_lossy(&result.stdout));Ok(())
 }
 #[cfg(not(target_os="linux"))]
 fn entrypoints(_root:&Path)->Result<()>{Err(fail("Entrypoints not implemented on this OS"))}
@@ -161,7 +160,7 @@ fn verify_payload(root:&Path,manifest:&Path)->Result<()> {
 fn install(rel:&Value,root:&Path,allow_deps:bool)->Result<Value> {
     supported()?;let tag=rel["tag_name"].as_str().ok_or("Missing release version")?;
     let current=installed(root);
-    if version(&current).is_some_and(|v|v>=version(tag).unwrap()){return Ok(json!({"state":"current","version":current}));}
+    if version(&current).is_some_and(|v|v>=version(tag).unwrap()){entrypoints(root)?;return Ok(json!({"state":"current","version":current}));}
     fs::create_dir_all(root)?;
     let _lock=update_lock(root)?;
     let work=root.join(format!(".download-{}",std::process::id()));fs::create_dir(&work)?;let _work=Guard(work.clone());

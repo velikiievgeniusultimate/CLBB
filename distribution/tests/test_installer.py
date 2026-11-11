@@ -13,6 +13,7 @@ class InstallerTests(unittest.TestCase):
             helper=p/'manager'
             helper.write_text('#!'+sys.executable+'\nimport json,os,sys\nfrom pathlib import Path\np=Path(os.environ["CLBB_FIXTURE"])\nwith (p/"calls").open("a")as f:f.write(json.dumps(sys.argv[1:])+"\\n")\nprint("{}")\n')
             digest=hashlib.sha256(helper.read_bytes()).hexdigest()
+            (p/'desktop_entry.py').write_text('print("desktop registration fixture")\n')
             (p/'SHA256SUMS').write_text(digest+'  clbb-manager-linux-x86_64\n')
             (p/'releases.json').write_text(json.dumps([{'tag_name':'v0.1.0-alpha.3','draft':False}]))
             (p/'game-apk.json').write_text(json.dumps({'package':'com.mobile.legends','download_url':manifest_url,'sha256':'a'*64}))
@@ -20,7 +21,7 @@ class InstallerTests(unittest.TestCase):
 from pathlib import Path
 args=sys.argv[1:];p=Path(os.environ['CLBB_FIXTURE']);url=next(a for a in args if a.startswith('https://'))
 with (p/'requests').open('a')as f:f.write(url+'\\n')
-name='releases.json'if '/api.github.com/'in url else 'game-apk.json'if url.endswith('/game-apk.json')else 'SHA256SUMS'if url.endswith('/SHA256SUMS')else 'manager'
+name='desktop_entry.py'if url.endswith('/desktop_entry.py')else 'releases.json'if '/api.github.com/'in url else 'game-apk.json'if url.endswith('/game-apk.json')else 'SHA256SUMS'if url.endswith('/SHA256SUMS')else 'manager'
 flag='--output'if '--output'in args else '-o';shutil.copyfile(p/name,args[args.index(flag)+1])
 ''');curl.chmod(0o755)
             for tool,text in [('pacman','exit 0'),('id','echo 1000')]:
