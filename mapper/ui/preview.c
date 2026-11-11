@@ -1,0 +1,484 @@
+/* Development preview only. It uses an in-memory model and never opens the
+ * game process, reads game memory, grabs a pointer, or modifies user settings.
+ * Run on a separate Xvfb display to inspect without focusing the game. */
+#include "clbb-settings.h"
+#include <string.h>
+
+typedef struct {
+  GHashTable *values;
+  GMainLoop *loop;
+  guint writes;
+  guint visible;
+} Preview;
+static const char *read_value(void *data, const char *key) {
+  Preview *p = data;
+  if (g_str_has_prefix(key, "hero.bindings.") && !strstr(key, ".override") &&
+      !strstr(key, "skill:") && !strstr(key, "combo:")) {
+    const char *slot = key + strlen("hero.bindings.");
+    const char *dot = strrchr(slot, '.');
+    if (dot) {
+      char *o = g_strdup_printf("hero.bindings.%.*s.override",
+                                (int)(dot - slot), slot);
+      const char *enabled = g_hash_table_lookup(p->values, o);
+      g_free(o);
+      if (g_strcmp0(enabled, "true")) {
+        char *c = g_strdup_printf("common.bindings.%s", slot);
+        const char *v = g_hash_table_lookup(p->values, c);
+        g_free(c);
+        return v;
+      }
+    }
+  }
+  return g_hash_table_lookup(p->values, key);
+}
+static gboolean write_value(void *data, const char *key, const char *value) {
+  Preview *p = data;
+  if ((g_str_has_suffix(key, ".key") || g_str_has_prefix(key, "hotkeys.") ||
+       !strcmp(key, "movement.button")) &&
+      g_ascii_strtoll(value, NULL, 0) == 0x02000001)
+    return FALSE;
+  if (g_str_has_prefix(key, "hotkeys.")) {
+    const char *slots[] = {"hotkeys.settings", "hotkeys.confine",
+                           "hotkeys.fullscreen"};
+    for (guint i = 0; i < G_N_ELEMENTS(slots); ++i)
+      if (strcmp(slots[i], key) && g_ascii_strtoll(value, NULL, 0) &&
+          g_ascii_strtoll(value, NULL, 0) ==
+              g_ascii_strtoll(read_value(p, slots[i]) ? read_value(p, slots[i])
+                                                      : "0",
+                              NULL, 0))
+        return FALSE;
+  }
+  if (!strcmp(key, "display.resolution")) {
+    char **size = g_strsplit(value, "x", -1);
+    char *end_w = NULL, *end_h = NULL;
+    gint64 w = size[0] ? g_ascii_strtoll(size[0], &end_w, 10) : 0;
+    gint64 h = size[1] ? g_ascii_strtoll(size[1], &end_h, 10) : 0;
+    gboolean valid = g_strv_length(size) == 2 && end_w && !*end_w && end_h &&
+                     !*end_h && w >= 256 && w <= 8192 && h >= 256 && h <= 8192;
+    if (!valid) {
+      g_strfreev(size);
+      return FALSE;
+    }
+    g_hash_table_replace(p->values, g_strdup("display.width"),
+                         g_strdup(size[0]));
+    g_hash_table_replace(p->values, g_strdup("display.height"),
+                         g_strdup(size[1]));
+    g_strfreev(size);
+  }
+  if (!strcmp(key, "display.frame_pacing")) {
+    char **fields = g_strsplit(value, ";", -1);
+    gboolean valid =
+        g_strv_length(fields) == 2 && g_str_has_prefix(fields[0], "limit=") &&
+        (!strcmp(fields[1], "vsync=0") || !strcmp(fields[1], "vsync=1"));
+    char *end = NULL;
+    gint64 fps = valid ? g_ascii_strtoll(fields[0] + 6, &end, 10) : 0;
+    valid = valid && end && !*end && fps >= 30 && fps <= 240;
+    if (!valid) {
+      g_strfreev(fields);
+      return FALSE;
+    }
+    g_hash_table_replace(p->values, g_strdup("display.fps_limit"),
+                         g_strdup(fields[0] + 6));
+    g_hash_table_replace(
+        p->values, g_strdup("display.vsync"),
+        g_strdup(!strcmp(fields[1], "vsync=1") ? "true" : "false"));
+    g_strfreev(fields);
+  }
+  g_hash_table_replace(p->values, g_strdup(key), g_strdup(value));
+  p->writes++;
+  return TRUE;
+}
+static void visibility(void *data, gboolean visible) {
+  Preview *p = data;
+  p->visible += visible ? 1 : 0;
+}
+static void visible_changed(GObject *object, GParamSpec *spec, gpointer data) {
+  (void)spec;
+  Preview *p = data;
+  if (!gtk_widget_get_visible(GTK_WIDGET(object)))
+    g_main_loop_quit(p->loop);
+}
+static gboolean quit_later(gpointer data) {
+  g_main_loop_quit(data);
+  return G_SOURCE_REMOVE;
+}
+static GtkWidget *find_type(GtkWidget *root, GType type) {
+  if (g_type_is_a(G_OBJECT_TYPE(root), type))
+    return root;
+  for (GtkWidget *w = gtk_widget_get_first_child(root); w;
+       w = gtk_widget_get_next_sibling(w)) {
+    GtkWidget *r = find_type(w, type);
+    if (r)
+      return r;
+  }
+  return NULL;
+}
+static GtkWidget *find_button(GtkWidget *root, const char *text) {
+  if (GTK_IS_BUTTON(root) &&
+      !g_strcmp0(gtk_button_get_label(GTK_BUTTON(root)), text))
+    return root;
+  for (GtkWidget *w = gtk_widget_get_first_child(root); w;
+       w = gtk_widget_get_next_sibling(w)) {
+    GtkWidget *r = find_button(w, text);
+    if (r)
+      return r;
+  }
+  return NULL;
+}
+static GtkWidget *find_control(GtkWidget *root, const char *key) {
+  const char *row_key = g_object_get_data(G_OBJECT(root), "clbb-settings-key");
+  if (row_key && !strcmp(row_key, key))
+    return root;
+  for (GtkWidget *w = gtk_widget_get_first_child(root); w;
+       w = gtk_widget_get_next_sibling(w)) {
+    GtkWidget *result = find_control(w, key);
+    if (result)
+      return result;
+  }
+  return NULL;
+}
+static void put(Preview *p, const char *k, const char *v) {
+  g_hash_table_replace(p->values, g_strdup(k), g_strdup(v));
+}
+int main(int argc, char **argv) {
+  gtk_init();
+  Preview p = {
+      .values = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free),
+      .loop = g_main_loop_new(NULL, FALSE)};
+  put(&p, "hero.id", "25");
+  put(&p, "hero.name", "Кагура");
+  put(&p, "status", "Матч активен · профиль Кагуры");
+  put(&p, "diagnostics.source_ms", "0.12");
+  put(&p, "hotkeys.settings", "16777270");
+  put(&p, "hotkeys.confine", "16777275");
+  put(&p, "hotkeys.fullscreen", "16777274");
+  put(&p, "common.bindings.attack.key", "32");
+  put(&p, "common.bindings.extra:2.key", "70");
+  put(&p, "audio.volume", "72");
+  put(&p, "display.width", "1280");
+  put(&p, "display.height", "720");
+  put(&p, "display.imported_resolution", "4000x3111");
+  put(&p, "display.fps_limit", "60");
+  put(&p, "display.vsync", "true");
+  put(&p, "updates.version", "v0.1.0-alpha.1");
+  put(&p, "updates.status", "Доступна новая версия CLBB.");
+  put(&p, "updates.available", "true");
+  ClbbSettingsCallbacks callbacks = {read_value, write_value, visibility, &p};
+  GtkWindow *preview = GTK_WINDOW(gtk_window_new());
+  gtk_window_set_title(preview, "CLBB · Настройки");
+  GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(preview));
+  GdkMonitor *monitor = g_list_model_get_item(gdk_display_get_monitors(display), 0);
+  GdkRectangle area;
+  gdk_monitor_get_geometry(monitor, &area);
+  g_object_unref(monitor);
+  gtk_window_set_default_size(preview, MIN(1060, area.width - 32),
+                              MIN(760, area.height - 64));
+  GtkWidget *overlay = gtk_overlay_new();
+  gtk_window_set_child(preview, overlay);
+  ClbbSettings *s = clbb_settings_create(GTK_OVERLAY(overlay), &callbacks);
+  gboolean selftest = FALSE;
+  gboolean linked_hero = FALSE;
+  const char *tab = "main";
+  guint timeout = 0;
+  for (int i = 1; i < argc; ++i) {
+    if (!strcmp(argv[i], "--self-test"))
+      selftest = TRUE;
+    else if (!strcmp(argv[i], "--linked-hero"))
+      linked_hero = TRUE;
+    else if (!strcmp(argv[i], "--tab") && i + 1 < argc)
+      tab = argv[++i];
+    else if (!strcmp(argv[i], "--timeout") && i + 1 < argc)
+      timeout = (guint)g_ascii_strtoull(argv[++i], NULL, 10);
+  }
+  if (linked_hero) {
+    put(&p, "hero.id", "133");put(&p, "hero.name", "Хирара");
+    put(&p, "hero.linked_controls", "1");put(&p, "hero.skill0_type", "1");
+    put(&p, "hero.bindings.combo:0.key", "69");put(&p, "hero.bindings.combo:1.key", "82");
+    clbb_settings_refresh(s);
+  }
+  if (selftest) {
+    GtkWidget *record_row = find_control(clbb_settings_panel(s), "debug.recording");
+    GtkWidget *record_button = find_type(record_row, GTK_TYPE_TOGGLE_BUTTON);
+    g_assert_nonnull(record_button);
+    for (int cycle = 0; cycle < 20; ++cycle) {
+      gboolean active = cycle % 2 == 0;
+      gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(record_button), active);
+      g_assert_cmpstr(read_value(&p, "debug.recording"), ==, active ? "true" : "false");
+      g_assert_cmpstr(gtk_button_get_label(GTK_BUTTON(record_button)), ==,
+                     active ? "ВКЛ · запись" : "ВЫКЛ · запись");
+      guint writes = p.writes;
+      clbb_settings_refresh(s);
+      g_assert_cmpuint(p.writes, ==, writes);
+      g_assert_cmpint(gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(record_button)), ==, active);
+    }
+    g_assert_cmpint(clbb_settings_keycode(GDK_KEY_F7), ==, 0x01000036);
+    g_assert_cmpint(clbb_settings_keycode(GDK_KEY_F12), ==, 0x0100003b);
+    g_assert_cmpint(clbb_settings_keycode(GDK_KEY_q), ==, 'Q');
+    g_assert_cmpint(clbb_settings_chord('S',GDK_CONTROL_MASK),==,0x04000053);
+    g_assert_cmpint(clbb_settings_chord('S',GDK_CONTROL_MASK|GDK_SHIFT_MASK),==,0x06000053);
+    GtkWidget *debug_key = find_button(GTK_WIDGET(clbb_settings_panel(s)), "Ctrl+S");
+    g_assert_nonnull(debug_key);
+    g_signal_emit_by_name(debug_key,"clicked");
+    GListModel *debug_controllers=gtk_widget_observe_controllers(GTK_WIDGET(clbb_settings_panel(s)));
+    gboolean debug_handled=FALSE;
+    for(guint i=0;i<g_list_model_get_n_items(debug_controllers);i++) {
+      GObject *c=g_list_model_get_item(debug_controllers,i);
+      if(GTK_IS_EVENT_CONTROLLER_KEY(c)) g_signal_emit_by_name(c,"key-pressed",GDK_KEY_k,0,GDK_CONTROL_MASK|GDK_SHIFT_MASK,&debug_handled);
+      g_object_unref(c);
+    }
+    g_object_unref(debug_controllers);
+    g_assert_cmpstr(read_value(&p,"debug.mark_shortcut"),==,"100663371");
+    g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)),"Ctrl+Shift+K"));
+    g_assert_cmpint(clbb_settings_keycode(GDK_KEY_Shift_L), ==, 0);
+    g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "Q"));
+    g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "F7"));
+    GtkWidget *q = find_button(GTK_WIDGET(clbb_settings_panel(s)), "Q");
+    g_signal_emit_by_name(q, "clicked");
+    GListModel *controllers =
+        gtk_widget_observe_controllers(GTK_WIDGET(clbb_settings_panel(s)));
+    gboolean handled = FALSE;
+    for (guint n = 0; n < g_list_model_get_n_items(controllers); ++n) {
+      GObject *controller = g_list_model_get_item(controllers, n);
+      if (GTK_IS_EVENT_CONTROLLER_KEY(controller))
+        g_signal_emit_by_name(controller, "key-pressed", GDK_KEY_j, 0, 0,
+                              &handled);
+      g_object_unref(controller);
+    }
+    g_object_unref(controllers);
+    g_assert_cmpstr(read_value(&p, "hero.bindings.skill:0.key"), ==, "74");
+    g_assert(!write_value(&p, "hero.bindings.skill:0.key", "33554433"));
+    g_assert(!write_value(&p, "hotkeys.settings", "16777275"));
+    g_assert(write_value(&p, "hero.bindings.skill:0.key", "88"));
+    clbb_settings_refresh(s);
+    g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "X"));
+    put(&p, "hero.id", "1");
+    put(&p, "hero.name", "Мия");
+    clbb_settings_refresh(s);
+    g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "R"));
+    put(&p, "hero.id", "25");
+    put(&p, "hero.name", "Кагура");
+    clbb_settings_refresh(s);
+    g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "W"));
+    g_assert(write_value(&p, "hero.bindings.extra:2.override", "true"));
+    g_assert(write_value(&p, "hero.bindings.extra:2.key", "86"));
+    clbb_settings_refresh(s);
+    g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "V"));
+    GtkWidget *window = GTK_WIDGET(clbb_settings_panel(s));
+    GtkWidget *update_check = find_button(window, "Проверить обновления");
+    GtkWidget *update_install = find_button(window, "Установить обновление");
+    g_assert(update_check && update_install);
+    g_signal_emit_by_name(update_check, "clicked");
+    g_assert_cmpstr(read_value(&p, "updates.check"), ==, "1");
+    g_assert(gtk_widget_get_sensitive(update_install));
+    g_signal_emit_by_name(update_install, "clicked");
+    g_assert_cmpstr(read_value(&p, "updates.install"), ==, "1");
+    put(&p, "updates.busy", "true");clbb_settings_refresh(s);
+    g_assert(!gtk_widget_get_sensitive(update_check));
+    put(&p, "updates.busy", "false");clbb_settings_refresh(s);
+    g_print("CLBB_UPDATES_UI_OK requests, busy state, install action\n");
+    GtkWidget *distance_row = find_control(window, "movement.click_distance_percent");
+    GtkWidget *distance_spin = find_type(distance_row, GTK_TYPE_SPIN_BUTTON);
+    GtkWidget *movement_mode = find_type(find_control(window, "movement.click_mode"), GTK_TYPE_DROP_DOWN);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(distance_spin)), ==, 100);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(distance_spin), 200);
+    g_assert_cmpstr(read_value(&p, "movement.click_distance_percent"), ==, "200");
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(movement_mode), 1);
+    g_assert_false(gtk_widget_get_visible(distance_row));
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(movement_mode), 0);
+    g_assert_true(gtk_widget_get_visible(distance_row));
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(distance_spin)), ==, 200);
+    const char *stops[] = {"hero.bindings.skill:0.stop_movement",
+                           "hero.bindings.skill:1.stop_movement",
+                           "hero.bindings.skill:1:2521.stop_movement",
+                           "hero.bindings.skill:2.stop_movement",
+                           "common.bindings.extra:2.stop_movement",
+                           "hero.bindings.extra:2.stop_movement"};
+    for (guint n = 0; n < G_N_ELEMENTS(stops); ++n) {
+      GtkWidget *row = find_control(window, stops[n]);
+      g_assert_nonnull(row);
+      GtkWidget *toggle = find_type(row, GTK_TYPE_SWITCH);
+      g_assert_nonnull(toggle);
+      g_assert_true(gtk_widget_get_sensitive(toggle));
+      gtk_switch_set_active(GTK_SWITCH(toggle), TRUE);
+      g_assert_cmpstr(g_hash_table_lookup(p.values, stops[n]), ==, "true");
+    }
+    g_assert_null(find_control(window, "common.bindings.attack.stop_movement"));
+    g_assert_null(
+        find_control(window, "common.bindings.extra:0.stop_movement"));
+    g_assert_null(
+        find_control(window, "common.bindings.shop:quick.stop_movement"));
+    g_assert(write_value(&p, "hero.bindings.extra:2.override", "false"));
+    clbb_settings_refresh(s);
+    GtkWidget *spell_stop =
+        find_type(find_control(window, "hero.bindings.extra:2.stop_movement"),
+                  GTK_TYPE_SWITCH);
+    g_assert_false(gtk_widget_get_sensitive(spell_stop));
+    GtkWidget *presets = find_control(window, "display.preset");
+    GtkWidget *width = find_control(window, "display.width");
+    GtkWidget *height = find_control(window, "display.height");
+    GtkWidget *apply = find_button(window, "Применить");
+    g_assert_nonnull(presets);
+    g_assert_nonnull(width);
+    g_assert_nonnull(height);
+    g_assert_nonnull(apply);
+    guint previous_writes = p.writes;
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(presets), 4);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(width)),
+                    ==, 4000);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(height)),
+                    ==, 3111);
+    g_assert_cmpuint(p.writes, ==, previous_writes);
+    clbb_settings_refresh(s);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(height)),
+                    ==, 3111);
+    g_signal_emit_by_name(apply, "clicked");
+    g_assert_cmpuint(p.writes, ==, previous_writes + 1);
+    g_assert_cmpstr(read_value(&p, "display.resolution"), ==, "4000x3111");
+    g_assert_false(gtk_widget_get_sensitive(apply));
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(presets), 2);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(height), 1081);
+    clbb_settings_refresh(s);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(width)),
+                    ==, 1920);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(height)),
+                    ==, 1081);
+    g_assert_cmpuint(p.writes, ==, previous_writes + 1);
+    g_signal_emit_by_name(apply, "clicked");
+    g_assert_cmpstr(read_value(&p, "display.resolution"), ==, "1920x1081");
+    g_assert_cmpuint(p.writes, ==, previous_writes + 2);
+    g_assert(!write_value(&p, "display.resolution", "8193x720"));
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(width), 9000);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(width)),
+                    ==, 8192);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(width), 1);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(width)),
+                    ==, 256);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(presets), 0);
+    gtk_editable_set_text(GTK_EDITABLE(width), "3333");
+    clbb_settings_refresh(s);
+    g_assert_cmpstr(gtk_editable_get_text(GTK_EDITABLE(width)), ==, "3333");
+    g_assert_cmpuint(p.writes, ==, previous_writes + 2);
+    g_signal_emit_by_name(apply, "clicked");
+    g_assert_cmpstr(read_value(&p, "display.resolution"), ==, "3333x1081");
+    g_assert_cmpuint(p.writes, ==, previous_writes + 3);
+    GtkWidget *fps_preset = find_control(window, "display.fps_preset");
+    GtkWidget *fps_spin = find_control(window, "display.fps_limit");
+    GtkWidget *vsync = find_control(window, "display.vsync");
+    GtkWidget *pacing_apply = find_button(window, "Применить FPS");
+    g_assert_nonnull(fps_preset);
+    g_assert_nonnull(fps_spin);
+    g_assert_nonnull(vsync);
+    g_assert_nonnull(pacing_apply);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(fps_spin)),
+                    ==, 60);
+    g_assert_true(gtk_switch_get_active(GTK_SWITCH(vsync)));
+    g_assert_false(gtk_widget_get_sensitive(pacing_apply));
+    guint pacing_writes = p.writes;
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(fps_preset), 7);
+    gtk_switch_set_active(GTK_SWITCH(vsync), FALSE);
+    clbb_settings_refresh(s);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(fps_spin)),
+                    ==, 240);
+    g_assert_false(gtk_switch_get_active(GTK_SWITCH(vsync)));
+    g_assert_cmpuint(p.writes, ==, pacing_writes);
+    g_signal_emit_by_name(pacing_apply, "clicked");
+    g_assert_cmpuint(p.writes, ==, pacing_writes + 1);
+    g_assert_cmpstr(read_value(&p, "display.frame_pacing"), ==,
+                    "limit=240;vsync=0");
+    g_assert_false(gtk_widget_get_sensitive(pacing_apply));
+    int limits[] = {30, 60, 90, 120, 144, 165, 180, 240};
+    for (guint n = 0; n < G_N_ELEMENTS(limits); ++n) {
+      gtk_drop_down_set_selected(GTK_DROP_DOWN(fps_preset), n);
+      g_assert_cmpint(
+          gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(fps_spin)), ==,
+          limits[n]);
+    }
+    g_assert_cmpuint(p.writes, ==, pacing_writes + 1);
+    gtk_editable_set_text(GTK_EDITABLE(fps_spin), "137");
+    gtk_switch_set_active(GTK_SWITCH(vsync), TRUE);
+    gtk_switch_set_active(GTK_SWITCH(vsync), FALSE);
+    clbb_settings_refresh(s);
+    g_assert_cmpstr(gtk_editable_get_text(GTK_EDITABLE(fps_spin)), ==, "137");
+    gtk_switch_set_active(GTK_SWITCH(vsync), TRUE);
+    g_signal_emit_by_name(pacing_apply, "clicked");
+    g_assert_cmpstr(read_value(&p, "display.frame_pacing"), ==,
+                    "limit=137;vsync=1");
+    g_assert_cmpuint(p.writes, ==, pacing_writes + 2);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(fps_spin), 999);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(fps_spin)),
+                    ==, 240);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(fps_spin), 1);
+    g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(fps_spin)),
+                    ==, 30);
+    g_assert_cmpuint(p.writes, ==, pacing_writes + 2);
+    gtk_window_present(preview);
+    clbb_settings_show(s);
+    g_assert(clbb_settings_is_visible(s));
+    g_assert(gtk_widget_get_root(window) == GTK_ROOT(preview));
+    g_assert_nonnull(find_button(window, "Вернуться в игру"));
+    /* Real layout on the isolated server must fit the selected monitor,
+     * including narrow displays where the old fixed minimum overflowed. */
+    for (guint n = 0; n < 100; ++n) {
+      while (g_main_context_iteration(NULL, FALSE)) {
+      }
+      if (gtk_widget_get_width(window) > 0 && gtk_widget_get_height(window) > 0)
+        break;
+      g_usleep(1000);
+    }
+    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(preview));
+    monitor = gdk_display_get_monitor_at_surface(
+        gtk_widget_get_display(window), surface);
+    GdkRectangle geometry;
+    gdk_monitor_get_geometry(monitor, &geometry);
+    g_assert_cmpint(gtk_widget_get_width(window), <=, geometry.width - 32);
+    g_assert_cmpint(gtk_widget_get_height(window), <=, geometry.height - 64);
+    g_print("CLBB_SETTINGS_GEOMETRY_OK window=%dx%d monitor=%dx%d\n",
+            gtk_widget_get_width(window), gtk_widget_get_height(window),
+            geometry.width, geometry.height);
+    clbb_settings_hide(s);
+    g_assert(!clbb_settings_is_visible(s));
+    g_assert_cmpuint(p.visible, ==, 1);
+    put(&p, "hero.id", "133");put(&p, "hero.linked_controls", "1");
+    put(&p, "hero.skill0_type", "1");
+    clbb_settings_refresh(s);
+    g_assert_nonnull(find_control(window, "hero.bindings.combo:0.key"));
+    g_assert_nonnull(find_control(window, "hero.bindings.combo:1.key"));
+    g_assert_null(find_control(window, "hero.bindings.combo:0.cast_mode"));
+    g_assert_null(find_control(window, "hero.bindings.combo:1.cast_mode"));
+    g_assert_null(find_control(window, "hero.bindings.skill:0.cast_mode"));
+    g_assert_nonnull(find_control(window, "hero.bindings.skill:1.cast_mode"));
+    g_assert_null(find_control(window, "hero.bindings.skill:2.key"));
+    g_assert(write_value(&p, "hero.bindings.combo:0.key", "88"));
+    g_assert_cmpstr(read_value(&p, "hero.bindings.combo:0.key"), ==, "88");
+    put(&p, "hero.id", "25");put(&p, "hero.linked_controls", "0");
+    clbb_settings_refresh(s);
+    g_assert_null(find_control(window, "hero.bindings.combo:0.key"));
+    g_assert_nonnull(find_control(window, "hero.bindings.skill:2.key"));
+    g_print("CLBB_LINKED_BINDINGS_UI_OK personal keys, capability refresh, no combo aim modes\n");
+    g_print("CLBB_SETTINGS_SELFTEST_OK key normalization, reserved LMB, hotkey "
+            "conflicts, refresh, hero switch, overrides, stop movement, "
+            "atomic display apply, preserved draft, atomic FPS VSync, "
+            "visibility\n");
+  } else {
+    const char *tabs[] = {"main", "controls", "hero", "sound", "hotkeys"};
+    GtkWidget *nav =
+        find_type(GTK_WIDGET(clbb_settings_panel(s)), GTK_TYPE_LIST_BOX);
+    for (guint n = 0; n < G_N_ELEMENTS(tabs); ++n)
+      if (nav && !strcmp(tab, tabs[n]))
+        gtk_list_box_select_row(
+            GTK_LIST_BOX(nav),
+            gtk_list_box_get_row_at_index(GTK_LIST_BOX(nav), n));
+    g_signal_connect(clbb_settings_panel(s), "notify::visible",
+                     G_CALLBACK(visible_changed), &p);
+    gtk_window_present(preview);
+    clbb_settings_show(s);
+    if (timeout)
+      g_timeout_add_seconds(timeout, quit_later, p.loop);
+    g_main_loop_run(p.loop);
+  }
+  clbb_settings_destroy(s);
+  gtk_window_destroy(preview);
+  g_main_loop_unref(p.loop);
+  g_hash_table_unref(p.values);
+  return 0;
+}

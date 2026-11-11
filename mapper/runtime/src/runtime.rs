@@ -1,0 +1,1158 @@
+//! Single-threaded controller, direct touch delivery and a read-only source worker.
+use crate::platform::linux::{ProcessMemory, now_ns};
+use crate::{
+    navigation::NavMesh,
+    projection::{self, Ray},
+    settings::Settings,
+    recorder::Recorder,
+    source::{Sample, Source},
+};
+use clbb_moba_core::{
+    Point,
+    controller::{
+        Button, Controller,
+        api::Input,
+        host::{Binding, Host, Timer},
+    },
+};
+use std::{
+    collections::BTreeMap,
+    ffi::{CStr, CString, c_char, c_void},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
+    time::{Duration, Instant},
+};
+type Touch = unsafe extern "C" fn(*mut c_void, i32, i32, f64, f64) -> i32;
+static GAIN: AtomicU32 = AtomicU32::new(1f32.to_bits());
+#[unsafe(no_mangle)]
+pub extern "C" fn clbb_audio_gain() -> f32 {
+    f32::from_bits(GAIN.load(Ordering::Relaxed))
+}
+#[derive(Default)]
+struct Shared {
+    sample: Option<Arc<Sample>>,
+    mesh: Option<Arc<NavMesh>>,
+    error: String,
+    source_ms: f64,
+    published_samples: u64,
+    rejected_samples: u64,
+    last_publish_ns: i64,
+    max_publish_gap_ms: f64,
+    max_navigation_ms: f64,
+}
+struct Worker {
+    shared: Arc<Mutex<Shared>>,
+    stop: Arc<AtomicBool>,
+    size: Arc<Mutex<[f64; 2]>>,
+}
+/// Keep transient replan failures on the active cadence. An old published
+/// sample is not evidence that the game is still in a match.
+fn source_cadence(last_success: Option<Instant>, now: Instant, cost: Duration) -> (bool, Duration) {
+    let active = last_success
+        .is_some_and(|last| now.saturating_duration_since(last) <= Duration::from_millis(250));
+    let wait = if active {
+        Duration::from_millis(2).saturating_sub(cost)
+    } else {
+        // Even a slow failed metadata scan must yield before another retry.
+        Duration::from_millis(750)
+    };
+    (active, wait)
+}
+impl Worker {
+    fn start(recorder: Arc<Recorder>) -> Self {
+        let shared = Arc::new(Mutex::new(Shared {
+            sample: None,
+            mesh: None,
+            error: "Ожидаю матч".into(),
+            source_ms: 0.,
+            published_samples: 0,
+            rejected_samples: 0,
+            last_publish_ns: 0,
+            max_publish_gap_ms: 0.,
+            max_navigation_ms: 0.,
+        }));
+        let stop = Arc::new(AtomicBool::new(false));
+        let size = Arc::new(Mutex::new([1280., 720.]));
+        let (out, quit, dimensions) = (shared.clone(), stop.clone(), size.clone());
+        std::thread::Builder::new()
+            .name("clbb-game-source".into())
+            .spawn(move || {
+                let memory = ProcessMemory::current();
+                let Ok(mut source) = Source::new(memory, format!("clbb:{}", std::process::id()))
+                else {
+                    return;
+                };
+                let mut mesh: Option<Arc<NavMesh>> = None;
+                let mut epoch = String::new();
+                let mut nav_at = Instant::now() - Duration::from_secs(5);
+                let mut last_success = None;
+                let mut result_at = 0i64;
+                while !quit.load(Ordering::Relaxed) {
+                    let start = Instant::now();
+                    let size = *dimensions.lock().unwrap();
+                    let result = source.sample(now_ns(), size);
+                    match result {
+                        Ok(sample) => {
+                            last_success = Some(Instant::now());
+                            if recorder.is_enabled() {
+                                let f = &sample.frame;
+                                recorder.push(now_ns(), "source", serde_json::json!({
+                                    "start_ns": f.time_ns.value-f.sample_duration_ms.value*1e6,"end_ns":f.time_ns.value,
+                                    "clock_ms":sample.game_clock_ms,"epoch":f.token.as_str(),"revision":sample.plan_revision,
+                                    "linked":sample.linked,"cancel_uv_valid":f.ui.cancel_uv.valid(),"cancel_uv":f.ui.cancel_uv.values.map(|v|v.value),
+                                    "buttons":f.ui.buttons.iter().take(f.ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill").map(|b|serde_json::json!({"slot":b.slot.as_str(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>(),
+                                    "hero":f.hero_id.int(),"hero_render":f.hero_render_xyz.values.map(|v|v.value),"hero_logic":sample.logic,"direction_visual":sample.direction_visual,"direction_source":f.direction_input.source.as_str(),
+                                    "skill":f.skill_id.int(),"slot":f.ui.active_slot.as_str(),"resolution":f.ui.resolution_px.values.map(|v|v.value),"native_source":f.logical.source.as_str(),"view":f.view_matrix.values.map(|v|v.value),"projection":sample.projection,
+                                    "aim":sample.aim,"center":f.ui.joystick.center_uv.values.map(|v|v.value),"radius":f.ui.joystick.radius_uv.values.map(|v|v.value),
+                                    "logical_ready":f.logical.ready.get(),"input_ready":f.logical.input_ready.get(),"valid_drag":f.logical.valid_drag.get(),"first_drag":f.logical.first_drag.get(),
+                                    "offset":f.logical.offset_xz.values.map(|v|v.value),"raw_touch":f.logical.raw_touch_xyz.values.map(|v|v.value),"range":f.logical.world_range.value,
+                                    "direction_touch":f.direction_input.raw_touch_xyz.values.map(|v|v.value),"direction_ready":f.direction_input.ready.get(),"direction":f.direction_input.direction_xz.values.map(|v|v.value)
+                                }));
+                                if now_ns()-result_at >= 8_000_000 {
+                                    result_at=now_ns();
+                                    recorder.push(result_at,"skill_result",serde_json::json!(crate::recorder::skill_result(&mut source,sample.match_owners[2],sample.match_owners[3])));
+                                }
+                            }
+                            let token = sample.frame.token.as_str();
+                            if token != epoch {
+                                mesh = None;
+                                epoch = token.into();
+                                nav_at = Instant::now() - Duration::from_secs(5);
+                            }
+                            {
+                                let mut out = out.lock().unwrap();
+                                let published = now_ns();
+                                if out.last_publish_ns != 0 {
+                                    out.max_publish_gap_ms = out.max_publish_gap_ms.max((published - out.last_publish_ns) as f64 / 1e6);
+                                }
+                                out.last_publish_ns = published;
+                                out.published_samples += 1;
+                                out.source_ms = sample.frame.sample_duration_ms.value;
+                                out.sample = Some(Arc::new(sample));
+                                out.error.clear();
+                                out.mesh = mesh.clone();
+                            }
+                            if nav_at.elapsed()
+                                > Duration::from_millis(if mesh.is_some() { 250 } else { 1500 })
+                            {
+                                nav_at = Instant::now();
+                                let nav_started = Instant::now();
+                                if mesh
+                                    .as_ref()
+                                    .is_some_and(|m| m.validate(&source.reflection).is_err())
+                                {
+                                    mesh = None;
+                                }
+                                if mesh.is_none() {
+                                    mesh = NavMesh::discover(&mut source.reflection)
+                                        .ok()
+                                        .map(Arc::new);
+                                }
+                                let mut out = out.lock().unwrap();
+                                out.mesh = mesh.clone();
+                                out.max_navigation_ms = out.max_navigation_ms.max(nav_started.elapsed().as_secs_f64() * 1000.);
+                            }
+                        }
+                        Err(e) => {
+                            if recorder.is_enabled() { recorder.push(now_ns(),"source_rejected",serde_json::json!({"reason":e})); }
+                            let mut out = out.lock().unwrap();
+                            out.rejected_samples += 1;
+                            out.error = e;
+                            out.mesh = None;
+                        }
+                    }
+                    let now = Instant::now();
+                    let (active, wait) = source_cadence(last_success, now, now.duration_since(start));
+                    if !active {
+                        let mut out = out.lock().unwrap();
+                        out.sample = None;
+                        out.mesh = None;
+                    }
+                    if !wait.is_zero() {
+                        std::thread::sleep(wait);
+                    }
+                }
+            })
+            .expect("source worker");
+        Self { shared, stop, size }
+    }
+}
+struct Adapter {
+    settings: Settings,
+    sample: Option<Arc<Sample>>,
+    inverse: Option<[f64; 16]>,
+    mesh: Option<Arc<NavMesh>>,
+    callback: Touch,
+    user: *mut c_void,
+    touches: [bool; 16],
+    rotate_contacts: bool,
+    next_contact: usize,
+    rays: BTreeMap<u64, Ray>,
+    wall_surface:projection::WallSurface,
+    next_ray: u64,
+    timers: [Option<i64>; 5],
+    trace: bool,
+}
+impl Adapter {
+    fn fresh(&self) -> Option<&Sample> {
+        self.sample
+            .as_deref()
+            .filter(|s| now_ns() - s.frame.time_ns.value as i64 <= 250_000_000)
+    }
+    fn ray(&self, p: Point) -> Option<Ray> {
+        self.fresh()?;
+        projection::ray(self.inverse.as_ref()?, p)
+    }
+    fn touch(&self, action: i32, id: i32, p: Point) -> bool {
+        if !p.x.is_finite() || !p.y.is_finite() {
+            return false;
+        }
+        let continuation = action != 0 && (0..16).contains(&id) && self.touches[id as usize];
+        let p = if continuation {
+            if !(-1. ..=2.).contains(&p.x) || !(-1. ..=2.).contains(&p.y) {
+                return false;
+            }
+            p
+        } else {
+            Point::new(p.x.clamp(0., 1.), p.y.clamp(0., 1.))
+        };
+        // Preserve the shared controller's integer command-cell contract. The
+        // native Android feedback uses an inclusive [0,size-1] device domain;
+        // ATL's direct pixel injection must encode it before JNI delivery.
+        let p = if let Some(sample) = &self.sample {
+            android_packet_point(p, sample.frame.ui.resolution_px.values.map(|n| n.value))
+        } else {
+            p
+        };
+        unsafe { (self.callback)(self.user, action, id, p.x, p.y) != 0 }
+    }
+    fn gain(&self) {
+        let v = if self.settings.boolean("audio.muted", 0) {
+            0.
+        } else {
+            self.settings.integer("audio.volume", 0) as f32 / 100.
+        };
+        GAIN.store(v.to_bits(), Ordering::Relaxed);
+    }
+}
+fn android_packet_point(p: Point, size: [f64; 2]) -> Point {
+    let axis = |value: f64, size: f64| {
+        if size.is_finite() && size >= 32. {
+            let cell = (value * size + 1e-7).floor();
+            // Keep the legacy inclusive device encoding unchanged in-view;
+            // extend the same affine encoding to offscreen continuation cells.
+            let cell = if (0. ..=1.).contains(&value) {
+                cell.clamp(0., size - 1.)
+            } else {
+                cell
+            };
+            cell * (size - 1.) / size / size
+        } else {
+            value
+        }
+    };
+    Point::new(axis(p.x, size[0]), axis(p.y, size[1]))
+}
+fn timer_index(timer: Timer) -> usize {
+    match timer {
+        Timer::Main => 0,
+        Timer::Pointer => 1,
+        Timer::Tap => 2,
+        Timer::Movement => 3,
+        Timer::Auxiliary => 4,
+    }
+}
+impl Host for Adapter {
+    fn clock_ns(&mut self) -> Option<i64> {
+        Some(now_ns())
+    }
+    fn begin(&mut self, p: Point) -> i32 {
+        let start=if self.rotate_contacts {self.next_contact} else {0};
+        let Some(i)=(0..16).map(|n|(start+n)%16).find(|i|!self.touches[*i]) else {
+            return -1;
+        };
+        if !self.touch(0, i as i32, p) {
+            return -1;
+        }
+        self.touches[i] = true;
+        if self.rotate_contacts {self.next_contact=(i+1)%16;}
+        i as i32
+    }
+    fn move_touch(&mut self, id: i32, p: Point) -> bool {
+        (0..16).contains(&id) && self.touches[id as usize] && self.touch(1, id, p)
+    }
+    fn end(&mut self, id: i32, p: Point) {
+        if (0..16).contains(&id) && self.touches[id as usize] {
+            self.touch(2, id, p);
+            self.touches[id as usize] = false;
+        }
+    }
+    fn cancel_touch(&mut self, id: i32, p: Point) -> bool {
+        if !(0..16).contains(&id) || !self.touches[id as usize] || !self.touch(3, id, p) {
+            return false;
+        }
+        self.touches[id as usize] = false;
+        true
+    }
+    fn pointer_world(&mut self, p: Point) -> Option<Point> {
+        let plane = self.fresh()?.aim?[1];
+        self.ray(p)?.at_plane(plane)
+    }
+    fn ground_world(&mut self, p: Point) -> Option<Point> {
+        let plane = self.fresh()?.frame.hero_render_xyz.values[1].value;
+        self.ray(p)?.at_plane(plane)
+    }
+    fn skill_direction_world(&mut self,p:Point,skill:i32)->Option<Point> {
+        let (visual,hero,view,projection,token)={let s=self.fresh()?;(s.direction_visual,s.frame.hero_render_xyz.values.map(|n|n.value),s.frame.view_matrix.values.map(|n|n.value),s.projection,s.frame.token)};
+        if let Some(spec)=visual.filter(|v|v.skill==skill) {
+            let offset=self.wall_surface.offset(token.as_str(),hero,spec.wall);
+            let direction=projection::direction_input(&view,&projection,hero,p,spec,offset)?;
+            return Some(Point::new(hero[0]+direction.x,hero[2]+direction.y));
+        }
+        if skill==8410{return None;}
+        self.ground_world(p)
+    }
+    fn movement_direction(&mut self, p: Point) -> Option<Point> {
+        let target = self.ground_world(p)?;
+        let hero = self.hero_world()?;
+        Some(Point::new(target.x - hero.x, -(target.y - hero.y)))
+    }
+    fn hero_world(&mut self) -> Option<Point> {
+        let v = self.fresh()?.frame.hero_render_xyz.values;
+        Some(Point::new(v[0].value, v[2].value))
+    }
+    fn pointer_world_at_plane(&mut self, p: Point, plane: f64) -> Option<Point> {
+        self.ray(p)?.at_plane(plane)
+    }
+    fn capture_pointer_world(&mut self, p: Point) -> u64 {
+        let Some(ray) = self.ray(p) else {
+            return 0;
+        };
+        self.next_ray = self.next_ray.wrapping_add(1).max(1);
+        self.rays.insert(self.next_ray, ray);
+        self.next_ray
+    }
+    fn resolve_world(&mut self, id: u64) -> Option<Point> {
+        self.rays.get(&id).copied()?.at_plane(self.fresh()?.aim?[1])
+    }
+    fn release_resolver(&mut self, id: u64) {
+        self.rays.remove(&id);
+    }
+    fn navigation(
+        &mut self,
+        start: Point,
+        target: Point,
+        avoid: bool,
+    ) -> Result<Vec<Point>, String> {
+        if let Some(mesh) = &self.mesh {
+            mesh.route(start, target, avoid)
+        } else if avoid {
+            Err("Карта проходимости недоступна".into())
+        } else {
+            Ok(vec![start, target])
+        }
+    }
+    fn binding(&mut self, hero: i32, button: &Button, config: &str) -> Binding {
+        let mut binding=self.settings.binding(hero,config);
+        if config == "extra:2" && !matches!(button.skillId, 20020 | 20150) {
+            binding.cast_mode = match binding.cast_mode {
+                2 => 1,
+                3 => 0,
+                mode => mode,
+            };
+        }
+        if let Some(sample)=self.fresh().filter(|s|s.frame.hero_id.int()==hero) {
+            binding.aim_type=*sample.control_types.get(&button.slot).unwrap_or(&0);
+        }
+        binding
+    }
+    fn cancel_key(&mut self, hero: i32) -> i32 {
+        self.settings.integer("hero.cancel_key", hero)
+    }
+    fn timer(&mut self, timer: Timer, delay: Option<i64>) {
+        let slot = &mut self.timers[timer_index(timer)];
+        match delay {
+            None => *slot = None,
+            Some(d) => {
+                let at = now_ns() + d.max(0) * 1_000_000;
+                *slot = Some(slot.map_or(at, |old| old.min(at)));
+            }
+        }
+    }
+    fn trace(&mut self, state: &Controller, event: &str, reason: &str) {
+        if self.trace {
+            let s = state.inspect();
+            eprintln!(
+                "[CLBB mapper] t={} event={} reason={} hero={} skill={} touch={}",
+                now_ns(),
+                event,
+                reason,
+                s.heroId_,
+                s.aimSkillId_,
+                s.skillTouch_
+            );
+        }
+    }
+}
+impl crate::linked_gesture::Transport for Adapter {
+    fn down(&mut self,p:Point)->i32 {
+        if self.touches.iter().filter(|v|**v).count()>=3 {return -1;}
+        self.begin(p)
+    }
+    fn motion(&mut self,id:i32,p:Point)->bool {self.move_touch(id,p)}
+    fn up(&mut self,id:i32,p:Point) {self.end(id,p);}
+    fn abort(&mut self,id:i32,p:Point)->bool {self.cancel_touch(id,p)}
+    fn abort_all(&mut self)->bool {
+        if !self.touch(4,0,Point::default()) {return false;}
+        self.touches.fill(false);true
+    }
+}
+// A hidden cancel widget is not an admission condition for a new gesture.
+// Only its real owned endpoints must be available before the native DOWN.
+fn linked_geometry(frame: &clbb_moba_core::controller::snapshot::Frame, endpoints: &[String;2]) -> Option<crate::linked_gesture::Geometry> {
+    let controls=&frame.ui;
+    let point=|slot:&str|controls.buttons.iter().take(controls.button_count.min(32) as usize)
+        .find(|b|b.slot.as_str()==slot && b.active.get() && b.press_uv.valid())
+        .map(|b|Point::new(b.press_uv.values[0].value,b.press_uv.values[1].value))
+        .filter(|p|(0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y));
+    Some(crate::linked_gesture::Geometry {
+        epoch:frame.token.owned(),endpoints:[point(&endpoints[0])?,point(&endpoints[1])?],
+        cancel:controls.cancel_uv.valid().then(||Point::new(controls.cancel_uv.values[0].value,controls.cancel_uv.values[1].value)),
+    })
+}
+pub struct Runtime {
+    updates: crate::updater::Updates,
+    gestures: crate::linked_gesture::Gestures,
+    core: Controller,
+    host: Adapter,
+    worker: Worker,
+    last_sample: i64,
+    suspended: bool,
+    read: CString,
+    error: String,
+    recorder: Arc<Recorder>,
+    debug_at: i64,
+    debug_pointer_at: i64,
+    debug_pending_since: i64,
+    debug_mismatch_since: i64,
+}
+impl Runtime {
+    fn new(callback: Touch, user: *mut c_void) -> Self {
+        let settings = Settings::load();
+        let trace = std::env::var_os("CLBB_MAPPER_TRACE").is_some();
+        let recorder = Recorder::new();
+        let mut v = Self {
+            updates:crate::updater::Updates::new(),
+            recorder: recorder.clone(), debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0,
+            gestures: Default::default(),
+            core: Controller::new(),
+            host: Adapter {
+                settings,
+                sample: None,
+                inverse: None,
+                mesh: None,
+                callback,
+                user,
+                touches: [false; 16],
+                rotate_contacts: false, next_contact: 0,
+                rays: BTreeMap::new(),
+                wall_surface:Default::default(),
+                next_ray: 0,
+                timers: [None; 5],
+                trace,
+            },
+            worker: Worker::start(recorder),
+            last_sample: 0,
+            suspended: false,
+            read: CString::default(),
+            error: String::new(),
+        };
+        v.host.gain();
+        v.input(Input::Trace(trace));
+        v.configure();
+        v
+    }
+    fn input(&mut self, event: Input<'_>) -> bool {
+        if matches!(&event,Input::Release|Input::Invalid(_)|Input::Enabled(false)) {self.gestures.reset(&mut self.host);}
+        self.core.apply_input(&mut self.host, event, now_ns())
+    }
+    fn configure(&mut self) {
+        let recording=self.host.settings.boolean("debug.recording",0);
+        if recording != self.recorder.is_enabled() {self.debug_pending_since=0;self.debug_mismatch_since=0;}
+        self.recorder.set_enabled(recording);
+        if recording {self.recorder.push(now_ns(),"settings",serde_json::json!({"values":self.host.settings.values}));}
+        self.input(Input::MovementMode(
+            self.host.settings.integer("movement.click_mode", 0),
+        ));
+        self.input(Input::MovementClickPercent(
+            self.host.settings.integer("movement.click_distance_percent", 0),
+        ));
+        self.input(Input::HoldThreshold(
+            self.host.settings.integer("movement.hold_ms", 0) as i64,
+        ));
+        self.input(Input::RefreshBindings);
+        self.input(Input::Enabled(
+            !self.suspended && self.host.settings.boolean("enabled", 0),
+        ));
+    }
+    fn poll(&mut self, width: f64, height: f64) {
+        if width >= 32. && height >= 32. {
+            *self.worker.size.lock().unwrap() = [width, height];
+        }
+        let (sample, mesh) = {
+            let shared = self.worker.shared.lock().unwrap();
+            (shared.sample.clone(), shared.mesh.clone())
+        };
+        self.host.mesh = mesh;
+        if let Some(sample) = sample.filter(|s| s.frame.time_ns.value as i64 != self.last_sample) {
+            self.last_sample = sample.frame.time_ns.value as i64;
+            let view = sample.frame.view_matrix.values.map(|v| v.value);
+            self.host.inverse = projection::inverse_product(&sample.projection, &view);
+            self.host.sample = Some(sample.clone());
+            let skill = sample.frame.skill_id.int();
+            self.core.update_observation(
+                sample.aim.is_some(),
+                sample
+                    .aim
+                    .map(|p| Point::new(p[0], p[2]))
+                    .unwrap_or_default(),
+                skill,
+            );
+            self.core
+                .apply_snapshot(&mut self.host, &sample.frame, now_ns());
+            let nav = self.host.mesh.is_some();
+            self.input(Input::Navigation {
+                available: nav,
+                reason: if nav {
+                    "Карта проходимости прочитана"
+                } else {
+                    "Ожидаю карту проходимости"
+                },
+            });
+        }
+        let now = now_ns();
+        for i in 0..5 {
+            if self.host.timers[i].is_some_and(|at| now >= at) {
+                self.host.timers[i] = if i == 0 || i == 3 {
+                    Some(now + 16_000_000)
+                } else {
+                    None
+                };
+                let timer = [
+                    Timer::Main,
+                    Timer::Pointer,
+                    Timer::Tap,
+                    Timer::Movement,
+                    Timer::Auxiliary,
+                ][i];
+                self.input(Input::Timer(timer));
+            }
+        }
+        let sample=self.host.sample.clone().filter(|s|now_ns()-s.frame.time_ns.value as i64<=250_000_000);
+        let cancel_feedback = sample.as_ref().map(|s| {
+            let f = &s.frame;
+            let cancel = &f.cancel_state;
+            let point = f.ui.cancel_uv;
+            crate::linked_gesture::CancelFeedback {
+                point: point.valid().then(|| Point::new(point.values[0].value, point.values[1].value)),
+                slot: if cancel.ready.get() && cancel.coherent.get() && cancel.cancelled.get()
+                    && cancel.token.as_str() == f.token.as_str() {
+                    cancel.slot.as_str()
+                } else { "" },
+                sample_start_ns: cancel.sample_start_ns.get(0.) as i64,
+            }
+        });
+        self.gestures.poll(&mut self.host,sample.as_ref().map(|s|s.frame.token.as_str()).unwrap_or(""),sample.as_ref().and_then(|s|s.linked.as_ref()),sample.as_ref().map(|s|s.frame.skill_id.int()).unwrap_or(0),sample.as_ref().map(|s|s.frame.skill_state.sample_start_ns.value as i64).unwrap_or(0),now,cancel_feedback);
+        self.debug_observe();
+    }
+    fn input_diagnostics(&self, view: &clbb_moba_core::controller::view::View) -> serde_json::Value {
+        let hero=view.heroId_;
+        serde_json::json!({"hero":hero,"ready":view.ready_,"enabled":view.enabled_,"skill":view.coreSkill_,"touch":view.skillTouch_,"aim":view.aimReady_,"pending_release":view.pendingRelease_,"logical":view.logicalMode_,"source":view.logicalSource_.as_str(),"pointer":[view.pointer_.x,view.pointer_.y],"status":view.status_.as_str(),"navigation":view.navigationAvailable_,"reason":view.inputReason_.as_str(),"accepted":view.acceptedInput_,"raw":[view.traceRaw_.x,view.traceRaw_.y],"decoded":[view.traceDecoded_.x,view.traceDecoded_.y],"sent":[view.skillPoint_.x,view.skillPoint_.y],"direct":view.directGeometryFresh_,"pending_seq":view.pendingGoalSequence_,"matched_seq":view.traceMatchedSequence_,"source_aim":self.host.sample.as_ref().is_some_and(|s|s.aim.is_some()),"epoch":view.frameEpoch_.as_str(),"plan_revision":self.host.sample.as_ref().map(|s|s.plan_revision).unwrap_or(0),"direction_accepted":view.directionAccepted_,"direction_fresh":view.directionGeometryFresh_,"direction_matched_seq":view.directionMatchedSequence_,"movement_touch":view.movementTouch_,"movement_held":view.movementHeld_,"movement_pressed":view.movementPressed_,"movement_ready":view.movementReady_,"movement_status":view.movementStatus_.as_str()})
+    }
+    fn aim_diagnostics(&self, view: &clbb_moba_core::controller::view::View) -> serde_json::Value {
+                let now = now_ns();
+                let sample = self.host.sample.as_ref();
+                let current_world = self.host.ray(view.pointer_).and_then(|ray| ray.at_plane(sample?.aim?[1]));
+                let worker = self.worker.shared.lock().unwrap();
+                let directional = serde_json::json!({
+                    "hero_world":[view.frameHero_.x,view.frameHero_.y],
+                    "pending_direction_valid":view.pendingDirectionValid_,
+                    "pending_direction":[view.pendingDirection_.x,view.pendingDirection_.y],
+                    "direction_observed":[view.directionObserved_.x,view.directionObserved_.y],
+                    "direction_goal_time_ns":view.directionGoalTime_,
+                    "direction_goal_seq":view.directionGoalSequence_,
+                    "direction_sample_start_ns":view.directionSampleStart_,
+                    "direction_sample_end_ns":view.directionSampleEnd_,"pending_seq":view.pendingGoalSequence_
+                });
+                let mut value = serde_json::json!({
+                    "now_ns":now,"frame_end_ns":view.lastFrameNs_,
+                    "source_age_ms":sample.map(|s|(now as f64-s.frame.time_ns.value)/1e6),
+                    "clock_ms":sample.map(|s|s.game_clock_ms),
+                    "read_ms":worker.source_ms,"published":worker.published_samples,"rejected":worker.rejected_samples,
+                    "max_publish_gap_ms":worker.max_publish_gap_ms,"max_navigation_ms":worker.max_navigation_ms,
+                    "logical_start_ns":view.traceSampleStart_,"logical_end_ns":view.traceSampleEnd_,
+                    "logical_fresh":view.logicalSampleFresh_,"accepted_ns":view.acceptedSampleNs_,
+                    "accepted_point":[view.acceptedPoint_.x,view.acceptedPoint_.y],
+                    "skill_point":[view.skillPoint_.x,view.skillPoint_.y],
+                    "origin":[view.logicalOrigin_.x,view.logicalOrigin_.y],
+                    "offset":[view.logicalObserved_.x,view.logicalObserved_.y],
+                    "current_cursor_world":current_world.map(|p|[p.x,p.y]),
+                    "pending_world_valid":view.pendingWorldValid_,"pending_world":[view.pendingWorld_.x,view.pendingWorld_.y],
+                    "desired_valid":view.traceDesiredValid_,"desired":[view.traceDesired_.x,view.traceDesired_.y],
+                    "pending_time_ns":view.pendingGoalTime_,
+                    "matched_seq":view.traceMatchedSequence_,"q_arming":view.qDragArming_,"q_recomputed":view.qDragRecomputeUsed_,
+                    "range":view.direct.world_range,"center":[view.joystickCenter_.x,view.joystickCenter_.y],
+                    "radius":[view.joystickRadius_.x,view.joystickRadius_.y],
+                    "skill":view.coreSkill_,"touch":view.skillTouch_,"pending_release":view.pendingRelease_,
+                    "reason":view.inputReason_.as_str()
+                });
+                value.as_object_mut().unwrap().extend(directional.as_object().unwrap().clone());
+                value
+            
+    }
+    fn debug_observe(&mut self) {
+        let now=now_ns();
+        if !self.recorder.is_enabled() || now-self.debug_at<8_000_000 { return; }
+        self.debug_at=now;
+        let v=self.core.inspect();
+        self.recorder.push(now,"controller",serde_json::json!({"input":self.input_diagnostics(&v),"aim":self.aim_diagnostics(&v),"contacts":self.host.touches.iter().enumerate().filter_map(|(i,v)|v.then_some(i)).collect::<Vec<_>>(),"linked_gestures":self.gestures.active,"linked_ignored":self.gestures.ignored_keys() }));
+        if v.pendingRelease_!=0 { if self.debug_pending_since==0 {self.debug_pending_since=now;} }
+        else {self.debug_pending_since=0;}
+        let delta=v.direct.clamped_world(v.traceDesired_)-v.logicalObserved_;
+        let mismatch=v.skillTouch_>=0 && v.acceptedInput_!=0 && v.traceDesiredValid_!=0 && v.logicalSampleFresh_!=0 && v.direct.ready!=0
+            && delta.x.hypot(delta.y)> (v.direct.world_range*0.02).max(0.08);
+        if mismatch {if self.debug_mismatch_since==0{self.debug_mismatch_since=now;}}else{self.debug_mismatch_since=0;}
+        if self.host.settings.boolean("debug.auto_marks",0) {
+            let reason=if self.debug_pending_since!=0 && now-self.debug_pending_since>100_000_000 {Some("release_wait_over_100ms")}
+                else if self.gestures.active.iter().any(|g|g.cancel_requested_ns.is_some_and(|t|now-t>100_000_000)) {Some("linked_cancel_wait_over_100ms")}
+                else if v.skillTouch_>=0 && now-v.lastFrameNs_>100_000_000 {Some("active_source_stale_over_100ms")}
+                else if self.debug_mismatch_since!=0 && now-self.debug_mismatch_since>150_000_000 {Some("sustained_aim_discrepancy")}
+                else {None};
+            if let Some(reason)=reason {self.recorder.mark(now,reason,true);}
+        }
+    }
+    fn event(&mut self, kind: i32, code: i32, down: bool, repeat: bool, p: Point) -> bool {
+        if self.recorder.is_enabled() && (kind!=0 || now_ns()-self.debug_pointer_at>=4_000_000) {
+            self.debug_pointer_at=now_ns();self.recorder.push(self.debug_pointer_at,"input_event",serde_json::json!({"kind":kind,"code":code,"down":down,"repeat":repeat,"pointer":[p.x,p.y]}));
+        }
+        if kind == 0 {
+            if !self.suspended {
+                self.input(Input::Pointer(p));
+            }
+            return false;
+        }
+        if kind==1 && code!=0 && self.recorder.is_enabled() && code==self.host.settings.integer("debug.mark_shortcut",0) {
+            if down && !repeat {self.recorder.mark(now_ns(),"manual",false);} return true;
+        }
+        // LMB always follows ATL's ordinary physical event path.
+        if kind == 2 && code == 1 {
+            return false;
+        }
+        if self.suspended {
+            return false;
+        }
+        let key = if kind == 2 {
+            crate::settings::MOUSE | code
+        } else {
+            code
+        };
+        if key == self.host.settings.integer("movement.button", 0) {
+            return self.input(Input::Mouse {
+                button: 2,
+                down,
+                point: p,
+            });
+        }
+        if self.gestures.contains(key) {
+            if !down && !repeat {self.gestures.release(&mut self.host,key);}
+            return true;
+        }
+        let hero=self.core.inspect().heroId_;
+        if down && !repeat && key!=0 && key==self.host.settings.integer("hero.cancel_key",hero) {
+            self.gestures.cancel(now_ns());
+        }
+        if down && !repeat && self.core.inspect().ready_!=0 && self.host.settings.boolean("enabled",0) {
+            if let Some(sample)=self.host.sample.clone().filter(|s|now_ns()-s.frame.time_ns.value as i64<=250_000_000) {
+                if let Some(link)=sample.linked.as_ref() {
+                    for origin in 0..2 {
+                        let binding=self.host.settings.binding(hero,&format!("combo:{origin}"));
+                        if key==0 || key!=binding.key {continue;}
+                        let geometry=linked_geometry(&sample.frame,&link.endpoints);
+                        self.recorder.push(now_ns(),"linked_admission",serde_json::json!({"key":key,"origin":origin,"passive":link.enough_energy,"parent_cooldown":link.on_cooldown[origin],"endpoints_valid":geometry.is_some(),"cancel_available":geometry.as_ref().is_some_and(|g|g.cancel.is_some()),"reason":if geometry.is_none(){"missing_endpoints"}else if !link.enough_energy{"passive_not_ready"}else{"native_down"}}));
+                        if let Some(geometry)=geometry {
+                            return self.gestures.begin(&mut self.host,key,origin,geometry,link,now_ns());
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+        self.input(Input::Pointer(p));
+        self.input(Input::Key {
+            code: key,
+            down,
+            repeat,
+        })
+    }
+    fn read(&mut self, key: &str) -> *const c_char {
+        let view = self.core.inspect();
+        let hero = view.heroId_;
+        let v=match key {
+            "hero.id"=>hero.to_string(),"hero.name"=>if hero==25{"Кагура".into()}else if hero>0{format!("Герой {hero}")}else{"Вне матча".into()},
+            "status"|"diagnostics.status"=>if !self.error.is_empty(){self.error.clone()}else if !self.host.settings.boolean("enabled",0){"Управление CLBB выключено".into()}else if self.host.fresh().is_none(){"Ожидаю матч и кнопки героя".into()}else if self.suspended{"Профиль готов · управление приостановлено".into()}else{view.status_.owned()},
+            "diagnostics.input"=>self.input_diagnostics(&view).to_string(),
+            "diagnostics.aim"=>self.aim_diagnostics(&view).to_string(),
+            "diagnostics.cast_lock" => self.host.fresh().map(|sample| {
+                let state = &sample.frame.skill_state;
+                let buttons: Vec<_> = state.buttons.iter().take(state.count as usize).map(|button| {
+                    let locked = button.cast_locked.is_bool().then(|| button.cast_locked.get());
+                    serde_json::json!({"slot": button.slot.as_str(), "form": button.active_skill_id.int(), "locked": locked})
+                }).collect();
+                serde_json::json!({
+                    "epoch": state.token.as_str(), "hero": state.hero_id.int(),
+                    "start_ns": state.sample_start_ns.value, "end_ns": state.sample_end_ns.value,
+                    "buttons": buttons,
+                }).to_string()
+            }).unwrap_or_else(|| "{}".into()),
+            k if k.starts_with("updates.")=>self.updates.read(k),
+            "diagnostics.render"=>crate::render_metrics::snapshot().to_string(),
+            "diagnostics.direction_visual"=>self.host.fresh().map(|s|serde_json::json!({"spec":s.direction_visual,"hero":s.frame.hero_render_xyz.values.map(|v|v.value),"view":s.frame.view_matrix.values.map(|v|v.value),"projection":s.projection,"sample_start_ns":s.frame.direction_input.sample_start_ns.value,"sample_end_ns":s.frame.direction_input.sample_end_ns.value}).to_string()).unwrap_or_else(||"{}".into()),
+            "diagnostics.hero_state"=>self.host.fresh().map(|s| {
+                let state=&s.frame.skill_state;
+                let form=state.buttons.iter().take(state.count.min(32) as usize).find(|b|b.slot.as_str()=="skill:1").map(|b|b.active_skill_id.int()).unwrap_or(0);
+                let name=if state.hero_id.int()==84 {match form {8420=>"ground",8425=>"wall",_=>"unknown"}} else {"unknown"};
+                serde_json::json!({"hero":state.hero_id.int(),"state":name,"form":form,"source":"owned skill:1 active form","epoch":state.token.as_str(),"sample_start_ns":state.sample_start_ns.value,"sample_end_ns":state.sample_end_ns.value}).to_string()
+            }).unwrap_or_else(||"{\"state\":\"unknown\"}".into()),
+            "diagnostics.templates"=>self.host.fresh().map(|s|serde_json::json!({"hero":s.frame.hero_id.int(),"types":s.control_types}).to_string()).unwrap_or_else(||"{}".into()),
+            "hero.linked_controls"=>if self.host.fresh().is_some_and(|s|s.linked.is_some()) {"1".into()}else{"0".into()},
+            "hero.skill0_type"=>self.host.fresh().and_then(|s|s.control_types.get("skill:0")).unwrap_or(&0).to_string(),
+            "diagnostics.gestures"=>serde_json::json!({"active":self.gestures.active,"ignored":self.gestures.ignored_keys(),"linked":self.host.fresh().and_then(|s|s.linked.as_ref()),"cancel_uv":self.host.fresh().map(|s|serde_json::json!({"valid":s.frame.ui.cancel_uv.valid(),"point":s.frame.ui.cancel_uv.values.map(|v|v.value)})),"buttons":self.host.fresh().map(|s|s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill").map(|b|serde_json::json!({"slot":b.slot.as_str(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>())}).to_string(),
+            "diagnostics.contacts"=>serde_json::json!({"rotation":self.host.rotate_contacts,"next":self.host.next_contact,"active":self.host.touches.iter().enumerate().filter_map(|(i,v)|v.then_some(i)).collect::<Vec<_>>()}).to_string(),
+            "debug.status"=>self.recorder.status(),
+            "diagnostics.source_ms"=>format!("{:.3}",self.worker.shared.lock().unwrap().source_ms),
+            "diagnostics.navigation"=>view.navigationStatus_.owned(),_=>self.host.settings.get(key,hero),
+        };
+        self.read = CString::new(v.replace('\0', "")).unwrap_or_default();
+        self.read.as_ptr()
+    }
+    fn write(&mut self, key: &str, value: &str) -> bool {
+        if matches!(key,"updates.check"|"updates.install"){return matches!(value,"1"|"true")&&self.updates.request(key); }
+        if key=="debug.mark" {return self.recorder.mark(now_ns(),value,false);}
+        if key=="diagnostics.contact_rotation" {
+            if self.host.touches.iter().any(|v|*v) {return false;}
+            return match value {
+                "true"|"1"=>{self.host.rotate_contacts=true;true},
+                "false"|"0"=>{self.host.rotate_contacts=false;true},
+                _=>false,
+            };
+        }
+        if key == "diagnostics.trace" {
+            return match value {
+                "true" | "1" => {
+                    self.host.trace = true;
+                    self.input(Input::Trace(true));
+                    true
+                }
+                "false" | "0" => {
+                    self.host.trace = false;
+                    self.input(Input::Trace(false));
+                    true
+                }
+                _ => false,
+            };
+        }
+        let hero = self.core.inspect().heroId_;
+        match self.host.settings.set(key, value, hero) {
+            Ok(()) => {
+                self.error.clear();
+                self.input(Input::Release);
+                self.host.gain();
+                self.configure();
+                true
+            }
+            Err(e) => {
+                self.error = e;
+                false
+            }
+        }
+    }
+    fn suspend(&mut self, value: bool) {
+        if self.suspended != value {
+            self.suspended = value;
+            self.input(Input::Release);
+            self.configure();
+        }
+    }
+}
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        self.recorder.set_enabled(false);
+        self.input(Input::Release);
+        self.worker.stop.store(true, Ordering::Relaxed);
+    }
+}
+// Pointers below are created and retained by the native GTK adapter. Dispatch is
+// GTK-thread only; it excludes reentry while a synchronous touch callback runs.
+#[unsafe(no_mangle)]
+pub extern "C" fn clbb_mapper_create(callback: Touch, user: *mut c_void) -> *mut Runtime {
+    Box::into_raw(Box::new(Runtime::new(callback, user)))
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clbb_mapper_destroy(rt: *mut Runtime) {
+    if !rt.is_null() {
+        unsafe {
+            drop(Box::from_raw(rt));
+        }
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clbb_mapper_poll(rt: *mut Runtime, width: f64, height: f64) {
+    if let Some(rt) = unsafe { rt.as_mut() } {
+        rt.poll(width, height);
+    }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clbb_mapper_event(
+    rt: *mut Runtime,
+    kind: i32,
+    code: i32,
+    down: i32,
+    repeat: i32,
+    x: f64,
+    y: f64,
+) -> i32 {
+    unsafe { rt.as_mut() }
+        .is_some_and(|rt| rt.event(kind, code, down != 0, repeat != 0, Point::new(x, y))) as i32
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clbb_mapper_read(rt: *mut Runtime, key: *const c_char) -> *const c_char {
+    if rt.is_null() || key.is_null() {
+        return c"".as_ptr();
+    }
+    let key = unsafe { CStr::from_ptr(key) }.to_str().unwrap_or("");
+    unsafe { &mut *rt }.read(key)
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clbb_mapper_write(
+    rt: *mut Runtime,
+    key: *const c_char,
+    value: *const c_char,
+) -> i32 {
+    if rt.is_null() || key.is_null() || value.is_null() {
+        return 0;
+    }
+    let key = unsafe { CStr::from_ptr(key) }.to_str().unwrap_or("");
+    let value = unsafe { CStr::from_ptr(value) }.to_str().unwrap_or("");
+    unsafe { &mut *rt }.write(key, value) as i32
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clbb_mapper_suspend(rt: *mut Runtime, value: i32) {
+    if let Some(rt) = unsafe { rt.as_mut() } {
+        rt.suspend(value != 0);
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn source_backoff_keeps_replans_fast_but_expires_old_success() {
+        let start = Instant::now();
+        assert_eq!(
+            source_cadence(None, start, Duration::from_millis(1)),
+            (false, Duration::from_millis(750))
+        );
+        for age in [0, 2, 100, 250] {
+            assert_eq!(
+                source_cadence(
+                    Some(start),
+                    start + Duration::from_millis(age),
+                    Duration::from_micros(500)
+                ),
+                (true, Duration::from_micros(1500))
+            );
+        }
+        assert_eq!(
+            source_cadence(
+                Some(start),
+                start + Duration::from_millis(251),
+                Duration::from_micros(500)
+            ),
+            (false, Duration::from_millis(750))
+        );
+        // A fresh match immediately leaves the slow retry cadence.
+        let next = start + Duration::from_secs(2);
+        assert_eq!(
+            source_cadence(Some(next), next, Duration::from_millis(1)),
+            (true, Duration::from_millis(1))
+        );
+    }
+    #[test]
+    fn failed_slow_discovery_always_yields_and_active_overrun_does_not_add_latency() {
+        let now = Instant::now();
+        let slow = Duration::from_secs(2);
+        assert_eq!(source_cadence(None, now, slow), (false, Duration::from_millis(750)));
+        assert_eq!(source_cadence(Some(now), now, slow), (true, Duration::ZERO));
+    }
+    unsafe extern "C" fn record(user: *mut c_void, action: i32, id: i32, x: f64, y: f64) -> i32 {
+        unsafe { &mut *(user as *mut Vec<(i32, i32, f64, f64)>) }.push((action, id, x, y));
+        1
+    }
+    fn fixture(events: &mut Vec<(i32, i32, f64, f64)>) -> Runtime {
+        Runtime {
+            updates:crate::updater::Updates::new(),
+            gestures: Default::default(),
+            core: Controller::new(),
+            host: Adapter {
+                settings: Settings::default(),
+                sample: None,
+                inverse: None,
+                mesh: None,
+                callback: record,
+                user: events as *mut _ as *mut c_void,
+                touches: [false; 16],
+                rotate_contacts: false, next_contact: 0,
+                rays: BTreeMap::new(),
+                wall_surface:Default::default(),
+                next_ray: 0,
+                timers: [None; 5],
+                trace: false,
+            },
+            worker: Worker {
+                shared: Arc::new(Mutex::new(Shared {
+                    sample: None,
+                    mesh: None,
+                    error: String::new(),
+                    source_ms: 0.,
+                    ..Default::default()
+                })),
+                stop: Arc::new(AtomicBool::new(false)),
+                size: Arc::new(Mutex::new([1280., 720.])),
+            },
+            last_sample: 0,
+            suspended: false,
+            read: CString::default(),
+            error: String::new(),
+            recorder: Recorder::new(), debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0,
+        }
+    }
+    #[test]
+    fn resetting_an_unknown_cancel_contact_cancels_the_native_context_without_casting() {
+        let mut events=Vec::new();let mut runtime=fixture(&mut events);
+        let movement=runtime.host.begin(Point::new(0.2,0.8));
+        let geometry=crate::linked_gesture::Geometry {epoch:"match".into(),endpoints:[Point::new(0.7,0.8),Point::new(0.9,0.6)],cancel:None};
+        let observed=crate::linked_gesture::Observation {endpoints:["skill:0".into(),"skill:1".into()],source_slot:None,pressed_slot:None,enough_energy:true,choices:[0,0],base_skills:[13320,13310],on_cooldown:[false,false]};
+        runtime.gestures.begin(&mut runtime.host,87,0,geometry,&observed,1);
+        assert_eq!(runtime.host.touches.iter().filter(|v|**v).count(),2);
+        runtime.input(Input::Release);
+        assert!(runtime.gestures.active.is_empty());
+        assert!(!runtime.host.touches[movement as usize]);
+        assert!(runtime.host.touches.iter().all(|v|!*v));
+        assert!(events.iter().any(|e|e.0==4));
+        assert!(!events.iter().any(|e|e.0==2));
+    }
+    #[test]
+    fn recorded_hirara_endpoints_are_usable_before_the_cancel_widget_exists() {
+        use clbb_moba_core::controller::snapshot as s;
+        let mut frame=s::Frame::default();frame.token=crate::source::text("recorded-match");
+        frame.ui.button_count=2;
+        for (i,uv) in [[0.781857303052746,0.8643963766009062],[0.9139779138587207,0.7058459842302351]].into_iter().enumerate() {
+            frame.ui.buttons[i].slot=crate::source::text(&format!("skill:{i}"));
+            frame.ui.buttons[i].active=crate::source::flag(true);
+            frame.ui.buttons[i].press_uv=crate::source::v2(uv);
+        }
+        assert!(!frame.ui.cancel_uv.valid());
+        let endpoints=["skill:0".into(),"skill:1".into()];
+        let geometry=linked_geometry(&frame,&endpoints).expect("user's valid skill buttons must admit DOWN");
+        assert!(geometry.cancel.is_none());
+        frame.ui.buttons[1].active=crate::source::flag(false);
+        assert!(linked_geometry(&frame,&endpoints).is_none());
+    }
+    #[test]
+    fn debug_chord_works_while_suspended_and_never_creates_a_touch() {
+        let mut events=Vec::new(); let mut r=fixture(&mut events);
+        let dir=std::env::temp_dir().join(format!("clbb-chord-test-{}",now_ns()));
+        r.recorder=Recorder::at(dir.clone()); r.suspended=true;
+        r.recorder.set_enabled(true);
+        let p=Point::new(0.5,0.5);
+        assert!(r.event(1,0x04000053,true,false,p));
+        assert!(r.event(1,0x04000053,true,true,p));
+        assert!(r.event(1,0x04000053,false,false,p));
+        r.recorder.set_enabled(false);
+        let deadline=std::time::Instant::now()+Duration::from_secs(3);
+        loop {
+            let file=std::fs::read_dir(&dir).ok().into_iter().flatten().filter_map(Result::ok)
+                .find(|e|e.path().extension().is_some_and(|v|v=="jsonl"));
+            if let Some(file)=file {
+                let data=std::fs::read_to_string(file.path()).unwrap();
+                let header:serde_json::Value=serde_json::from_str(data.lines().next().unwrap()).unwrap();
+                assert_eq!(header["marks"].as_array().unwrap().len(),1); break;
+            }
+            assert!(std::time::Instant::now()<deadline,"{}",r.recorder.status());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(events.is_empty()); std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn contact_rotation_separates_gestures_without_reusing_a_live_finger() {
+        let mut events=Vec::new();let mut runtime=fixture(&mut events);
+        assert!(runtime.write("diagnostics.contact_rotation","true"));
+        let p=Point::new(0.5,0.5);
+        let first=runtime.host.begin(p);assert_eq!(first,0);
+        runtime.host.end(first,p);
+        let movement=runtime.host.begin(p);assert_eq!(movement,1);
+        assert!(!runtime.write("diagnostics.contact_rotation","false"));
+        for _ in 0..40 {
+            let skill=runtime.host.begin(p);assert!(skill>=0 && skill!=movement);
+            runtime.host.end(skill,p);
+            assert!(runtime.host.touches[movement as usize]);
+        }
+        runtime.host.end(movement,p);
+        assert!(runtime.write("diagnostics.contact_rotation","false"));
+        assert_eq!(runtime.host.begin(p),0);
+    }
+    #[test]
+    fn trace_toggle_reaches_adapter_without_releasing_live_contacts() {
+        let mut events = Vec::new();
+        let mut runtime = fixture(&mut events);
+        let id = runtime.host.begin(Point::new(0.5, 0.5));
+        assert!(id >= 0);
+        let count = events.len();
+        assert!(runtime.write("diagnostics.trace", "true"));
+        assert!(runtime.host.trace);
+        assert!(runtime.host.touches[id as usize]);
+        assert_eq!(events.len(), count);
+        assert!(!runtime.write("diagnostics.trace", "invalid"));
+        assert!(runtime.host.trace);
+        assert!(runtime.write("diagnostics.trace", "false"));
+        assert!(!runtime.host.trace);
+        assert!(runtime.host.touches[id as usize]);
+        assert_eq!(events.len(), count);
+    }
+    #[test]
+    fn native_packet_round_trips_to_the_recorded_command_cell() {
+        for size in [[1308., 713.], [1920., 1080.], [4000., 3111.]] {
+            for p in [
+                Point::new(0., 0.),
+                Point::new(0.2317, 0.7583),
+                Point::new(0.9999, 0.9999),
+                Point::new(1., 1.),
+            ] {
+                let native = android_packet_point(p, size);
+                let decode = Point::new(
+                    native.x * size[0] * size[0] / (size[0] - 1.),
+                    native.y * size[1] * size[1] / (size[1] - 1.),
+                );
+                assert!(
+                    (decode.x - (p.x * size[0] + 1e-7).floor().clamp(0., size[0] - 1.)).abs()
+                        < 1e-6
+                );
+                assert!(
+                    (decode.y - (p.y * size[1] + 1e-7).floor().clamp(0., size[1] - 1.)).abs()
+                        < 1e-6
+                );
+            }
+        }
+    }
+    #[test]
+    fn offscreen_command_cells_keep_inclusive_encoding_without_screen_clipping() {
+        for size in [[1308., 713.], [1920., 1080.], [4000., 3111.]] {
+            for p in [Point::new(0.768125, 3229.5 / 3111.),
+                      Point::new(-0.12, 1.12), Point::new(1.12, -0.12)] {
+                let native = android_packet_point(p, size);
+                for (value, encoded, extent) in [(p.x, native.x, size[0]), (p.y, native.y, size[1])] {
+                    let decoded = encoded * extent * extent / (extent - 1.);
+                    assert!((decoded - (value * extent + 1e-7).floor()).abs() < 1e-6);
+                }
+            }
+        }
+    }
+    #[test]
+    fn virtual_continuation_can_leave_view_but_initial_ui_touch_is_still_bounded() {
+        let mut events = Vec::new();
+        let mut rt = fixture(&mut events);
+        let id = rt.host.begin(Point::new(-0.2, 1.2));
+        assert!(id >= 0);
+        assert_eq!((events[0].2, events[0].3), (0., 1.));
+        assert!(rt.host.move_touch(id, Point::new(0.77, 1.04)));
+        assert_eq!((events[1].2, events[1].3), (0.77, 1.04));
+        assert!(!rt.host.move_touch(id, Point::new(0.77, f64::INFINITY)));
+        assert!(!rt.host.move_touch(id, Point::new(0.77, 3.)));
+        assert_eq!(events.len(), 2);
+        rt.host.end(id, Point::new(0.77, 1.04));
+        assert_eq!((events[2].0, events[2].3), (2, 1.04));
+        assert!(!rt.host.move_touch(id, Point::new(0.77, 1.04)));
+    }
+    #[test]
+    fn physical_lmb_never_creates_a_mapped_touch() {
+        let mut events = Vec::new();
+        let mut rt = fixture(&mut events);
+        assert!(!rt.event(2, 1, true, false, Point::new(0.2, 0.3)));
+        assert!(!rt.event(2, 1, false, false, Point::new(0.8, 0.9)));
+        assert!(events.is_empty());
+        assert!(rt.host.touches.iter().all(|v| !*v));
+    }
+    #[test]
+    fn source_updates_do_not_postpone_armed_pointer_timer() {
+        let mut events = Vec::new();
+        let mut rt = fixture(&mut events);
+        rt.host.timer(Timer::Pointer, Some(1));
+        let first = rt.host.timers[1];
+        for _ in 0..100 {
+            rt.host.timer(Timer::Pointer, Some(1));
+        }
+        assert_eq!(rt.host.timers[1], first);
+        rt.host.timer(Timer::Pointer, None);
+        assert!(rt.host.timers[1].is_none());
+    }
+    #[test]
+    fn failed_native_begin_does_not_reserve_finger() {
+        unsafe extern "C" fn reject(_: *mut c_void, _: i32, _: i32, _: f64, _: f64) -> i32 {
+            0
+        }
+        let mut events = Vec::new();
+        let mut rt = fixture(&mut events);
+        rt.host.callback = reject;
+        assert_eq!(rt.host.begin(Point::new(0.5, 0.5)), -1);
+        assert!(rt.host.touches.iter().all(|v| !*v));
+    }
+    #[test]
+    fn private_fingers_do_not_alias_and_reuse_after_up() {
+        let mut events = Vec::new();
+        let mut rt = fixture(&mut events);
+        let a = rt.host.begin(Point::new(0.1, 0.2));
+        let b = rt.host.begin(Point::new(0.8, 0.9));
+        assert_ne!(a, b);
+        rt.host.end(a, Point::new(0.1, 0.2));
+        assert_eq!(rt.host.begin(Point::new(0.3, 0.4)), a);
+        assert_eq!(
+            events.iter().map(|e| e.0).collect::<Vec<_>>(),
+            vec![0, 0, 2, 0]
+        );
+    }
+}
+/// Called before Android Application/Resources construction. No source worker or
+/// input state is created; the desktop window keeps its own physical size.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clbb_mapper_config_resolution(width: *mut i32, height: *mut i32) {
+    let settings = Settings::load();
+    let gain = if settings.boolean("audio.muted", 0) {
+        0.0
+    } else {
+        settings.integer("audio.volume", 0) as f32 / 100.
+    };
+    GAIN.store(gain.to_bits(), Ordering::Relaxed);
+    crate::pacing::clbb_frame_pacer_configure(
+        settings.integer("display.fps_limit", 0) as u32,
+        i32::from(settings.boolean("display.vsync", 0)),
+    );
+    let w = settings.integer("display.width", 0);
+    let h = settings.integer("display.height", 0);
+    if let Some(out) = unsafe { width.as_mut() } {
+        *out = w;
+    }
+    if let Some(out) = unsafe { height.as_mut() } {
+        *out = h;
+    }
+}

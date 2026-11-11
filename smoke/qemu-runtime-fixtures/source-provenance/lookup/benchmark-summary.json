@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "benchmark": "One ABBA series per mode, same binary, thread CPU,2M calls/round; no repetitions selected for preferred outcome",
+  "results": [
+    {
+      "mode": "A64 full-key hit",
+      "baseline_ns": 2.5773985,
+      "candidate_ns": 1.923041,
+      "candidate_over_baseline": 0.7461170633877532,
+      "cpu_reduction_percent": 25.38829366122468,
+      "raw_baseline_ns": [
+        2.511391,
+        2.643406
+      ],
+      "raw_candidate_ns": [
+        1.929336,
+        1.916746
+      ]
+    },
+    {
+      "mode": "A64 one mismatch per64",
+      "baseline_ns": 2.8834437499999996,
+      "candidate_ns": 2.3407485,
+      "candidate_over_baseline": 0.8117892017140963,
+      "cpu_reduction_percent": 18.82107982859037,
+      "raw_baseline_ns": [
+        2.876801,
+        2.8900865
+      ],
+      "raw_candidate_ns": [
+        2.199061,
+        2.482436
+      ]
+    },
+    {
+      "mode": "authored A32 state seam",
+      "baseline_ns": 2.80938125,
+      "candidate_ns": 3.01275875,
+      "candidate_over_baseline": 1.0723922749893773,
+      "cpu_reduction_percent": -7.239227498937728,
+      "raw_baseline_ns": [
+        2.767216,
+        2.8515465
+      ],
+      "raw_candidate_ns": [
+        2.9612815,
+        3.064236
+      ]
+    },
+    {
+      "mode": "logging seam enabled",
+      "baseline_ns": 4.24770425,
+      "candidate_ns": 4.2368267500000005,
+      "candidate_over_baseline": 0.9974392049540645,
+      "cpu_reduction_percent": 0.2560795045935538,
+      "raw_baseline_ns": [
+        4.0553965,
+        4.440012
+      ],
+      "raw_candidate_ns": [
+        4.218177,
+        4.2554765
+      ]
+    }
+  ],
+  "raw_sha256": "bdd876d38587cb26228610af1301a75f90b876c79ef48770c64556abe3e8c14c",
+  "scope": "Synthetic types/helper with authored QHT/A32/logging seams. No actual QEMU code reclamation, game or whole-startup speed result. Concurrent system activity uncontrolled.",
+  "pass": true
+}

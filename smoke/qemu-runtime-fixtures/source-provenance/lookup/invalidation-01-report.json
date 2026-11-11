@@ -1,0 +1,120 @@
+{
+  "schema": 1,
+  "pass": true,
+  "no_guest_execution": true,
+  "test_only_instrumentation": true,
+  "runs": [
+    {
+      "name": "normal-compile",
+      "pid": 3256868,
+      "command": [
+        "cc",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01",
+        "-O2",
+        "-g",
+        "-fPIC",
+        "-fno-strict-aliasing",
+        "-fstack-protector-strong",
+        "-D_GNU_SOURCE",
+        "-DNEED_CPU_H",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build/aarch64-linux-user",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/target/arm",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/include",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/tcg/i386",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/accel/tcg",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01",
+        "-I/usr/include/glib-2.0",
+        "-I/usr/lib/glib-2.0/include",
+        "-I/usr/include/sysprof-6",
+        "-pthread",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/fixture.c",
+        "-o",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/normal",
+        "-lglib-2.0"
+      ],
+      "start_utc": "2026-11-09T12:26:49.224506+00:00",
+      "exit": 0
+    },
+    {
+      "name": "normal-run",
+      "pid": 3256876,
+      "command": [
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/normal"
+      ],
+      "start_utc": "2026-11-09T12:26:49.388316+00:00",
+      "exit": 0
+    },
+    {
+      "name": "sanitized-compile",
+      "pid": 3256883,
+      "command": [
+        "cc",
+        "-fsanitize=address,undefined",
+        "-fno-sanitize-recover=all",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01",
+        "-O2",
+        "-g",
+        "-fPIC",
+        "-fno-strict-aliasing",
+        "-fstack-protector-strong",
+        "-D_GNU_SOURCE",
+        "-DNEED_CPU_H",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build/aarch64-linux-user",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/target/arm",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/include",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/tcg/i386",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/accel/tcg",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01",
+        "-I/usr/include/glib-2.0",
+        "-I/usr/lib/glib-2.0/include",
+        "-I/usr/include/sysprof-6",
+        "-pthread",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/fixture.c",
+        "-o",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/sanitized",
+        "-lglib-2.0"
+      ],
+      "start_utc": "2026-11-09T12:26:49.602406+00:00",
+      "exit": 0
+    },
+    {
+      "name": "sanitized-run",
+      "pid": 3256892,
+      "command": [
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/sanitized"
+      ],
+      "start_utc": "2026-11-09T12:26:49.866253+00:00",
+      "exit": 0
+    }
+  ],
+  "input_sha256": {
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/fixture.c": "34bfd6caf3dc578f5fa670104a0aa43737ee22ae57a56c8bc71fe72f73a42a8d",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/include/exec/tb-lookup.h": "fdf95ce10d41d5851deed1e51831a8f4ad6f31c3964476c19322c63a2bc6af73",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/prepared/lookup-implementations.inc": "c186d76a85fe9ede989cc6bb00b379a5cfd978c644fc2e571f90734dbfa36caa"
+  },
+  "modes": [
+    "CF_INVALID after pointer load before full key check",
+    "CF_INVALID plus slot clear after pointer load",
+    "slot clear alone while loaded TB remains valid"
+  ],
+  "scope": "Deterministic test-only interleavings under retained-allocation/RCU lifetime assumption; no real QEMU reclamation/SMC integration test claimed.",
+  "artifact_sha256": {
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/normal-compile.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/normal-run.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/sanitized-compile.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/normal-compile.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/lookup-implementations.inc": "8c3c552e7e2f60b0e23a5433bf04d3518e15bf9ed0fcd82c817eeb8d54943a4c",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/sanitized": "f9fc7a34ab47cf986963602831c1229ed02b1124eeb476e4ddbdab8ff8fb2d36",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/sanitized-run.stdout": "717a0ba2595ef1498c026ecefc3229851f57c9b0984852056d27f6a756f0d1a9",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/fixture.c": "c6f3543dbb2454c9d5387778371e36443006f3034801200f3700066fcb4f550b",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/sanitized-run.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/sanitized-compile.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/normal": "489071591a476d87290754c680f6b0cacd5acbe9185d4532d075c71942d255f2",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/normal-run.stdout": "717a0ba2595ef1498c026ecefc3229851f57c9b0984852056d27f6a756f0d1a9",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/invalidation-01/exec/tb-lookup.h": "77bc63a016df3ca249314da979883225762f9ffa12c8e4549ab9787dc48db8e2"
+  }
+}

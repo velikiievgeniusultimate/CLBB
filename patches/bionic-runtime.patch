@@ -1,0 +1,505 @@
+diff --git a/Makefile b/Makefile
+index 5c74b10..c3569c7 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,5 +1,7 @@
+ CURRDIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
++BIONIC_MAKEFILE := $(realpath $(lastword $(MAKEFILE_LIST)))
+ BUILDDIR := $(CURRDIR)/builddir
++.DEFAULT_GOAL := default
+ 
+ LIBC_SRCS_arm64 = \
+ libc/arch-arm64/bionic/__bionic_clone.S \
+@@ -233,6 +235,7 @@ libc/arch-arm64/bionic/__set_tls.c
+ 
+ LIBC_SRCS = \
+ libc/arch-common/bionic/crtbegin_so.c \
++libc/bionic/standalone_system_properties.c \
+ libc/async_safe/async_safe_log.cpp \
+ libc/bionic/abort.cpp \
+ libc/bionic/accept4.cpp \
+@@ -738,6 +741,13 @@ jemalloc/src/tsd.c \
+ jemalloc/src/util.c \
+ jemalloc/src/witness.c
+ 
++# Standalone AArch64 build only; Android.bp/full Android retain netd semantics.
++# Override with CLBB_NATIVE_BRIDGE_DNS=0 when no matching host SVC exists.
++CLBB_NATIVE_BRIDGE_DNS ?= 1
++ifeq ($(CLBB_NATIVE_BRIDGE_DNS),1)
++LIBC_SRCS += libc/dns/net/clbb_dns.c
++endif
++
+ LIBC_OBJS := $(LIBC_SRCS:%=$(BUILDDIR)/%.o)
+ LIBC_OBJS_arm64 := $(LIBC_SRCS_arm64:%=$(BUILDDIR)/%.o)
+ LIBC_NOSP_OBJS := $(LIBC_NOSP_SRCS:%=$(BUILDDIR)/%.o)
+@@ -764,8 +774,21 @@ DEFINES=-D_LIBC=1 \
+         -DWILDABBR=\"\" \
+         -DNO_RUN_TIME_WARNINGS_ABOUT_YEAR_2000_PROBLEMS_THANK_YOU 
+ 
++ifeq ($(CLBB_NATIVE_BRIDGE_DNS),1)
++DEFINES += -DCLBB_NATIVE_BRIDGE_DNS=1
++endif
++
+ ARCH=aarch64
+-CFLAGS=-target $(ARCH)-pc-linux -g -fPIC -nostdlib -nostdinc -fno-exceptions -fno-sized-deallocation
++# Opt in for A/B release measurements; empty retains the historical -O0 build.
++# Release experiment: BIONIC_OPT='-O2 -fno-strict-aliasing -fno-builtin -mno-outline-atomics'.
++# -fno-builtin prevents libc/allocator idioms from becoming self-calls; unlike
++# -ffreestanding it does not alter __STDC_HOSTED__ or the existing header mode.
++# -mno-outline-atomics retains inline ARMv8.0 LL/SC, without new __aarch64_* deps.
++# Bionic overlays public pthread objects with private/internal representations,
++# and shares atomic/futex storage via different pointer types. Keep aliasing
++# conservative until those contracts have separate compiler validation.
++BIONIC_OPT ?=
++CFLAGS=-DINET6 -target $(ARCH)-pc-linux -g -fPIC -nostdlib -nostdinc -fno-exceptions -fno-sized-deallocation $(BIONIC_OPT)
+ 
+ INCLUDES=-I$(CURRDIR)/libc/include \
+          -I$(CURRDIR)/libc/kernel/android/uapi/ \
+@@ -792,39 +815,56 @@ INCLUDES=-I$(CURRDIR)/libc/include \
+ 
+ default: $(BUILDDIR)/libc.so
+ 
++# Make normally ignores flag changes. Preserve the stamp mtime on identical
++# configuration, but rebuild all object variants when any compile/link input
++# option or compiler identity changes. This includes the optional DNS define.
++BIONIC_FLAG_STAMP := $(BUILDDIR)/.bionic-build-flags
++BIONIC_CLANG_ID := $(shell clang --version | head -n 1)
++.PHONY: bionic-flags-force
++bionic-flags-force:
++$(BIONIC_FLAG_STAMP): bionic-flags-force
++	@mkdir -p "$(@D)"
++	@printf '%s\n' 'CLANG=$(BIONIC_CLANG_ID)' 'CFLAGS=$(CFLAGS)' 'DEFINES=$(DEFINES)' 'INCLUDES=$(INCLUDES)' 'LIBGCC=$(shell clang -target aarch64-linux-gnu --rtlib=libgcc --print-libgcc-file-name)' > "$@.tmp"
++	@if ! cmp -s "$@.tmp" "$@"; then mv "$@.tmp" "$@"; else rm -f "$@.tmp"; fi
++
++$(ALL_OBJS): $(BIONIC_FLAG_STAMP) $(BIONIC_MAKEFILE)
++
+ define rules=
+ $(filter %.$(1).o,$(LIBC_OBJS)): $(BUILDDIR)/%.$(1).o: %.$(1)
+ 	mkdir -p $$(@D)
+-	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -include $(CURRDIR)/libc/kernel/uapi/linux/libc-compat.h -o $$@ $$<
++	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -MMD -MP -MF $$@.d -MT $$@ -include $(CURRDIR)/libc/kernel/uapi/linux/libc-compat.h -o $$@ $$<
+ $(filter %.$(1).o,$(LIBC_NOSP_OBJS)): $(BUILDDIR)/%.$(1).o: %.$(1)
+ 	mkdir -p $$(@D)
+-	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -include $(CURRDIR)/libc/kernel/uapi/linux/libc-compat.h -fno-stack-protector -o $$@ $$<
++	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -MMD -MP -MF $$@.d -MT $$@ -include $(CURRDIR)/libc/kernel/uapi/linux/libc-compat.h -fno-stack-protector -o $$@ $$<
+ $(filter %.$(1).o,$(LIBC_FORTIFY_OBJ)): $(BUILDDIR)/%.$(1).o: %.$(1)
+ 	mkdir -p $$(@D)
+-	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -D__BIONIC_DECLARE_FORTIFY_HELPERS -DNO___MEMCPY_CHK -o $$@ $$<
++	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -MMD -MP -MF $$@.d -MT $$@ -D__BIONIC_DECLARE_FORTIFY_HELPERS -DNO___MEMCPY_CHK -o $$@ $$<
+ $(filter %.$(1).o,$(LIBC_OBJS_arm64)): $(BUILDDIR)/%.$(1).o: %.$(1)
+ 	mkdir -p $$(@D)
+-	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -D__ASSEMBLY__ -o $$@ $$<
++	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -MMD -MP -MF $$@.d -MT $$@ -D__ASSEMBLY__ -o $$@ $$<
+ $(filter %.$(1).o,$(LIBC_FREEBSD_OBJS)): $(BUILDDIR)/%.$(1).o: %.$(1)
+ 	mkdir -p $$(@D)
+-	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -include $(CURRDIR)/libc/upstream-freebsd/android/include/freebsd-compat.h -o $$@ $$<
++	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -MMD -MP -MF $$@.d -MT $$@ -include $(CURRDIR)/libc/upstream-freebsd/android/include/freebsd-compat.h -o $$@ $$<
+ $(filter %.$(1).o,$(LIBC_NETBSD_OBJS)): $(BUILDDIR)/%.$(1).o: %.$(1)
+ 	mkdir -p $$(@D)
+-	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -include $(CURRDIR)/libc/upstream-netbsd/android/include/netbsd-compat.h -o $$@ $$<
++	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -MMD -MP -MF $$@.d -MT $$@ -include $(CURRDIR)/libc/upstream-netbsd/android/include/netbsd-compat.h -o $$@ $$<
+ $(filter %.$(1).o,$(LIBC_OPENBSD_OBJS)): $(BUILDDIR)/%.$(1).o: %.$(1)
+ 	mkdir -p $$(@D)
+-	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -include $(CURRDIR)/libc/upstream-openbsd/android/include/openbsd-compat.h -o $$@ $$<
++	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -MMD -MP -MF $$@.d -MT $$@ -include $(CURRDIR)/libc/upstream-openbsd/android/include/openbsd-compat.h -o $$@ $$<
+ $(filter %.$(1).o,$(JEMALLOC_OBJS)): $(BUILDDIR)/%.$(1).o: %.$(1)
+ 	mkdir -p $$(@D)
+-	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -include $(CURRDIR)/jemalloc/android/include/log.h -o $$@ $$<
++	clang -c $(CFLAGS) $(DEFINES) $(INCLUDES) -MMD -MP -MF $$@.d -MT $$@ -include $(CURRDIR)/jemalloc/android/include/log.h -o $$@ $$<
+ endef
+ 
+ EXTS := c cpp S
+ $(foreach ext, $(EXTS), $(eval $(call rules,$(ext))))
+ 
+-$(BUILDDIR)/libc.so: $(ALL_OBJS)
+-	clang -target aarch64-pc-linux -fuse-ld=lld -shared -nostdlib -L$(CURRDIR)/prebuilts -ldl -l:linker64 -Wl,--version-script,$(CURRDIR)/libc/libc.arm64.map -o $@ -Wl,-soname,libc.so $^ $(shell clang -target aarch64-linux-gnu --rtlib=libgcc --print-libgcc-file-name)
++$(BUILDDIR)/libc.so: $(ALL_OBJS) $(CURRDIR)/libc/libc.arm64.map
++	clang -target aarch64-pc-linux -fuse-ld=lld -shared -nostdlib -L$(CURRDIR)/prebuilts -ldl -l:linker64 -Wl,--version-script,$(CURRDIR)/libc/libc.arm64.map -o $@ -Wl,-soname,libc.so $(ALL_OBJS) $(shell clang -target aarch64-linux-gnu --rtlib=libgcc --print-libgcc-file-name)
+ 
+ clean:
+ 	rm -rf $(BUILDDIR)
+ 
++# Track real local/transitive headers for C, C++ and preprocessed assembly.
++# -MP leaves harmless phony rules when a formerly included header is removed.
++-include $(ALL_OBJS:%=%.d)
+diff --git a/libc/dns/net/getaddrinfo.c b/libc/dns/net/getaddrinfo.c
+index 4e1aa61..39439ec 100644
+--- a/libc/dns/net/getaddrinfo.c
++++ b/libc/dns/net/getaddrinfo.c
+@@ -108,6 +108,9 @@
+ #include <stdarg.h>
+ #include "nsswitch.h"
+ #include "private/bionic_defs.h"
++#if defined(CLBB_NATIVE_BRIDGE_DNS) && defined(__aarch64__)
++#include "private/clbb_dns.h"
++#endif
+ 
+ typedef union sockaddr_union {
+     struct sockaddr     generic;
+@@ -735,6 +738,10 @@ android_getaddrinfofornetcontext(const char *hostname, const char *servname,
+ 	if (gai_error != EAI_SYSTEM) {
+ 		return gai_error;
+ 	}
++#if defined(CLBB_NATIVE_BRIDGE_DNS) && defined(__aarch64__)
++	if (__clbb_dns_default_context(netcontext))
++		return __clbb_dns_getaddrinfo(hostname, servname, hints, res);
++#endif
+ #endif
+ 
+ 	/*
+diff --git a/libc/dns/net/gethnamaddr.c b/libc/dns/net/gethnamaddr.c
+index 7e18840..7c11db7 100644
+--- a/libc/dns/net/gethnamaddr.c
++++ b/libc/dns/net/gethnamaddr.c
+@@ -89,6 +89,9 @@
+ #include <string.h>
+ 
+ #include "hostent.h"
++#if defined(CLBB_NATIVE_BRIDGE_DNS) && defined(__aarch64__)
++#include "private/clbb_dns.h"
++#endif
+ 
+ #define maybe_ok(res, nm, ok) (((res)->options & RES_NOCHECKNAME) != 0U || \
+                                (ok)(nm) != 0)
+@@ -795,6 +798,10 @@ gethostbyname_internal(const char *name, int af, res_state res, struct hostent *
+ 	FILE* proxy = fdopen(__netdClientDispatch.dnsOpenProxy(), "r+");
+ 	if (proxy == NULL) {
+ 		// Either we're not supposed to be using the proxy or the proxy is unavailable.
++#if defined(CLBB_NATIVE_BRIDGE_DNS) && defined(__aarch64__)
++		if (__clbb_dns_default_context(netcontext))
++			return __clbb_dns_gethostbyname(name, af, hp, hbuf, hbuflen, errorp);
++#endif
+ 		res_setnetcontext(res, netcontext);
+ 		return gethostbyname_internal_real(name, af, res, hp, hbuf, hbuflen, errorp);
+ 	}
+diff --git a/libc/libc.arm64.map b/libc/libc.arm64.map
+index 1f37571..8055b59 100644
+--- a/libc/libc.arm64.map
++++ b/libc/libc.arm64.map
+@@ -131,11 +131,11 @@ LIBC {
+     __sym_ntos;
+     __sym_ston;
+ #    __system_property_area_serial; # introduced=23
+-#    __system_property_find;
++    __system_property_find;
+ #    __system_property_find_nth;
+ #    __system_property_foreach; # introduced-arm=19 introduced-arm64=21 introduced-mips=19 introduced-mips64=21 introduced-x86=19 introduced-x86_64=21
+-#    __system_property_get;
+-#    __system_property_read;
++    __system_property_get;
++    __system_property_read;
+ #    __system_property_serial; # introduced-arm=19 introduced-arm64=21 introduced-mips=19 introduced-mips64=21 introduced-x86=19 introduced-x86_64=21
+ #    __system_property_set; # introduced-arm=12 introduced-arm64=21 introduced-mips=12 introduced-mips64=21 introduced-x86=12 introduced-x86_64=21
+     __umask_chk; # introduced-arm=18 introduced-arm64=21 introduced-mips=18 introduced-mips64=21 introduced-x86=18 introduced-x86_64=21
+diff --git a/libc/libc.map.txt b/libc/libc.map.txt
+index 581d17d..6453acf 100644
+--- a/libc/libc.map.txt
++++ b/libc/libc.map.txt
+@@ -188,11 +188,11 @@ LIBC {
+     __sym_ntos;
+     __sym_ston;
+ #    __system_property_area_serial; # introduced=23
+-#    __system_property_find;
++    __system_property_find;
+ #    __system_property_find_nth;
+ #    __system_property_foreach; # introduced-arm=19 introduced-arm64=21 introduced-mips=19 introduced-mips64=21 introduced-x86=19 introduced-x86_64=21
+-#    __system_property_get;
+-#    __system_property_read;
++    __system_property_get;
++    __system_property_read;
+ #    __system_property_serial; # introduced-arm=19 introduced-arm64=21 introduced-mips=19 introduced-mips64=21 introduced-x86=19 introduced-x86_64=21
+ #    __system_property_set; # introduced-arm=12 introduced-arm64=21 introduced-mips=12 introduced-mips64=21 introduced-x86=12 introduced-x86_64=21
+     __timer_create; # arm x86 mips
+diff --git a/libc/bionic/standalone_system_properties.c b/libc/bionic/standalone_system_properties.c
+new file mode 100644
+index 0000000..1c2dcad
+--- /dev/null
++++ b/libc/bionic/standalone_system_properties.c
+@@ -0,0 +1,23 @@
++/* Standalone native-bridge libc has no Android property area/service.
++ * Preserve the existing absent-property ABI, previously misplaced in liblog.
++ * This source is selected only by the standalone Makefile, not Android.bp. */
++#include <sys/system_properties.h>
++#include <stdio.h>
++
++int __system_property_get(const char* name, char* value) {
++    (void)name;
++    value[0] = '\0';
++    return 0;
++}
++
++const prop_info* __system_property_find(const char* name) {
++    fprintf(stderr, "[libnb-qemu property absent]: %s\n", name ? name : "");
++    return NULL;
++}
++
++int __system_property_read(const prop_info* info, char* name, char* value) {
++    (void)info;
++    if (name) name[0] = '\0';
++    if (value) value[0] = '\0';
++    return 0;
++}
+diff --git a/libc/dns/net/clbb_dns.c b/libc/dns/net/clbb_dns.c
+new file mode 100644
+index 0000000..20b74cd
+--- /dev/null
++++ b/libc/dns/net/clbb_dns.c
+@@ -0,0 +1,178 @@
++/* Rootless standalone native bridge DNS. No Android daemon or guest/host
++ * allocator sharing. Wire ABI is mirrored from dns-adapter/include/clbb_dns.h. */
++#include "private/clbb_dns.h"
++#include "private/clbb_dns_wire.h"
++#include "resolv_netid.h"
++#include <arpa/inet.h>
++#include <errno.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++#if !defined(CLBB_NATIVE_BRIDGE_DNS) || !defined(__aarch64__)
++#error clbb_dns.c is only for the standalone AArch64 native bridge
++#endif
++
++_Static_assert(sizeof(clbb_dns_hints_v1) == 20, "DNS hints ABI");
++_Static_assert(sizeof(clbb_dns_record_v1) == 40, "DNS record ABI");
++_Static_assert(sizeof(clbb_dns_response_v1) == 3600, "DNS response ABI");
++
++int __clbb_dns_default_context(const struct android_net_context* context) {
++    return context->app_netid == NETID_UNSET && context->app_mark == MARK_UNSET &&
++        context->dns_netid == NETID_UNSET && context->dns_mark == MARK_UNSET &&
++        context->uid == NET_CONTEXT_INVALID_UID && context->flags == 0 &&
++        context->qhook == NULL;
++}
++
++static int resolve(const char* node, const char* service,
++                   const clbb_dns_hints_v1* hints, clbb_dns_response_v1* response) {
++    memset(response, 0, sizeof(*response));
++    register uintptr_t x0 __asm__("x0") = (uintptr_t)node;
++    register uintptr_t x1 __asm__("x1") = (uintptr_t)service;
++    register uintptr_t x2 __asm__("x2") = (uintptr_t)hints;
++    register uintptr_t x3 __asm__("x3") = (uintptr_t)response;
++    __asm__ volatile("svc #0x2800" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3) : "memory", "cc");
++    int result = (int)x0;
++    if (result != 0) {
++        if (result == EAI_SYSTEM) errno = response->system_errno;
++        return result > 0 && result < EAI_MAX ? result : EAI_FAIL;
++    }
++    if (response->version != CLBB_DNS_VERSION || response->count == 0 ||
++        response->count > CLBB_DNS_MAX_RECORDS ||
++        response->canonical_len >= CLBB_DNS_CANON_CAPACITY ||
++        response->canonical[response->canonical_len] != '\0') return EAI_FAIL;
++    for (uint32_t i = 0; i < response->count; ++i) {
++        const clbb_dns_record_v1* r = &response->records[i];
++        if ((r->family != 4 && r->family != 6) ||
++            (r->socktype != SOCK_STREAM && r->socktype != SOCK_DGRAM) ||
++            (r->protocol != IPPROTO_TCP && r->protocol != IPPROTO_UDP)) return EAI_FAIL;
++    }
++    return 0;
++}
++
++int __clbb_dns_getaddrinfo(const char* node, const char* service,
++                          const struct addrinfo* hints, struct addrinfo** result) {
++    *result = NULL;
++    clbb_dns_hints_v1 wire = { .version = CLBB_DNS_VERSION };
++    if (hints) {
++        switch (hints->ai_family) {
++            case AF_UNSPEC: break;
++            case AF_INET: wire.family = 4; break;
++            case AF_INET6: wire.family = 6; break;
++            default: return EAI_FAMILY;
++        }
++        wire.socktype = hints->ai_socktype;
++        wire.protocol = hints->ai_protocol;
++        if (hints->ai_flags & AI_PASSIVE) wire.flags |= CLBB_DNS_PASSIVE;
++        if (hints->ai_flags & AI_CANONNAME) wire.flags |= CLBB_DNS_CANONNAME;
++        if (hints->ai_flags & AI_NUMERICHOST) wire.flags |= CLBB_DNS_NUMERICHOST;
++        if (hints->ai_flags & AI_NUMERICSERV) wire.flags |= CLBB_DNS_NUMERICSERV;
++        if (hints->ai_flags & AI_ADDRCONFIG) wire.flags |= CLBB_DNS_ADDRCONFIG;
++        if (hints->ai_flags & AI_V4MAPPED) wire.flags |= CLBB_DNS_V4MAPPED;
++        if (hints->ai_flags & AI_ALL) wire.flags |= CLBB_DNS_ALL;
++    }
++    clbb_dns_response_v1 response;
++    int error = resolve(node, service, &wire, &response);
++    if (error) return error;
++    struct addrinfo** tail = result;
++    for (uint32_t i = 0; i < response.count; ++i) {
++        const clbb_dns_record_v1* record = &response.records[i];
++        struct addrinfo* ai = calloc(1, sizeof(*ai) + sizeof(struct sockaddr_storage));
++        if (!ai) { error = EAI_MEMORY; goto fail; }
++        *tail = ai;
++        tail = &ai->ai_next;
++        ai->ai_flags = hints ? hints->ai_flags : 0;
++        ai->ai_family = record->family == 4 ? AF_INET : AF_INET6;
++        ai->ai_socktype = record->socktype;
++        ai->ai_protocol = record->protocol;
++        ai->ai_addr = (struct sockaddr*)(ai + 1);
++        if (record->family == 4) {
++            struct sockaddr_in* sa = (struct sockaddr_in*)ai->ai_addr;
++            ai->ai_addrlen = sizeof(*sa);
++            sa->sin_family = AF_INET;
++            sa->sin_port = htons(record->port);
++            memcpy(&sa->sin_addr, record->address, 4);
++        } else {
++            struct sockaddr_in6* sa = (struct sockaddr_in6*)ai->ai_addr;
++            ai->ai_addrlen = sizeof(*sa);
++            sa->sin6_family = AF_INET6;
++            sa->sin6_port = htons(record->port);
++            sa->sin6_flowinfo = htonl(record->flowinfo);
++            sa->sin6_scope_id = record->scope_id;
++            memcpy(&sa->sin6_addr, record->address, 16);
++        }
++        if (i == 0 && response.canonical_len) {
++            ai->ai_canonname = malloc(response.canonical_len + 1);
++            if (!ai->ai_canonname) { error = EAI_MEMORY; goto fail; }
++            memcpy(ai->ai_canonname, response.canonical, response.canonical_len + 1);
++        }
++    }
++    return 0;
++fail:
++    freeaddrinfo(*result);
++    *result = NULL;
++    return error;
++}
++
++struct hostent* __clbb_dns_gethostbyname(const char* name, int af,
++    struct hostent* host, char* buffer, size_t size, int* host_error) {
++    memset(host, 0, sizeof(*host));
++    if (af != AF_INET && af != AF_INET6) {
++        errno = EAFNOSUPPORT; *host_error = NO_RECOVERY; return NULL;
++    }
++    clbb_dns_hints_v1 hints = {
++        CLBB_DNS_VERSION, CLBB_DNS_CANONNAME, af == AF_INET ? 4 : 6,
++        SOCK_STREAM, IPPROTO_TCP
++    };
++    clbb_dns_response_v1 response;
++    int error = name ? resolve(name, NULL, &hints, &response) : EAI_NONAME;
++    if (error) {
++        switch (error) {
++            case EAI_AGAIN: *host_error = TRY_AGAIN; break;
++            case EAI_NONAME: *host_error = HOST_NOT_FOUND; break;
++            case EAI_NODATA: *host_error = NO_DATA; break;
++            case EAI_MEMORY: errno = ENOMEM; *host_error = NETDB_INTERNAL; break;
++            case EAI_SYSTEM: *host_error = NETDB_INTERNAL; break;
++            default: *host_error = NO_RECOVERY; break;
++        }
++        return NULL;
++    }
++    const size_t addr_size = af == AF_INET ? 4 : 16;
++    for (uint32_t i = 0; i < response.count; ++i) {
++        if (response.records[i].family != hints.family) {
++            *host_error = NO_RECOVERY; return NULL;
++        }
++    }
++    const char* canonical = response.canonical_len ? (char*)response.canonical : name;
++    size_t name_size = strlen(canonical) + 1;
++    /* Pointer arrays and addresses start aligned even for an unaligned _r buffer.
++     * Bounds are checked before any buffer write; no partial hostent escapes. */
++    size_t padding = (-(uintptr_t)buffer) & (sizeof(char*) - 1);
++    size_t pointers_size = (response.count + 2) * sizeof(char*);
++    size_t addresses_size = response.count * addr_size;
++    if (padding > size || pointers_size > size - padding ||
++        addresses_size > size - padding - pointers_size ||
++        name_size > size - padding - pointers_size - addresses_size) {
++        errno = ENOSPC; /* Existing h_errno_to_result converts this to ERANGE. */
++        *host_error = NETDB_INTERNAL;
++        return NULL;
++    }
++    char** aliases = (char**)(buffer + padding);
++    char** addresses = aliases + 1;
++    char* data = (char*)addresses + (response.count + 1) * sizeof(char*);
++    aliases[0] = NULL;
++    for (uint32_t i = 0; i < response.count; ++i) {
++        addresses[i] = data;
++        memcpy(data, response.records[i].address, addr_size);
++        data += addr_size;
++    }
++    addresses[response.count] = NULL;
++    memcpy(data, canonical, name_size);
++    host->h_name = data;
++    host->h_aliases = aliases;
++    host->h_addrtype = af;
++    host->h_length = addr_size;
++    host->h_addr_list = addresses;
++    *host_error = NETDB_SUCCESS;
++    return host;
++}
+diff --git a/libc/private/clbb_dns.h b/libc/private/clbb_dns.h
+new file mode 100644
+index 0000000..35c8d91
+--- /dev/null
++++ b/libc/private/clbb_dns.h
+@@ -0,0 +1,12 @@
++#ifndef BIONIC_PRIVATE_CLBB_DNS_H
++#define BIONIC_PRIVATE_CLBB_DNS_H
++#include <netdb.h>
++struct android_net_context;
++__BEGIN_DECLS
++__LIBC_HIDDEN__ int __clbb_dns_default_context(const struct android_net_context*);
++__LIBC_HIDDEN__ int __clbb_dns_getaddrinfo(const char*, const char*,
++    const struct addrinfo*, struct addrinfo**);
++__LIBC_HIDDEN__ struct hostent* __clbb_dns_gethostbyname(const char*, int,
++    struct hostent*, char*, size_t, int*);
++__END_DECLS
++#endif
+diff --git a/libc/private/clbb_dns_wire.h b/libc/private/clbb_dns_wire.h
+new file mode 100644
+index 0000000..f6e0733
+--- /dev/null
++++ b/libc/private/clbb_dns_wire.h
+@@ -0,0 +1,56 @@
++#ifndef CLBB_DNS_H
++#define CLBB_DNS_H
++#include <stdint.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* v1 payload integers are little endian. No native pointers occur in payloads.
++ * Public C function arguments are HOST pointers, not unchecked guest pointers. */
++#define CLBB_DNS_VERSION 1u
++#define CLBB_DNS_MAX_RECORDS 64u
++#define CLBB_DNS_CANON_CAPACITY 1024u
++enum {
++    CLBB_DNS_PASSIVE = 1, CLBB_DNS_CANONNAME = 2,
++    CLBB_DNS_NUMERICHOST = 4, CLBB_DNS_NUMERICSERV = 8,
++    CLBB_DNS_ADDRCONFIG = 16, CLBB_DNS_V4MAPPED = 32, CLBB_DNS_ALL = 64
++};
++/* These are guest bionic EAI values; do not use host EAI constants. */
++enum {
++    CLBB_DNS_OK = 0, CLBB_DNS_ADDRFAMILY = 1, CLBB_DNS_AGAIN = 2, CLBB_DNS_BADFLAGS = 3,
++    CLBB_DNS_FAIL = 4, CLBB_DNS_FAMILY = 5, CLBB_DNS_MEMORY = 6,
++    CLBB_DNS_NODATA = 7, CLBB_DNS_NONAME = 8, CLBB_DNS_SERVICE = 9,
++    CLBB_DNS_SOCKTYPE = 10, CLBB_DNS_SYSTEM = 11, CLBB_DNS_BADHINTS = 12,
++    CLBB_DNS_PROTOCOL = 13, CLBB_DNS_OVERFLOW = 14
++};
++typedef struct {
++    uint32_t version, flags;
++    uint32_t family;   /* 0 unspecified, 4 IPv4, 6 IPv6 */
++    uint32_t socktype; /* 0 unspecified, 1 stream, 2 datagram */
++    uint32_t protocol; /* 0 unspecified, 6 TCP, 17 UDP */
++} clbb_dns_hints_v1;
++typedef struct {
++    uint32_t family, socktype, protocol;
++    uint16_t port; /* host order */
++    uint16_t reserved;
++    uint32_t scope_id, flowinfo;
++    uint8_t address[16]; /* network-order bytes; first 4 for IPv4 */
++} clbb_dns_record_v1;
++typedef struct {
++    uint32_t version, count, canonical_len;
++    int32_t system_errno; /* Linux/Android errno, only on EAI_SYSTEM */
++    uint8_t canonical[CLBB_DNS_CANON_CAPACITY]; /* NUL terminated */
++    clbb_dns_record_v1 records[CLBB_DNS_MAX_RECORDS];
++} clbb_dns_response_v1;
++
++/* node/service are nullable NUL-terminated strings. hints is required.
++ * response is required and reset on failure; count=0, canonical_len=0.
++ * Buffers must be aligned, non-overlapping and valid for the whole call.
++ * Success never silently truncates. No memory ownership passes to the caller.
++ * Blocking call; host OS timeout/cancellation policies apply. */
++int32_t clbb_dns_resolve_v1(const char *node, const char *service,
++    const clbb_dns_hints_v1 *hints, clbb_dns_response_v1 *response);
++#ifdef __cplusplus
++}
++#endif
++#endif

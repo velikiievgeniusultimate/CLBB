@@ -1,0 +1,1224 @@
+diff --git a/accel/tcg/tcg-runtime.c b/accel/tcg/tcg-runtime.c
+index 446465a..2ab9c42 100644
+--- a/accel/tcg/tcg-runtime.c
++++ b/accel/tcg/tcg-runtime.c
+@@ -145,7 +145,7 @@ uint64_t HELPER(ctpop_i64)(uint64_t arg)
+     return ctpop64(arg);
+ }
+ 
+-void *HELPER(lookup_tb_ptr)(CPUArchState *env)
++static void * __attribute__((noinline)) clbb_lookup_tb_ptr_slow(CPUArchState *env)
+ {
+     CPUState *cpu = env_cpu(env);
+     TranslationBlock *tb;
+@@ -164,6 +164,51 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env)
+     return tb->tc.ptr;
+ }
+ 
++/* GPL-2.0-or-later experiment derived from QEMU tb-lookup.h
++ * Copyright (C) 2017 Emilio G. Cota and QEMU ARM state extraction.
++ * Original full helper retained verbatim in the noinline slow function.
++ * No second cache or new code-pointer lifetime/invalidation protocol. */
++void *HELPER(lookup_tb_ptr)(CPUArchState *env)
++{
++#if defined(CONFIG_USER_ONLY) && defined(TARGET_AARCH64) && !defined(CONFIG_DEBUG_TCG)
++    CPUState *cpu = env_cpu(env);
++    CPUArchState *state = (CPUArchState *)cpu->env_ptr;
++    uint32_t cf_mask = curr_cflags();
++    uint32_t flags = state->hflags;
++
++    if (likely(FIELD_EX32(flags, TBFLAG_ANY, AARCH64_STATE))) {
++        target_ulong pc = state->pc;
++        TranslationBlock *tb;
++        uint32_t hash;
++
++        if (cpu_isar_feature(aa64_bti, env_archcpu(state))) {
++            flags = FIELD_DP32(flags, TBFLAG_A64, BTYPE, state->btype);
++        }
++        if (FIELD_EX32(flags, TBFLAG_ANY, SS_ACTIVE) &&
++            (state->pstate & PSTATE_SS)) {
++            flags = FIELD_DP32(flags, TBFLAG_ANY, PSTATE_SS, 1);
++        }
++        hash = tb_jmp_cache_hash_func(pc);
++        tb = atomic_rcu_read(&cpu->tb_jmp_cache[hash]);
++        cf_mask &= ~CF_CLUSTER_MASK;
++        cf_mask |= cpu->cluster_index << CF_CLUSTER_SHIFT;
++        if (likely(tb && tb->pc == pc && tb->cs_base == 0 &&
++                   tb->flags == flags &&
++                   tb->trace_vcpu_dstate == *cpu->trace_dstate &&
++                   (tb_cflags(tb) & (CF_HASH_MASK | CF_INVALID)) == cf_mask)) {
++            qemu_log_mask_and_addr(CPU_LOG_EXEC, pc,
++                                  "Chain %d: %p ["
++                                  TARGET_FMT_lx "/" TARGET_FMT_lx "/%#x] %s\n",
++                                  cpu->cpu_index, tb->tc.ptr,
++                                  (target_ulong)0, pc, flags,
++                                  lookup_symbol(pc));
++            return tb->tc.ptr;
++        }
++    }
++#endif
++    return clbb_lookup_tb_ptr_slow(env);
++}
++
+ void HELPER(exit_atomic)(CPUArchState *env)
+ {
+     cpu_loop_exit_atomic(env_cpu(env), GETPC());
+diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
+index 909059a..f175d0e 100644
+--- a/accel/tcg/translate-all.c
++++ b/accel/tcg/translate-all.c
+@@ -1552,8 +1552,10 @@ static inline void tb_page_add(PageDesc *p, TranslationBlock *tb,
+             prot |= p2->flags;
+             p2->flags &= ~PAGE_WRITE;
+           }
++        /* TCG reads executable guest bytes as host data (x86 PKU/XOM). */
+         mprotect(g2h(page_addr), qemu_host_page_size,
+-                 (prot & PAGE_BITS) & ~PAGE_WRITE);
++                 ((prot & PAGE_BITS) & ~PAGE_WRITE) |
++                 ((prot & PAGE_EXEC) ? PROT_READ : 0));
+         if (DEBUG_TB_INVALIDATE_GATE) {
+             printf("protecting code page: 0x" TB_PAGE_ADDR_FMT "\n", page_addr);
+         }
+@@ -2652,7 +2654,8 @@ int page_unprotect(target_ulong address, uintptr_t pc)
+ #endif
+             }
+             mprotect((void *)g2h(host_start), qemu_host_page_size,
+-                     prot & PAGE_BITS);
++                     (prot & PAGE_BITS) |
++                     ((prot & PAGE_EXEC) ? PROT_READ : 0));
+         }
+         mmap_unlock();
+         /* If current TB was invalidated return to main loop */
+diff --git a/hw/core/cpu.c b/hw/core/cpu.c
+index 786a1be..44865ce 100644
+--- a/hw/core/cpu.c
++++ b/hw/core/cpu.c
+@@ -36,6 +36,19 @@
+ 
+ CPUInterruptHandler cpu_interrupt_handler;
+ 
++/* Embedded JNI callers do not share QEMU's system-emulation iothread lock.
++ * Protect QOM CPU creation, reset and final release, while keeping normal
++ * guest execution parallel. Recursive reset callbacks use the same lock.
++ */
++static GRecMutex clbb_cpu_lifecycle_lock;
++
++void clbb_cpu_unref(CPUState *cpu)
++{
++    g_rec_mutex_lock(&clbb_cpu_lifecycle_lock);
++    object_unref(OBJECT(cpu));
++    g_rec_mutex_unlock(&clbb_cpu_lifecycle_lock);
++}
++
+ CPUState *cpu_by_arch_id(int64_t id)
+ {
+     CPUState *cpu;
+@@ -58,6 +71,7 @@ bool cpu_exists(int64_t id)
+ CPUState *cpu_create(const char *typename)
+ {
+     Error *err = NULL;
++    g_rec_mutex_lock(&clbb_cpu_lifecycle_lock);
+     CPUState *cpu = CPU(object_new(typename));
+     object_property_set_bool(OBJECT(cpu), true, "realized", &err);
+     if (err != NULL) {
+@@ -65,6 +79,7 @@ CPUState *cpu_create(const char *typename)
+         object_unref(OBJECT(cpu));
+         exit(EXIT_FAILURE);
+     }
++    g_rec_mutex_unlock(&clbb_cpu_lifecycle_lock);
+     return cpu;
+ }
+ 
+@@ -241,9 +256,15 @@ void cpu_dump_statistics(CPUState *cpu, int flags)
+ 
+ void cpu_reset(CPUState *cpu)
+ {
++    /* The embedded native bridge creates CPUs from concurrent JNI threads.
++     * Resettable's phase state assumes serialized reset operations (normally
++     * provided by QEMU's iothread lock). Serialize resets, not guest execution.
++     * Recursion on the same thread remains possible for device reset callbacks.
++     */
++    g_rec_mutex_lock(&clbb_cpu_lifecycle_lock);
+     device_cold_reset(DEVICE(cpu));
+-
+     trace_guest_cpu_reset(cpu);
++    g_rec_mutex_unlock(&clbb_cpu_lifecycle_lock);
+ }
+ 
+ static void cpu_common_reset(DeviceState *dev)
+diff --git a/include/hw/core/cpu.h b/include/hw/core/cpu.h
+index 5bf94d2..b55705e 100644
+--- a/include/hw/core/cpu.h
++++ b/include/hw/core/cpu.h
+@@ -673,6 +673,9 @@ ObjectClass *cpu_class_by_name(const char *typename, const char *cpu_model);
+  */
+ CPUState *cpu_create(const char *typename);
+ 
++/* Native bridge: release a CPU under the shared QOM lifecycle lock. */
++void clbb_cpu_unref(CPUState *cpu);
++
+ /**
+  * parse_cpu_option:
+  * @cpu_option: The -cpu option including optional parameters.
+diff --git a/linux-user/aarch64/cpu_loop.c b/linux-user/aarch64/cpu_loop.c
+index a5565c3..d6218ae 100644
+--- a/linux-user/aarch64/cpu_loop.c
++++ b/linux-user/aarch64/cpu_loop.c
+@@ -152,7 +152,9 @@ void cpu_loop(CPUARMState *env)
+          * so any return to running guest code implies this.
+          */
+         env->exclusive_addr = -1;
+-        if (trapnr == EXCP_YIELD) {
++        /* Only the bridge sentinel ends a native call. Ordinary guest YIELD
++         * instructions also raise EXCP_YIELD and must resume the same frame. */
++        if (trapnr == EXCP_YIELD && env->pc == env->pc_stop) {
+             return;
+         }
+     }
+diff --git a/linux-user/aarch64/signal.c b/linux-user/aarch64/signal.c
+index cd521ee..7a2e30c 100644
+--- a/linux-user/aarch64/signal.c
++++ b/linux-user/aarch64/signal.c
+@@ -424,7 +424,7 @@ static void target_setup_frame(int usig, struct target_sigaction *ka,
+                                uc.tuc_mcontext.__reserved),
+     };
+     int fpsimd_ofs, fr_ofs, sve_ofs = 0, vq = 0, sve_size = 0;
+-    struct target_rt_sigframe *frame;
++    struct target_rt_sigframe *frame = NULL;
+     struct target_rt_frame_record *fr;
+     abi_ulong frame_addr, return_addr;
+ 
+@@ -469,6 +469,15 @@ static void target_setup_frame(int usig, struct target_sigaction *ka,
+ 
+     frame_addr = get_sigframe(ka, env, layout.total_size);
+     trace_user_setup_frame(env, frame_addr);
++    /* This embedded bridge permits host-owned JNI buffers in access_ok(),
++     * so lock_user alone does not check or unprotect translated pages.
++     * A signal frame is always guest memory: validate its entire range and
++     * restore writes to any stack pages protected for cached trampolines
++     * before writing from host code outside cpu_exec's fault recovery. */
++    if (!access_ok(VERIFY_WRITE, frame_addr, layout.total_size) ||
++        page_check_range(frame_addr, layout.total_size, PAGE_READ | PAGE_WRITE)) {
++        goto give_sigsegv;
++    }
+     frame = lock_user(VERIFY_WRITE, frame_addr, layout.total_size, 0);
+     if (!frame) {
+         goto give_sigsegv;
+diff --git a/linux-user/main.c b/linux-user/main.c
+index a86ad79..e567c11 100644
+--- a/linux-user/main.c
++++ b/linux-user/main.c
+@@ -47,6 +47,35 @@
+ #include "cpu_loop-common.h"
+ #include "crypto/init.h"
+ 
++/* Optional translated-code cache budget, not guest/application data preload.
++ * Zero preserves QEMU's own default/allocation policy. Keep parsing bounded
++ * before multiplying, so arbitrarily long environment values cannot overflow.
++ */
++static unsigned long clbb_tcg_cache_bytes(void)
++{
++    const int saved_errno = errno;
++    const char *value = getenv("CLBB_TCG_CACHE_MIB");
++    unsigned long mib = 0;
++    unsigned long result = 0;
++
++    if (value && *value) {
++        const unsigned char *at = (const unsigned char *)value;
++        for (; *at; ++at) {
++            if (*at < '0' || *at > '9' || mib > 1024 / 10 ||
++                (mib == 1024 / 10 && (unsigned)(*at - '0') > 1024 % 10)) {
++                goto done;
++            }
++            mib = mib * 10 + (*at - '0');
++        }
++        if (mib >= 32 && mib <= 1024) {
++            result = mib * MiB;
++        }
++    }
++done:
++    errno = saved_errno;
++    return result;
++}
++
+ char *exec_path;
+ 
+ int singlestep;
+@@ -741,7 +770,7 @@ int qemu_main(int argc, char **argv, char **envp)
+ //#endif
+ 
+     /* init tcg before creating CPUs and to get qemu_host_page_size */
+-    tcg_exec_init(0);
++    tcg_exec_init(clbb_tcg_cache_bytes());
+ 
+     cpu = cpu_create(cpu_type);
+     env = cpu->env_ptr;
+@@ -892,6 +921,7 @@ int qemu_main(int argc, char **argv, char **envp)
+ 
+     target_set_brk(info->brk);
+     syscall_init();
++    signal_init_embedded();
+ //#ifndef __ANDROID__
+ //    signal_init();
+ //#endif
+diff --git a/linux-user/mmap.c b/linux-user/mmap.c
+index 889571a..b282b37 100644
+--- a/linux-user/mmap.c
++++ b/linux-user/mmap.c
+@@ -21,11 +21,31 @@
+ #include "exec/log.h"
+ #include "qemu.h"
+ 
++/* CLBB: guest executable pages must be readable by the host TCG decoder.
++ * Linux x86 execute-only mappings may use PKU and fault on decoder reads.
++ * Keep guest page flags unchanged; widen only the host mapping permissions.
++ */
++static int clbb_host_prot(int prot)
++{
++    return (prot & PROT_EXEC) ? (prot | PROT_READ) : prot;
++}
++
++static int clbb_host_mprotect(void *addr, size_t len, int prot)
++{
++    return mprotect(addr, len, clbb_host_prot(prot));
++}
++
++static void *clbb_host_mmap(void *addr, size_t len, int prot, int flags,
++                            int fd, off_t offset)
++{
++    return mmap(addr, len, clbb_host_prot(prot), flags, fd, offset);
++}
++
+ #if 0
+ 
+ static void *log_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
+ {
+-  void *mapped = mmap(addr, length, prot, flags, fd, offset);
++  void *mapped = clbb_host_mmap(addr, length, prot, flags, fd, offset);
+   qemu_log("mmap  : %p - %p [%d]\n", mapped, ((char*)mapped) + length, length);
+   return mapped;
+ }
+@@ -113,7 +133,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int prot)
+             }
+             end = host_end;
+         }
+-        ret = mprotect(g2h(host_start), qemu_host_page_size, prot1 & PAGE_BITS);
++        ret = clbb_host_mprotect(g2h(host_start), qemu_host_page_size, prot1 & PAGE_BITS);
+         if (ret != 0)
+             goto error;
+         host_start += qemu_host_page_size;
+@@ -123,7 +143,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int prot)
+         for(addr = end; addr < host_end; addr += TARGET_PAGE_SIZE) {
+             prot1 |= page_get_flags(addr);
+         }
+-        ret = mprotect(g2h(host_end - qemu_host_page_size), qemu_host_page_size,
++        ret = clbb_host_mprotect(g2h(host_end - qemu_host_page_size), qemu_host_page_size,
+                        prot1 & PAGE_BITS);
+         if (ret != 0)
+             goto error;
+@@ -132,7 +152,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int prot)
+ 
+     /* handle the pages in the middle */
+     if (host_start < host_end) {
+-        ret = mprotect(g2h(host_start), host_end - host_start, prot);
++        ret = clbb_host_mprotect(g2h(host_start), host_end - host_start, prot);
+         if (ret != 0)
+             goto error;
+     }
+@@ -165,7 +185,7 @@ static int mmap_frag(abi_ulong real_start,
+ 
+     if (prot1 == 0) {
+         /* no page was there, so we allocate one */
+-        void *p = mmap(host_start, qemu_host_page_size, prot,
++        void *p = clbb_host_mmap(host_start, qemu_host_page_size, prot,
+                        flags | MAP_ANONYMOUS, -1, 0);
+         if (p == MAP_FAILED)
+             return -1;
+@@ -183,7 +203,7 @@ static int mmap_frag(abi_ulong real_start,
+ 
+         /* adjust protection to be able to read */
+         if (!(prot1 & PROT_WRITE))
+-            mprotect(host_start, qemu_host_page_size, prot1 | PROT_WRITE);
++            clbb_host_mprotect(host_start, qemu_host_page_size, prot1 | PROT_WRITE);
+ 
+         /* read the corresponding file data */
+         if (pread(fd, g2h(start), end - start, offset) == -1)
+@@ -191,10 +211,10 @@ static int mmap_frag(abi_ulong real_start,
+ 
+         /* put final protection */
+         if (prot_new != (prot1 | PROT_WRITE))
+-            mprotect(host_start, qemu_host_page_size, prot_new);
++            clbb_host_mprotect(host_start, qemu_host_page_size, prot_new);
+     } else {
+         if (prot_new != prot1) {
+-            mprotect(host_start, qemu_host_page_size, prot_new);
++            clbb_host_mprotect(host_start, qemu_host_page_size, prot_new);
+         }
+         if (prot_new & PROT_WRITE) {
+             memset(g2h(start), 0, end - start);
+@@ -302,11 +322,11 @@ abi_ulong mmap_find_vma(abi_ulong start, abi_ulong size, abi_ulong align)
+         /*
+          * Reserve needed memory area to avoid a race.
+          * It should be discarded using:
+-         *  - mmap() with MAP_FIXED flag
++         *  - clbb_host_mmap() with MAP_FIXED flag
+          *  - mremap() with MREMAP_FIXED flag
+          *  - shmat() with SHM_REMAP flag
+          */
+-        ptr = mmap(g2h(addr), size, PROT_NONE,
++        ptr = clbb_host_mmap(g2h(addr), size, PROT_NONE,
+                    MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE, -1, 0);
+ 
+         /* ENOMEM, if host address space has no memory */
+@@ -458,14 +478,14 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
+         /* Note: we prefer to control the mapping address. It is
+            especially important if qemu_host_page_size >
+            qemu_real_host_page_size */
+-        p = mmap(g2h(start), host_len, prot,
++        p = clbb_host_mmap(g2h(start), host_len, prot,
+                  flags | MAP_FIXED | MAP_ANONYMOUS, -1, 0);
+         if (p == MAP_FAILED)
+             goto fail;
+         /* update start so that it points to the file position at 'offset' */
+         host_start = (unsigned long)p;
+         if (!(flags & MAP_ANONYMOUS)) {
+-            p = mmap(g2h(start), len, prot,
++            p = clbb_host_mmap(g2h(start), len, prot,
+                      flags | MAP_FIXED, fd, host_offset);
+             if (p == MAP_FAILED) {
+                 munmap(g2h(start), host_len);
+@@ -485,7 +505,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
+         /*
+          * Test if requested memory area fits target address space
+          * It can fail only on 64-bit host with 32-bit target.
+-         * On any other target/host host mmap() handles this error correctly.
++         * On any other target/host host clbb_host_mmap() handles this error correctly.
+          */
+         if (!guest_range_valid(start, len)) {
+             errno = ENOMEM;
+@@ -552,7 +572,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
+                 offset1 = 0;
+             else
+                 offset1 = offset + real_start - start;
+-            p = mmap(g2h(real_start), real_end - real_start,
++            p = clbb_host_mmap(g2h(real_start), real_end - real_start,
+                      prot, flags, fd, offset1);
+             if (p == MAP_FAILED)
+                 goto fail;
+@@ -610,7 +630,7 @@ static void mmap_reserve(abi_ulong start, abi_ulong size)
+             real_end -= qemu_host_page_size;
+     }
+     if (real_start != real_end) {
+-        mmap(g2h(real_start), real_end - real_start, PROT_NONE,
++        clbb_host_mmap(g2h(real_start), real_end - real_start, PROT_NONE,
+                  MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE,
+                  -1, 0);
+     }
+diff --git a/linux-user/qemu.h b/linux-user/qemu.h
+index e6f2372..5347ba9 100644
+--- a/linux-user/qemu.h
++++ b/linux-user/qemu.h
+@@ -406,6 +406,7 @@ void print_taken_signal(int target_signum, const target_siginfo_t *tinfo);
+ /* signal.c */
+ void process_pending_signals(CPUArchState *cpu_env);
+ void signal_init(void);
++void signal_init_embedded(void);
+ int queue_signal(CPUArchState *env, int sig, int si_type,
+                  target_siginfo_t *info);
+ void host_to_target_siginfo(target_siginfo_t *tinfo, const siginfo_t *info);
+@@ -691,4 +692,7 @@ void preexit_cleanup(CPUArchState *env, int code);
+ #include "target_cpu.h"
+ #include "target_structs.h"
+ 
++/* Embedders may release host thread resources after guest TLS destructors. */
++extern void (*native_bridge_thread_exit_handler)(void);
++
+ #endif /* QEMU_H */
+diff --git a/linux-user/signal.c b/linux-user/signal.c
+index 836efb8..0db6ecb 100644
+--- a/linux-user/signal.c
++++ b/linux-user/signal.c
+@@ -570,6 +570,15 @@ void qemu_android_handle_sigprof(int num)
+ }
+ #endif
+ 
++/* Embedded QEMU shares the process with ART. Initialize guest signal state
++ * without replacing ART's host handlers; native-bridge callbacks route faults. */
++void signal_init_embedded(void)
++{
++    TaskState *ts = (TaskState *)thread_cpu->opaque;
++    signal_table_init();
++    sigprocmask(0, NULL, &ts->signal_mask);
++}
++
+ void signal_init(void)
+ {
+     TaskState *ts = (TaskState *)thread_cpu->opaque;
+diff --git a/linux-user/syscall.c b/linux-user/syscall.c
+index c1b79ed..be5ce7d 100644
+--- a/linux-user/syscall.c
++++ b/linux-user/syscall.c
+@@ -1200,9 +1200,72 @@ static inline abi_long copy_from_user_timeval(struct timeval *tv,
+     return 0;
+ }
+ 
++#if defined(TARGET_AARCH64) && !defined(TARGET_ABI32)
++static abi_long clbb_syscall_copy_to_guest(abi_ulong target_addr,
++                                        const void *source, size_t length)
++{
++    abi_ulong last, page, last_page;
++    struct iovec local, remote;
++    ssize_t copied;
++
++    if (length == 0) {
++        return 0;
++    }
++    last = target_addr + length - 1;
++    if (length > SSIZE_MAX || last < target_addr ||
++        !guest_addr_valid(target_addr) || !guest_addr_valid(last)) {
++        return -TARGET_EFAULT;
++    }
++
++    /* Preserve tracked self-modifying-code semantics before the kernel copy.
++     * Missing/reserved descriptors are not proof that Android host mappings
++     * are inaccessible. Check each page independently: an unknown first page
++     * must not hide a tracked SMC page later in a crossing output buffer.
++     * stat only writes, so PAGE_READ must not reject a valid write-only page.
++     */
++    mmap_lock();
++    page = target_addr & TARGET_PAGE_MASK;
++    last_page = last & TARGET_PAGE_MASK;
++    for (;;) {
++        int flags = page_get_flags(page);
++
++        if ((flags & (PAGE_VALID | PAGE_WRITE_ORG)) ==
++            (PAGE_VALID | PAGE_WRITE_ORG) &&
++            page_check_range(page, 1, PAGE_WRITE) != 0) {
++            mmap_unlock();
++            return -TARGET_EFAULT;
++        }
++        if (page == last_page) {
++            break;
++        }
++        page += TARGET_PAGE_SIZE;
++    }
++
++    local.iov_base = (void *)source;
++    local.iov_len = length;
++    remote.iov_base = g2h(target_addr);
++    remote.iov_len = length;
++    copied = syscall(__NR_process_vm_writev, getpid(), &local, 1UL,
++                     &remote, 1UL, 0UL);
++    mmap_unlock();
++
++    /* A partial copy has the same EFAULT result as the kernel stat syscall;
++     * bytes copied before a boundary fault have unspecified output contents.
++     * Never fall back to memcpy if the kernel denies the safe copy.
++     */
++    return copied == (ssize_t)length ? 0 : -TARGET_EFAULT;
++}
++#endif
++
+ static inline abi_long copy_to_user_timeval(abi_ulong target_tv_addr,
+                                             const struct timeval *tv)
+ {
++#if defined(TARGET_AARCH64) && !defined(TARGET_ABI32)
++    struct target_timeval converted;
++    __put_user(tv->tv_sec, &converted.tv_sec);
++    __put_user(tv->tv_usec, &converted.tv_usec);
++    return clbb_syscall_copy_to_guest(target_tv_addr, &converted, sizeof(converted));
++#else
+     struct target_timeval *target_tv;
+ 
+     if (!lock_user_struct(VERIFY_WRITE, target_tv, target_tv_addr, 0)) {
+@@ -1215,6 +1278,7 @@ static inline abi_long copy_to_user_timeval(abi_ulong target_tv_addr,
+     unlock_user_struct(target_tv, target_tv_addr, 1);
+ 
+     return 0;
++#endif
+ }
+ 
+ static inline abi_long copy_to_user_timeval64(abi_ulong target_tv_addr,
+@@ -1274,6 +1338,12 @@ static inline abi_long target_to_host_timespec64(struct timespec *host_ts,
+ static inline abi_long host_to_target_timespec(abi_ulong target_addr,
+                                                struct timespec *host_ts)
+ {
++#if defined(TARGET_AARCH64) && !defined(TARGET_ABI32)
++    struct target_timespec converted;
++    __put_user(host_ts->tv_sec, &converted.tv_sec);
++    __put_user(host_ts->tv_nsec, &converted.tv_nsec);
++    return clbb_syscall_copy_to_guest(target_addr, &converted, sizeof(converted));
++#else
+     struct target_timespec *target_ts;
+ 
+     if (!lock_user_struct(VERIFY_WRITE, target_ts, target_addr, 0)) {
+@@ -1283,11 +1353,18 @@ static inline abi_long host_to_target_timespec(abi_ulong target_addr,
+     __put_user(host_ts->tv_nsec, &target_ts->tv_nsec);
+     unlock_user_struct(target_ts, target_addr, 1);
+     return 0;
++#endif
+ }
+ 
+ static inline abi_long host_to_target_timespec64(abi_ulong target_addr,
+                                                  struct timespec *host_ts)
+ {
++#if defined(TARGET_AARCH64) && !defined(TARGET_ABI32)
++    struct target__kernel_timespec converted;
++    __put_user(host_ts->tv_sec, &converted.tv_sec);
++    __put_user(host_ts->tv_nsec, &converted.tv_nsec);
++    return clbb_syscall_copy_to_guest(target_addr, &converted, sizeof(converted));
++#else
+     struct target__kernel_timespec *target_ts;
+ 
+     if (!lock_user_struct(VERIFY_WRITE, target_ts, target_addr, 0)) {
+@@ -1297,12 +1374,19 @@ static inline abi_long host_to_target_timespec64(abi_ulong target_addr,
+     __put_user(host_ts->tv_nsec, &target_ts->tv_nsec);
+     unlock_user_struct(target_ts, target_addr, 1);
+     return 0;
++#endif
+ }
+ 
+ #if defined(TARGET_NR_gettimeofday)
+ static inline abi_long copy_to_user_timezone(abi_ulong target_tz_addr,
+                                              struct timezone *tz)
+ {
++#if defined(TARGET_AARCH64) && !defined(TARGET_ABI32)
++    struct target_timezone converted;
++    __put_user(tz->tz_minuteswest, &converted.tz_minuteswest);
++    __put_user(tz->tz_dsttime, &converted.tz_dsttime);
++    return clbb_syscall_copy_to_guest(target_tz_addr, &converted, sizeof(converted));
++#else
+     struct target_timezone *target_tz;
+ 
+     if (!lock_user_struct(VERIFY_WRITE, target_tz, target_tz_addr, 1)) {
+@@ -1315,6 +1399,7 @@ static inline abi_long copy_to_user_timezone(abi_ulong target_tz_addr,
+     unlock_user_struct(target_tz, target_tz_addr, 1);
+ 
+     return 0;
++#endif
+ }
+ #endif
+ 
+@@ -5920,6 +6005,8 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
+ #define NEW_STACK_SIZE 0x40000
+ 
+ 
++void (*native_bridge_thread_exit_handler)(void);
++
+ static pthread_mutex_t clone_lock = PTHREAD_MUTEX_INITIALIZER;
+ typedef struct {
+     CPUArchState *env;
+@@ -6837,6 +6924,20 @@ static inline int target_to_host_mlockall_arg(int arg)
+ #if (defined(TARGET_NR_stat64) || defined(TARGET_NR_lstat64) ||     \
+      defined(TARGET_NR_fstat64) || defined(TARGET_NR_fstatat64) ||  \
+      defined(TARGET_NR_newfstatat))
++#if defined(TARGET_AARCH64) && !defined(TARGET_ABI32)
++/* Android's guest allocator can expose host mappings without PageDesc entries,
++ * so its access_ok() checks only address bounds. Never directly write a stat
++ * result through that unchecked pointer: an ordinary EFAULT probe may target a
++ * read-only/unmapped page. The kernel checks the final copy without a racy
++ * userspace permissions probe or a host SIGSEGV.
++ */
++static abi_long clbb_stat64_copy_to_guest(abi_ulong target_addr,
++                                        const void *source, size_t length)
++{
++    return clbb_syscall_copy_to_guest(target_addr, source, length);
++}
++#endif
++
+ static inline abi_long host_to_target_stat64(void *cpu_env,
+                                              abi_ulong target_addr,
+                                              struct stat *host_st)
+@@ -6879,8 +6980,14 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
+         struct target_stat *target_st;
+ #endif
+ 
++#if defined(TARGET_AARCH64) && !defined(TARGET_ABI32)
++        __typeof__(*target_st) target_st_storage;
++
++        target_st = &target_st_storage;
++#else
+         if (!lock_user_struct(VERIFY_WRITE, target_st, target_addr, 0))
+             return -TARGET_EFAULT;
++#endif
+         memset(target_st, 0, sizeof(*target_st));
+         __put_user(host_st->st_dev, &target_st->st_dev);
+         __put_user(host_st->st_ino, &target_st->st_ino);
+@@ -6904,7 +7011,12 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
+         __put_user(host_st->st_mtim.tv_nsec, &target_st->target_st_mtime_nsec);
+         __put_user(host_st->st_ctim.tv_nsec, &target_st->target_st_ctime_nsec);
+ #endif
++#if defined(TARGET_AARCH64) && !defined(TARGET_ABI32)
++        return clbb_stat64_copy_to_guest(target_addr, target_st,
++                                         sizeof(*target_st));
++#else
+         unlock_user_struct(target_st, target_addr, 1);
++#endif
+     }
+ 
+     return 0;
+@@ -7659,6 +7771,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+             return -TARGET_ERESTARTSYS;
+         }
+ 
++        if (native_bridge_thread_exit_handler) {
++            native_bridge_thread_exit_handler();
++        }
+         cpu_list_lock();
+ 
+         if (CPU_NEXT(first_cpu)) {
+@@ -7676,7 +7791,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+                           NULL, NULL, 0);
+             }
+             thread_cpu = NULL;
+-            object_unref(OBJECT(cpu));
++            clbb_cpu_unref(cpu);
+             g_free(ts);
+             rcu_unregister_thread();
+             pthread_exit(NULL);
+diff --git a/target/arm/cpu.h b/target/arm/cpu.h
+index 4c0e3f8..6d8e88a 100644
+--- a/target/arm/cpu.h
++++ b/target/arm/cpu.h
+@@ -3278,8 +3278,8 @@ static inline bool arm_cpu_bswap_data(CPUARMState *env)
+ }
+ #endif
+ 
+-void cpu_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
+-                          target_ulong *cs_base, uint32_t *flags);
++void arm_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
++                         target_ulong *cs_base, uint32_t *flags);
+ 
+ enum {
+     QEMU_PSCI_CONDUIT_DISABLED = 0,
+@@ -3850,4 +3850,30 @@ static inline bool isar_feature_any_ccidx(const ARMISARegisters *id)
+ #define cpu_isar_feature(name, cpu) \
+     ({ ARMCPU *cpu_ = (cpu); isar_feature_##name(&cpu_->isar); })
+ 
++/* User-mode A64 indirect branches are a hot path. Keep the exact dynamic
++ * BTYPE/single-step state checks inline, so a cache hit does not spill three
++ * outputs and call through the shared-library PLT. Other states and debug
++ * hflags validation retain the complete original implementation. */
++static inline void cpu_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
++                                       target_ulong *cs_base, uint32_t *pflags)
++{
++#if defined(CONFIG_USER_ONLY) && defined(TARGET_AARCH64) && !defined(CONFIG_DEBUG_TCG)
++    uint32_t flags = env->hflags;
++    if (likely(FIELD_EX32(flags, TBFLAG_ANY, AARCH64_STATE))) {
++        *pc = env->pc;
++        *cs_base = 0;
++        if (cpu_isar_feature(aa64_bti, env_archcpu(env))) {
++            flags = FIELD_DP32(flags, TBFLAG_A64, BTYPE, env->btype);
++        }
++        if (FIELD_EX32(flags, TBFLAG_ANY, SS_ACTIVE) &&
++            (env->pstate & PSTATE_SS)) {
++            flags = FIELD_DP32(flags, TBFLAG_ANY, PSTATE_SS, 1);
++        }
++        *pflags = flags;
++        return;
++    }
++#endif
++    arm_get_tb_cpu_state(env, pc, cs_base, pflags);
++}
++
+ #endif
+diff --git a/target/arm/helper.c b/target/arm/helper.c
+index 7e9ea5d..7229a2d 100644
+--- a/target/arm/helper.c
++++ b/target/arm/helper.c
+@@ -12686,8 +12686,8 @@ static inline void assert_hflags_rebuild_correctly(CPUARMState *env)
+ #endif
+ }
+ 
+-void cpu_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
+-                          target_ulong *cs_base, uint32_t *pflags)
++void arm_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
++                         target_ulong *cs_base, uint32_t *pflags)
+ {
+     uint32_t flags = env->hflags;
+     uint32_t pstate_for_ss;
+diff --git a/target/arm/pauth_helper.c b/target/arm/pauth_helper.c
+index b909630..5649d13 100644
+--- a/target/arm/pauth_helper.c
++++ b/target/arm/pauth_helper.c
+@@ -82,66 +82,167 @@ static uint64_t pac_cell_inv_shuffle(uint64_t i)
+ 
+ static uint64_t pac_sub(uint64_t i)
+ {
+-    static const uint8_t sub[16] = {
+-        0xb, 0x6, 0x8, 0xf, 0xc, 0x0, 0x9, 0xe,
+-        0x3, 0x7, 0x4, 0x5, 0xd, 0x2, 0x1, 0xa,
+-    };
+-    uint64_t o = 0;
+-    int b;
+-
+-    for (b = 0; b < 64; b += 4) {
+-        o |= (uint64_t)sub[(i >> b) & 0xf] << b;
+-    }
+-    return o;
++    /* Generated ANF: sixteen independent nibbles, with no
++     * input-dependent memory lookup or branch. */
++    const uint64_t mask = UINT64_C(0x1111111111111111);
++    uint64_t v1 = (i >> 0) & mask;
++    uint64_t v2 = (i >> 1) & mask;
++    uint64_t v4 = (i >> 2) & mask;
++    uint64_t v8 = (i >> 3) & mask;
++    uint64_t v3 = v2 & v1;
++    uint64_t v5 = v4 & v1;
++    uint64_t v6 = v4 & v2;
++    uint64_t v7 = v6 & v1;
++    uint64_t v9 = v8 & v1;
++    uint64_t v10 = v8 & v2;
++    uint64_t v11 = v10 & v1;
++    uint64_t v12 = v8 & v4;
++    uint64_t v13 = v12 & v1;
++    uint64_t v14 = v12 & v2;
++
++    return ((mask ^ v1 ^ v2 ^ v4 ^ v5 ^ v7 ^ v9 ^ v11 ^ v12 ^ v14) << 0) ^
++           ((mask ^ v2 ^ v3 ^ v4 ^ v6 ^ v11 ^ v13) << 1) ^
++           ((v1 ^ v4 ^ v6 ^ v10 ^ v11 ^ v14) << 2) ^
++           ((mask ^ v1 ^ v3 ^ v8 ^ v9 ^ v11 ^ v12 ^ v13 ^ v14) << 3);
+ }
+-
+ static uint64_t pac_inv_sub(uint64_t i)
+ {
+-    static const uint8_t inv_sub[16] = {
+-        0x5, 0xe, 0xd, 0x8, 0xa, 0xb, 0x1, 0x9,
+-        0x2, 0x6, 0xf, 0x0, 0x4, 0xc, 0x7, 0x3,
+-    };
+-    uint64_t o = 0;
+-    int b;
+-
+-    for (b = 0; b < 64; b += 4) {
+-        o |= (uint64_t)inv_sub[(i >> b) & 0xf] << b;
+-    }
+-    return o;
++    /* Generated ANF: sixteen independent nibbles, with no
++     * input-dependent memory lookup or branch. */
++    const uint64_t mask = UINT64_C(0x1111111111111111);
++    uint64_t v1 = (i >> 0) & mask;
++    uint64_t v2 = (i >> 1) & mask;
++    uint64_t v4 = (i >> 2) & mask;
++    uint64_t v8 = (i >> 3) & mask;
++    uint64_t v3 = v2 & v1;
++    uint64_t v5 = v4 & v1;
++    uint64_t v6 = v4 & v2;
++    uint64_t v7 = v6 & v1;
++    uint64_t v9 = v8 & v1;
++    uint64_t v10 = v8 & v2;
++    uint64_t v11 = v10 & v1;
++    uint64_t v12 = v8 & v4;
++    uint64_t v13 = v12 & v1;
++    uint64_t v14 = v12 & v2;
++
++    return ((mask ^ v1 ^ v4 ^ v6 ^ v7 ^ v8 ^ v9 ^ v10 ^ v11 ^ v12 ^ v14) << 0) ^
++           ((v1 ^ v3 ^ v4 ^ v5 ^ v6 ^ v7 ^ v8 ^ v9 ^ v13) << 1) ^
++           ((mask ^ v3 ^ v4 ^ v7 ^ v8 ^ v9 ^ v10 ^ v11 ^ v13 ^ v14) << 2) ^
++           ((v1 ^ v2 ^ v3 ^ v4 ^ v5 ^ v9 ^ v12 ^ v14) << 3);
+ }
+-
+-static int rot_cell(int cell, int n)
++static uint64_t pac_mult(uint64_t i)
+ {
+-    /* 4-bit rotate left by n.  */
+-    cell |= cell << 4;
+-    return extract32(cell, 4 - n, 4);
++    /* Generated by CLBB tools/pauth-audit/generate.rs. Rotate each
++     * nibble in parallel, then mix all four 16-bit rows at once.
++     * Rows: r1[3]^r2[2]^r1[1], r2[3]^r1[2]^r1[0],
++     *       r1[3]^r1[1]^r2[0], r1[2]^r2[1]^r1[0]. */
++    uint64_t r1 = ((i << 1) & UINT64_C(0xeeeeeeeeeeeeeeee)) |
++                  ((i >> 3) & UINT64_C(0x1111111111111111));
++    uint64_t r2 = ((i << 2) & UINT64_C(0xcccccccccccccccc)) |
++                  ((i >> 2) & UINT64_C(0x3333333333333333));
++
++    return ((r1 << 16) | (r1 >> 48)) ^
++           ((r1 << 48) | (r1 >> 16)) ^
++           ((r2 << 32) | (r2 >> 32));
+ }
+ 
+-static uint64_t pac_mult(uint64_t i)
++#if defined(__x86_64__) && defined(__GNUC__)
++#include <tmmintrin.h>
++static const uint8_t vector_sbox[16] = {0xb, 0x6, 0x8, 0xf, 0xc, 0x0, 0x9, 0xe, 0x3, 0x7, 0x4, 0x5, 0xd, 0x2, 0x1, 0xa};
++static const uint8_t vector_inv_sbox[16] = {0x5, 0xe, 0xd, 0x8, 0xa, 0xb, 0x1, 0x9, 0x2, 0x6, 0xf, 0x0, 0x4, 0xc, 0x7, 0x3};
++static const uint8_t vector_rc0[16] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
++static const uint8_t vector_rc1[16] = {0x4, 0x4, 0x3, 0x7, 0x0, 0x7, 0x3, 0x0, 0xe, 0x2, 0xa, 0x8, 0x9, 0x1, 0x3, 0x1};
++static const uint8_t vector_rc2[16] = {0x0, 0xd, 0x1, 0x3, 0xf, 0x9, 0x9, 0x2, 0x2, 0x2, 0x8, 0x3, 0x9, 0x0, 0x4, 0xa};
++static const uint8_t vector_rc3[16] = {0x9, 0x8, 0xc, 0x6, 0xe, 0x4, 0xc, 0xe, 0x8, 0x9, 0xa, 0xf, 0xe, 0x2, 0x8, 0x0};
++static const uint8_t vector_rc4[16] = {0x7, 0x7, 0x3, 0x1, 0x0, 0xd, 0x8, 0x3, 0x6, 0xe, 0x1, 0x2, 0x8, 0x2, 0x5, 0x4};
++
++#define V_INLINE static inline __attribute__((target("ssse3"), always_inline))
++V_INLINE __m128i vector_unpack(uint64_t value)
+ {
+-    uint64_t o = 0;
+-    int b;
+-
+-    for (b = 0; b < 4 * 4; b += 4) {
+-        int i0, i4, i8, ic, t0, t1, t2, t3;
+-
+-        i0 = extract64(i, b, 4);
+-        i4 = extract64(i, b + 4 * 4, 4);
+-        i8 = extract64(i, b + 8 * 4, 4);
+-        ic = extract64(i, b + 12 * 4, 4);
+-
+-        t0 = rot_cell(i8, 1) ^ rot_cell(i4, 2) ^ rot_cell(i0, 1);
+-        t1 = rot_cell(ic, 1) ^ rot_cell(i4, 1) ^ rot_cell(i0, 2);
+-        t2 = rot_cell(ic, 2) ^ rot_cell(i8, 1) ^ rot_cell(i0, 1);
+-        t3 = rot_cell(ic, 1) ^ rot_cell(i8, 2) ^ rot_cell(i4, 1);
+-
+-        o |= (uint64_t)t3 << b;
+-        o |= (uint64_t)t2 << (b + 4 * 4);
+-        o |= (uint64_t)t1 << (b + 8 * 4);
+-        o |= (uint64_t)t0 << (b + 12 * 4);
++    __m128i bytes = _mm_cvtsi64_si128(value);
++    __m128i mask = _mm_set1_epi8(15);
++    return _mm_unpacklo_epi8(_mm_and_si128(bytes, mask),
++                           _mm_and_si128(_mm_srli_epi64(bytes, 4), mask));
++}
++V_INLINE uint64_t vector_pack(__m128i cells)
++{
++    __m128i bytes = _mm_maddubs_epi16(cells, _mm_set1_epi16(0x1001));
++    return _mm_cvtsi128_si64(_mm_packus_epi16(bytes, _mm_setzero_si128()));
++}
++V_INLINE __m128i vector_shuffle(__m128i v)
++{
++    return _mm_shuffle_epi8(v, _mm_setr_epi8(13,6,11,0,7,12,1,10,8,3,14,5,2,9,4,15));
++}
++V_INLINE __m128i vector_inv_shuffle(__m128i v)
++{
++    return _mm_shuffle_epi8(v, _mm_setr_epi8(3,6,12,9,14,11,1,4,8,13,7,2,5,0,10,15));
++}
++V_INLINE __m128i vector_mult(__m128i v)
++{
++    __m128i r1 = _mm_or_si128(_mm_and_si128(_mm_slli_epi16(v, 1), _mm_set1_epi8(14)),
++                            _mm_and_si128(_mm_srli_epi16(v, 3), _mm_set1_epi8(1)));
++    __m128i r2 = _mm_or_si128(_mm_and_si128(_mm_slli_epi16(v, 2), _mm_set1_epi8(12)),
++                            _mm_and_si128(_mm_srli_epi16(v, 2), _mm_set1_epi8(3)));
++    return _mm_xor_si128(_mm_xor_si128(_mm_shuffle_epi32(r1, _MM_SHUFFLE(2,1,0,3)),
++                                     _mm_shuffle_epi32(r1, _MM_SHUFFLE(0,3,2,1))),
++                                     _mm_shuffle_epi32(r2, _MM_SHUFFLE(1,0,3,2)));
++}
++V_INLINE __m128i vector_tweak(__m128i v)
++{
++    v = _mm_shuffle_epi8(v, _mm_setr_epi8(4,5,6,7,11,2,3,8,12,13,14,15,0,1,10,9));
++    __m128i right = _mm_and_si128(_mm_srli_epi16(v, 1), _mm_set1_epi8(7));
++    __m128i rotated = _mm_or_si128(right,
++        _mm_slli_epi16(_mm_and_si128(_mm_xor_si128(v,right),_mm_set1_epi8(1)),3));
++    __m128i select = _mm_setr_epi8(0,0,15,0,15,0,0,15,0,0,0,15,15,0,15,15);
++    return _mm_xor_si128(v, _mm_and_si128(_mm_xor_si128(v,rotated),select));
++}
++V_INLINE __m128i vector_inv_tweak(__m128i v)
++{
++    v = _mm_shuffle_epi8(v, _mm_setr_epi8(12,13,5,6,0,1,2,3,7,15,14,4,8,9,10,11));
++    __m128i rotated = _mm_or_si128(_mm_and_si128(_mm_slli_epi16(v,1),_mm_set1_epi8(15)),
++        _mm_and_si128(_mm_xor_si128(v,_mm_srli_epi16(v,3)),_mm_set1_epi8(1)));
++    __m128i select = _mm_setr_epi8(15,0,0,0,0,0,15,0,15,15,15,15,0,0,0,15);
++    return _mm_xor_si128(v, _mm_and_si128(_mm_xor_si128(v,rotated),select));
++}
++V_INLINE __m128i vector_load(const uint8_t *v) { return _mm_loadu_si128((const __m128i*)v); }
++__attribute__((target("ssse3"), noinline))
++static uint64_t vector_state_pauth_computepac(uint64_t data, uint64_t modifier, ARMPACKey key)
++{
++    const uint8_t *rc[] = {vector_rc0,vector_rc1,vector_rc2,vector_rc3,vector_rc4};
++    const __m128i sbox = vector_load(vector_sbox), inv_sbox = vector_load(vector_inv_sbox);
++    const __m128i key0 = vector_unpack(key.hi), key1 = vector_unpack(key.lo);
++    const __m128i modk0 = vector_unpack((key.hi << 63) | ((key.hi >> 1) ^ (key.hi >> 63)));
++    const __m128i alpha = vector_unpack(UINT64_C(0xC0AC29B7C97C50DD));
++    __m128i runningmod = vector_unpack(modifier);
++    __m128i workingval = _mm_xor_si128(vector_unpack(data),key0);
++    for (int i=0;i<=4;i++) {
++        workingval = _mm_xor_si128(workingval,_mm_xor_si128(key1,runningmod));
++        workingval = _mm_xor_si128(workingval,vector_load(rc[i]));
++        if (i>0) workingval=vector_mult(vector_shuffle(workingval));
++        workingval = _mm_shuffle_epi8(sbox,workingval);
++        runningmod = vector_tweak(runningmod);
+     }
+-    return o;
++    workingval = _mm_xor_si128(workingval,_mm_xor_si128(modk0,runningmod));
++    workingval = vector_mult(vector_shuffle(workingval));
++    workingval = _mm_shuffle_epi8(sbox,workingval);
++    workingval = vector_mult(vector_shuffle(workingval));
++    workingval = _mm_xor_si128(workingval,key1);
++    workingval = vector_inv_shuffle(workingval);
++    workingval = _mm_shuffle_epi8(inv_sbox,workingval);
++    workingval = vector_inv_shuffle(vector_mult(workingval));
++    workingval = _mm_xor_si128(workingval,_mm_xor_si128(key0,runningmod));
++    for (int i=0;i<=4;i++) {
++        workingval = _mm_shuffle_epi8(inv_sbox,workingval);
++        if(i<4) workingval=vector_inv_shuffle(vector_mult(workingval));
++        runningmod=vector_inv_tweak(runningmod);
++        workingval=_mm_xor_si128(workingval,vector_load(rc[4-i]));
++        workingval=_mm_xor_si128(workingval,_mm_xor_si128(key1,runningmod));
++        workingval=_mm_xor_si128(workingval,alpha);
++    }
++    return vector_pack(_mm_xor_si128(workingval,modk0));
+ }
++#undef V_INLINE
++#endif
+ 
+ static uint64_t tweak_cell_rot(uint64_t cell)
+ {
+@@ -207,8 +308,10 @@ static uint64_t tweak_inv_shuffle(uint64_t i)
+     return o;
+ }
+ 
+-static uint64_t pauth_computepac(uint64_t data, uint64_t modifier,
+-                                 ARMPACKey key)
++static inline __attribute__((always_inline)) uint64_t pauth_computepac_core(uint64_t data, uint64_t modifier,
++                                 ARMPACKey key,
++                                 uint64_t (*pac_sub)(uint64_t),
++                                 uint64_t (*pac_inv_sub)(uint64_t))
+ {
+     static const uint64_t RC[5] = {
+         0x0000000000000000ull,
+@@ -272,6 +375,48 @@ static uint64_t pauth_computepac(uint64_t data, uint64_t modifier,
+     return workingval;
+ }
+ 
++/* The common QARMA body above is unchanged, and is inlined into each wrapper
++ * with compile-time-known S-box functions. There is no per-round indirect call. */
++static uint64_t pauth_computepac_portable(uint64_t data, uint64_t modifier,
++                                         ARMPACKey key)
++{
++    return pauth_computepac_core(data, modifier, key, pac_sub, pac_inv_sub);
++}
++
++#if defined(__x86_64__) && defined(__GNUC__)
++#ifndef CLBB_PAC_C_REFERENCE
++/* Rust entry takes scalar values only; this code retains CPU feature dispatch.
++ * No guest pointer, env layout or mutable state crosses this boundary. */
++__attribute__((visibility("hidden")))
++extern uint64_t clbb_rust_pac_ssse3(uint64_t data, uint64_t modifier,
++                                     uint64_t key_hi, uint64_t key_lo);
++#endif
++__attribute__((target("ssse3")))
++static uint64_t pauth_computepac_ssse3(uint64_t data, uint64_t modifier,
++                                      ARMPACKey key)
++{
++#ifdef CLBB_PAC_C_REFERENCE
++    return vector_state_pauth_computepac(data, modifier, key);
++#else
++    return clbb_rust_pac_ssse3(data, modifier, key.hi, key.lo);
++#endif
++}
++#endif
++
++static uint64_t pauth_computepac(uint64_t data, uint64_t modifier,
++                                 ARMPACKey key)
++{
++#if defined(__x86_64__) && defined(__GNUC__)
++    /* GCC initializes this immutable cached feature set before ordinary code
++     * runs. This is one feature test per full PAC, not CPUID or mutable lazy
++     * initialization, and unsupported hosts never enter the SSSE3 function. */
++    if (__builtin_cpu_supports("ssse3")) {
++        return pauth_computepac_ssse3(data, modifier, key);
++    }
++#endif
++    return pauth_computepac_portable(data, modifier, key);
++}
++
+ static uint64_t pauth_addpac(CPUARMState *env, uint64_t ptr, uint64_t modifier,
+                              ARMPACKey *key, bool data)
+ {
+diff --git a/target/arm/vfp_helper.c b/target/arm/vfp_helper.c
+index 930d6e7..fca81d7 100644
+--- a/target/arm/vfp_helper.c
++++ b/target/arm/vfp_helper.c
+@@ -24,6 +24,7 @@
+ #ifdef CONFIG_TCG
+ #include "qemu/log.h"
+ #include "fpu/softfloat.h"
++#include "rsqrt-estimate-table.h"
+ #endif
+ 
+ /* VFP support.  We follow the convention used for VFP instructions:
+@@ -851,22 +852,11 @@ float64 HELPER(recpe_f64)(float64 input, void *fpstp)
+ 
+ static int do_recip_sqrt_estimate(int a)
+ {
+-    int b, estimate;
++    int estimate;
+ 
+     assert(128 <= a && a < 512);
+-    if (a < 256) {
+-        a = a * 2 + 1;
+-    } else {
+-        a = (a >> 1) << 1;
+-        a = (a + 1) * 2;
+-    }
+-    b = 512;
+-    while (a * (b + 1) * (b + 1) < (1 << 28)) {
+-        b += 1;
+-    }
+-    estimate = (b + 1) / 2;
++    estimate = 256 + clbb_rsqrt_estimate_minus_256[a - 128];
+     assert(256 <= estimate && estimate < 512);
+-
+     return estimate;
+ }
+ 
+diff --git a/tcg/i386/tcg-target.inc.c b/tcg/i386/tcg-target.inc.c
+index ec083bd..0caa4b1 100644
+--- a/tcg/i386/tcg-target.inc.c
++++ b/tcg/i386/tcg-target.inc.c
+@@ -2413,13 +2413,18 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
+             int32_t val;
+             val = a2;
+             if (val == (int8_t)val) {
+-                tcg_out_modrm(s, OPC_IMUL_GvEvIb + rexw, a0, a0);
++                tcg_out_modrm(s, OPC_IMUL_GvEvIb + rexw, a0, a1);
+                 tcg_out8(s, val);
+             } else {
+-                tcg_out_modrm(s, OPC_IMUL_GvEvIz + rexw, a0, a0);
++                tcg_out_modrm(s, OPC_IMUL_GvEvIz + rexw, a0, a1);
+                 tcg_out32(s, val);
+             }
++        } else if (a0 == a2) {
++            /* The two-input form is commutative.  Preserve a2 when the
++             * output aliases it instead of overwriting it with a1.  */
++            tcg_out_modrm(s, OPC_IMUL_GvEv + rexw, a0, a1);
+         } else {
++            tcg_out_mov(s, rexw ? TCG_TYPE_I64 : TCG_TYPE_I32, a0, a1);
+             tcg_out_modrm(s, OPC_IMUL_GvEv + rexw, a0, a2);
+         }
+         break;
+@@ -3033,11 +3038,11 @@ static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
+ 
+     case INDEX_op_add_i32:
+     case INDEX_op_add_i64:
++    case INDEX_op_mul_i32:
++    case INDEX_op_mul_i64:
+         return &r_r_re;
+     case INDEX_op_sub_i32:
+     case INDEX_op_sub_i64:
+-    case INDEX_op_mul_i32:
+-    case INDEX_op_mul_i64:
+     case INDEX_op_or_i32:
+     case INDEX_op_or_i64:
+     case INDEX_op_xor_i32:
+diff --git a/util/rcu.c b/util/rcu.c
+index cad4440..bbb1b22 100644
+--- a/util/rcu.c
++++ b/util/rcu.c
+@@ -64,6 +64,11 @@ static inline int rcu_gp_ongoing(unsigned long *ctr)
+  * writers.
+  */
+ __thread struct rcu_reader_data rcu_reader;
++static __thread bool rcu_thread_registered;
++static void rcu_thread_exit(gpointer unused);
++/* NativeBridge also runs on ART-created threads, whose exit does not pass
++ * through qemu_thread_atexit_notify. Remove their TLS node before it expires. */
++static GPrivate rcu_thread_registration = G_PRIVATE_INIT(rcu_thread_exit);
+ 
+ /* Protected by rcu_registry_lock.  */
+ typedef QLIST_HEAD(, rcu_reader_data) ThreadList;
+@@ -297,17 +302,34 @@ void call_rcu1(struct rcu_head *node, void (*func)(struct rcu_head *node))
+ 
+ void rcu_register_thread(void)
+ {
++    if (rcu_thread_registered) {
++        return;
++    }
+     assert(rcu_reader.ctr == 0);
+     qemu_mutex_lock(&rcu_registry_lock);
+     QLIST_INSERT_HEAD(&registry, &rcu_reader, node);
++    rcu_thread_registered = true;
+     qemu_mutex_unlock(&rcu_registry_lock);
++    g_private_set(&rcu_thread_registration, GINT_TO_POINTER(1));
+ }
+ 
+ void rcu_unregister_thread(void)
+ {
++    if (!rcu_thread_registered) {
++        return;
++    }
+     qemu_mutex_lock(&rcu_registry_lock);
+     QLIST_REMOVE(&rcu_reader, node);
++    rcu_thread_registered = false;
++    rcu_reader.node.le_next = NULL;
++    rcu_reader.node.le_prev = NULL;
+     qemu_mutex_unlock(&rcu_registry_lock);
++    g_private_set(&rcu_thread_registration, NULL);
++}
++
++static void rcu_thread_exit(gpointer unused)
++{
++    rcu_unregister_thread();
+ }
+ 
+ static void rcu_init_complete(void)
+@@ -369,6 +391,9 @@ static void rcu_init_child(void)
+     }
+ 
+     memset(&registry, 0, sizeof(registry));
++    rcu_thread_registered = false;
++    g_private_set(&rcu_thread_registration, NULL);
++    memset(&rcu_reader, 0, sizeof(rcu_reader));
+     rcu_init_complete();
+ }
+ #endif
+diff --git a/target/arm/rsqrt-estimate-table.h b/target/arm/rsqrt-estimate-table.h
+new file mode 100644
+index 0000000..7e96938
+--- /dev/null
++++ b/target/arm/rsqrt-estimate-table.h
+@@ -0,0 +1,58 @@
++/*
++ * ARM VFP floating-point operations
++ *
++ *  Copyright (c) 2003 Fabrice Bellard
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, see <http://www.gnu.org/licenses/>.
++ */
++
++/* Generated by the std-only Rust finite-domain audit.
++ * Values exactly match all 384 valid inputs of do_recip_sqrt_estimate.
++ * No floating-point approximation or runtime initialization. */
++#ifndef CLBB_EXACT_RSQRT_TABLE_H
++#define CLBB_EXACT_RSQRT_TABLE_H
++#include <assert.h>
++#include <stdint.h>
++static const uint8_t clbb_rsqrt_estimate_minus_256[384] = {
++    255, 253, 251, 249, 247, 245, 243, 242, 240, 238, 236, 234, 233, 231, 229, 228,
++    226, 224, 223, 221, 219, 218, 216, 215, 213, 212, 210, 209, 207, 206, 204, 203,
++    201, 200, 198, 197, 196, 194, 193, 192, 190, 189, 188, 186, 185, 184, 183, 181,
++    180, 179, 178, 176, 175, 174, 173, 172, 170, 169, 168, 167, 166, 165, 164, 163,
++    162, 160, 159, 158, 157, 156, 155, 154, 153, 152, 151, 150, 149, 148, 147, 146,
++    145, 144, 143, 142, 141, 140, 140, 139, 138, 137, 136, 135, 134, 133, 132, 131,
++    131, 130, 129, 128, 127, 126, 126, 125, 124, 123, 122, 121, 121, 120, 119, 118,
++    118, 117, 116, 115, 114, 114, 113, 112, 111, 111, 110, 109, 109, 108, 107, 106,
++    105, 105, 104, 104, 103, 103, 101, 101, 100, 100, 99, 99, 97, 97, 96, 96,
++    95, 95, 93, 93, 92, 92, 91, 91, 90, 90, 88, 88, 87, 87, 86, 86,
++    85, 85, 84, 84, 82, 82, 81, 81, 80, 80, 79, 79, 78, 78, 77, 77,
++    76, 76, 75, 75, 74, 74, 72, 72, 71, 71, 70, 70, 69, 69, 68, 68,
++    67, 67, 66, 66, 65, 65, 64, 64, 63, 63, 62, 62, 61, 61, 60, 60,
++    60, 60, 59, 59, 58, 58, 57, 57, 56, 56, 55, 55, 54, 54, 53, 53,
++    52, 52, 51, 51, 51, 51, 50, 50, 49, 49, 48, 48, 47, 47, 46, 46,
++    46, 46, 45, 45, 44, 44, 43, 43, 42, 42, 42, 42, 41, 41, 40, 40,
++    39, 39, 38, 38, 38, 38, 37, 37, 36, 36, 35, 35, 35, 35, 34, 34,
++    33, 33, 33, 33, 32, 32, 31, 31, 30, 30, 30, 30, 29, 29, 28, 28,
++    28, 28, 27, 27, 26, 26, 26, 26, 25, 25, 24, 24, 24, 24, 23, 23,
++    22, 22, 22, 22, 21, 21, 20, 20, 20, 20, 19, 19, 19, 19, 18, 18,
++    17, 17, 17, 17, 16, 16, 16, 16, 15, 15, 14, 14, 14, 14, 13, 13,
++    13, 13, 12, 12, 11, 11, 11, 11, 10, 10, 10, 10, 9, 9, 9, 9,
++    8, 8, 8, 8, 7, 7, 6, 6, 6, 6, 5, 5, 5, 5, 4, 4,
++    4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 0, 0,
++};
++static inline int clbb_exact_rsqrt_lookup(int a)
++{
++    assert(128 <= a && a < 512);
++    return 256 + clbb_rsqrt_estimate_minus_256[a - 128];
++}
++#endif

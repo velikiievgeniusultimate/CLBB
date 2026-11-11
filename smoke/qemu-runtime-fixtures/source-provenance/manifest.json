@@ -1,0 +1,93 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "retained": "lookup/tcg-runtime.c",
+      "original": "logs/eta-qemu-a64-lookup-candidate/functional-03/prepared/tcg-runtime.c",
+      "sha256": "9c0b653bb93f0d1b2f25a79184fdc0c6dd9c059275ca4e43c9ff4b76d84034dd",
+      "bytes": 6015,
+      "provenance": "GPL-2.0-or-later derivative/context retained; original file notice authoritative"
+    },
+    {
+      "retained": "lookup/candidate.patch",
+      "original": "logs/eta-qemu-a64-lookup-candidate/functional-03/prepared/candidate.patch",
+      "sha256": "0cad50793d331f517a062fafab22a6e0db04e9e0f1800da4eb4fe7b517b95255",
+      "bytes": 2454,
+      "provenance": "GPL-2.0-or-later derivative/context retained; original file notice authoritative"
+    },
+    {
+      "retained": "lookup/wrapper.inc",
+      "original": "tools/eta-qemu-a64-lookup-candidate/wrapper.inc",
+      "sha256": "aff04dfea875b178450b6dcd02b324f297bc3caa709a62fb51f72d99a1ac54ae",
+      "bytes": 1952,
+      "provenance": "GPL-2.0-or-later derivative/context retained; original file notice authoritative"
+    },
+    {
+      "retained": "lookup/prepare.py",
+      "original": "tools/eta-qemu-a64-lookup-candidate/prepare.py",
+      "sha256": "fb70848e0f44531d58807e58a1da6a8e99564ce6818ca1932b9459b6743c3069",
+      "bytes": 2073,
+      "provenance": "GPL-2.0-or-later derivative/context retained; original file notice authoritative"
+    },
+    {
+      "retained": "lookup/README.md",
+      "original": "tools/eta-qemu-a64-lookup-candidate/README.md",
+      "sha256": "87116406b2a9e6b6f740afc700830b4741cc973ee73b10d6960f1962694dfe61",
+      "bytes": 5441,
+      "provenance": "Historical evidence/documentation; source licenses unchanged"
+    },
+    {
+      "retained": "lookup/original-freeze-manifest.json",
+      "original": "tools/eta-qemu-a64-lookup-candidate/freeze-manifest.json",
+      "sha256": "c1dde461401e3e2651f2afd6395203a76d910ed091412bf82c2b9cd698dc44e9",
+      "bytes": 2086,
+      "provenance": "Historical evidence/documentation; source licenses unchanged"
+    },
+    {
+      "retained": "lookup/functional-03-report.json",
+      "original": "logs/eta-qemu-a64-lookup-candidate/functional-03/report.json",
+      "sha256": "7bce2dc7e95e341cdd859f63fc24ee227c582e6237e1905613181050a5871374",
+      "bytes": 17247,
+      "provenance": "Historical evidence/documentation; source licenses unchanged"
+    },
+    {
+      "retained": "lookup/invalidation-01-report.json",
+      "original": "logs/eta-qemu-a64-lookup-candidate/invalidation-01/report.json",
+      "sha256": "df48eb5e1879b458a4da382a19fbb010bd8a146c0c2618153e4dcf47207c8545",
+      "bytes": 8133,
+      "provenance": "Historical evidence/documentation; source licenses unchanged"
+    },
+    {
+      "retained": "lookup/benchmark-summary.json",
+      "original": "logs/eta-qemu-a64-lookup-candidate/functional-03/benchmark-summary.json",
+      "sha256": "27db3da26955580d14abb831528fa8c2ee1b20e5eb275644764489ee19f586b1",
+      "bytes": 1923,
+      "provenance": "Historical evidence/documentation; source licenses unchanged"
+    },
+    {
+      "retained": "state/state_transfer.c",
+      "original": "tools/arm64-qemu-state-audit/state_transfer.c",
+      "sha256": "a9af43476d7b98ec34e3ea5a1f2a77b00b52404a319004f73631d320e9edbc94",
+      "bytes": 3546,
+      "provenance": "GPL-2.0-or-later derivative/context retained; original file notice authoritative"
+    },
+    {
+      "retained": "state/state_transfer.h",
+      "original": "tools/arm64-qemu-state-audit/state_transfer.h",
+      "sha256": "b335b7f23e4a06b4bf8ac7b9f11b6e24aa60a4cda37cc4f2785e66285fb2cefb",
+      "bytes": 821,
+      "provenance": "GPL-2.0-or-later derivative/context retained; original file notice authoritative"
+    },
+    {
+      "retained": "state/clbb_arm64_host.h",
+      "original": "eta-host-adapter/include/clbb_arm64_host.h",
+      "sha256": "d5495cfb32b318769251cfda0f0323ba334b4d5c8437105625e0325875431324",
+      "bytes": 3007,
+      "provenance": "MIT, own original notice retained"
+    }
+  ],
+  "original_paths_are_historical_only": true,
+  "no_runtime_ETA_dependency": true,
+  "scope": "Exact byte copies before ETA archival. Future validators check retained files directly, never demand original locations. GPL code and MIT standalone test ABI retain original notices.",
+  "pass": true
+}

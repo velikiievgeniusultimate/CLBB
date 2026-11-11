@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "source_sha256": {
+    "tools/eta-qemu-a64-lookup-candidate/README.md": "87116406b2a9e6b6f740afc700830b4741cc973ee73b10d6960f1962694dfe61",
+    "tools/eta-qemu-a64-lookup-candidate/check.py": "25da47024c735700292ac49f26c19925f70185087697549a3f61df382212ab61",
+    "tools/eta-qemu-a64-lookup-candidate/check_invalidation.py": "f3796c8526c68e7a0a3bbbbac9a0a812fe01087d8f3c4a6a397c025aeba13a2f",
+    "tools/eta-qemu-a64-lookup-candidate/fixture.c": "34bfd6caf3dc578f5fa670104a0aa43737ee22ae57a56c8bc71fe72f73a42a8d",
+    "tools/eta-qemu-a64-lookup-candidate/prepare.py": "fb70848e0f44531d58807e58a1da6a8e99564ce6818ca1932b9459b6743c3069",
+    "tools/eta-qemu-a64-lookup-candidate/wrapper.inc": "aff04dfea875b178450b6dcd02b324f297bc3caa709a62fb51f72d99a1ac54ae"
+  },
+  "evidence_sha256": {
+    "logs/eta-qemu-a64-lookup-candidate/functional-03/report.json": "7bce2dc7e95e341cdd859f63fc24ee227c582e6237e1905613181050a5871374",
+    "logs/eta-qemu-a64-lookup-candidate/functional-03/benchmark-summary.json": "27db3da26955580d14abb831528fa8c2ee1b20e5eb275644764489ee19f586b1",
+    "logs/eta-qemu-a64-lookup-candidate/invalidation-01/report.json": "df48eb5e1879b458a4da382a19fbb010bd8a146c0c2618153e4dcf47207c8545"
+  },
+  "candidate_sha256": {
+    "logs/eta-qemu-a64-lookup-candidate/functional-03/prepared/prepare-report.json": "6fa70f48b1713b4f59d3ff0217895f6fcbd74b4eb36885863061fff742fb77a6",
+    "logs/eta-qemu-a64-lookup-candidate/functional-03/prepared/tcg-runtime.c": "9c0b653bb93f0d1b2f25a79184fdc0c6dd9c059275ca4e43c9ff4b76d84034dd",
+    "logs/eta-qemu-a64-lookup-candidate/functional-03/prepared/lookup-implementations.inc": "c186d76a85fe9ede989cc6bb00b379a5cfd978c644fc2e571f90734dbfa36caa",
+    "logs/eta-qemu-a64-lookup-candidate/functional-03/prepared/candidate.patch": "0cad50793d331f517a062fafab22a6e0db04e9e0f1800da4eb4fe7b517b95255"
+  },
+  "provenance": "GPL QEMU derivative; original QEMU attribution retained; no independent ETA ownership claim",
+  "no_canonical_changes": true,
+  "no_game": true,
+  "production_promotion_proven": false,
+  "pass": true
+}

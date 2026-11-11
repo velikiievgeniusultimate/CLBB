@@ -1,0 +1,26 @@
+# Runtime dependencies installed by pacman, not bundled.
+gtk4>=4.14
+webkitgtk-6.0>=2.54.1
+libportal-gtk4
+sdl3
+pipewire-alsa
+libx11
+libunwind
+libbsd
+libelf
+libcap
+icu
+zlib
+lz4
+xz
+expat
+fontconfig
+noto-fonts
+noto-fonts-cjk
+noto-fonts-emoji
+ttf-dejavu
+python>=3.12
+curl
+tar
+coreutils
+zenity

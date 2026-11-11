@@ -1,0 +1,3141 @@
+{
+  "schema": 1,
+  "status": "draft_inventory_not_release_clearance",
+  "components": [
+    {
+      "name": "art_standalone",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://gitlab.com/android_translation_layer/art_standalone.git",
+      "pinned_revision": "7ead96be8423b3789457b920336149f3f35a61d0",
+      "checked_out_revision": "7ead96be8423b3789457b920336149f3f35a61d0",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/art_standalone/adb/NOTICE",
+          "sha256": "9e097c628332c9f60d958f4477b5a301c95e7342c0afbc513c61b8b6145f4c40"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/art/NOTICE",
+          "sha256": "613c3a67424d8f9f32da434d1b98a610f98a7df6c2350c3429d9da975f0405fd"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/art/dt_fd_forward/NOTICE",
+          "sha256": "fbf423c97d1010d2cc3945e694998ca427689add2165fe2b5e24cacdea471bac"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/art/openjdkjvm/NOTICE",
+          "sha256": "b2fdb88151f747b40f4a8b17ceba930136c8c1be873611972b413bce2c2eb587"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/art/openjdkjvmti/NOTICE",
+          "sha256": "d5dde6ff1463281d19c920f2a3241bb12055ac78f0d2a27b4c8b457dc45db5d9"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/dalvik/NOTICE",
+          "sha256": "3d70cfeeeb3e0261da92808b014c744541215abcc6be41f8be54b4381ded28f3"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/dalvik/dexdump/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/dalvik/dx/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/apache-http/NOTICE",
+          "sha256": "35de8127791c66480f3bfac591dd3ade6845a09ed5b48f8c7233f68714a80110"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/apache-xml/NOTICE",
+          "sha256": "15d5249f89cdb96207e5bcafab2533640d122a508c8751003cc12e13a9e984d5"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/bouncycastle/NOTICE",
+          "sha256": "b09759f09a99a154f15e155b76ea7538e527ea8dc330591c594af1e29034e529"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/fdlibm/NOTICE",
+          "sha256": "b010adcefa10bbced885f54291172d9ff42c566670826685e11f65cf0a0cfa8b"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/hamcrest/LICENSE.txt",
+          "sha256": "1cde867cab5c8e842929da5391cef98b4017314822270e934e8e2eef3767c666"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/hamcrest/NOTICE",
+          "sha256": "1cde867cab5c8e842929da5391cef98b4017314822270e934e8e2eef3767c666"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/icu/NOTICE",
+          "sha256": "dcef9a036e3f4b21b23721c65144c1af6012299779a1cd05de2c3220832b4e8c"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/junit/NOTICE",
+          "sha256": "34a13334323361339a172d718db32604cb14cb7c483de3a01547c6caa9318518"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/libunwind/AUTHORS",
+          "sha256": "4c76ea80d2b50837f948cd5348efcf1cdf41693049a657d8e6cc21ea849d4aa6"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/libunwind/COPYING",
+          "sha256": "6a0dbbdaec2b3136b7bf045586f4212bdf74e7af688bf9dfe9154607cf5ec156"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/libunwind/LICENSE",
+          "sha256": "cb5aedb296c5246d1f22e9099f925a65146f9f0d6b4eebba97fd27a6cdbbab2d"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/libunwind/NOTICE",
+          "sha256": "cb5aedb296c5246d1f22e9099f925a65146f9f0d6b4eebba97fd27a6cdbbab2d"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/okhttp/LICENSE.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/okhttp/okio/LICENSE.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/external/safe-iop/NOTICE",
+          "sha256": "b71befc71cd206e875c6e46def1a08c7850ae96b52910375be5d71ef633a872d"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/libandroidfw/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/libbase/NOTICE",
+          "sha256": "e0afbb47be661ce2076d21a1d4dc02caa58b7c215ab7ff9d151b6724be341f77"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/libcore/LICENSE",
+          "sha256": "067d8f7f645efe1131a9df13aa80ec2910d4ff898f9b14d337443a4202d56ab6"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/libcore/NOTICE",
+          "sha256": "ded3eab76e881c8c18ab9e4ed9e888b1afcac41435913930f88f8188cecb2e8f"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/libcore/luni/license.html",
+          "sha256": "79d0a86a1537d50aeddf85a6b785d75cf76648a1243bafe2dc39771b93350ad8"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/libcore/ojluni/NOTICE",
+          "sha256": "cb41b8e3c007df5129056379cc855c5d0e9b39df7e710ca8f0cba66d8d66b0a1"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/libnativehelper/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/prebuilts/misc/common/jarjar/LICENSE.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/system/core/NOTICE",
+          "sha256": "5f28c11f8b1b3f97b9d42c74b85371ebf4127f241b799279bcecd69f7ee542dc"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/system/core/libcutils/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/system/core/liblog/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+        },
+        {
+          "path": "legal/third-party/source/art_standalone/system/core/libutils/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+        }
+      ]
+    },
+    {
+      "name": "atl",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://gitlab.com/android_translation_layer/android_translation_layer.git",
+      "pinned_revision": "bbb4d469405cdaea585475b17daef13202bc7e23",
+      "checked_out_revision": "bbb4d469405cdaea585475b17daef13202bc7e23",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/atl/LICENSE.txt",
+          "sha256": "e57f1c320b8cf8798a7d2ff83a6f9e06a33a03585f6e065fea97f1d86db84052"
+        },
+        {
+          "path": "legal/third-party/source/atl/res/framework-res/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+        }
+      ]
+    },
+    {
+      "name": "bionic_translation",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://gitlab.com/android_translation_layer/bionic_translation.git",
+      "pinned_revision": "6253dec7f24a57a94039a088cb436d880e92e3be",
+      "checked_out_revision": "6253dec7f24a57a94039a088cb436d880e92e3be",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/bionic_translation/linker/NOTICE",
+          "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+        }
+      ]
+    },
+    {
+      "name": "libglvnd",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://github.com/NVIDIA/libglvnd.git",
+      "pinned_revision": "faa23f21fc677af5792825dc30cb1ccef4bf33a6",
+      "checked_out_revision": "faa23f21fc677af5792825dc30cb1ccef4bf33a6",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/libglvnd/src/util/cJSON/LICENSE",
+          "sha256": "f6f207863675ca5a5128fd120b9aef4f4bbab73ffa57e5f771ccffc8e3cc56b7"
+        },
+        {
+          "path": "legal/third-party/source/libglvnd/src/util/uthash/LICENSE",
+          "sha256": "e9b9aac8421b6d29176c6f23f6f7a907194245e35ef99ace10839734961cfaa2"
+        }
+      ]
+    },
+    {
+      "name": "libopensles-standalone",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://gitlab.com/android_translation_layer/libopensles-standalone.git",
+      "pinned_revision": "c6982620c7dadeb90220b23c575b25eeffda765f",
+      "checked_out_revision": "c6982620c7dadeb90220b23c575b25eeffda765f",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/include/SLES/OpenSLES.h.txt",
+          "sha256": "54568b857a4e1279f8e79d29b205225bc5ff38e924aba6320f2c549e38aac9ce"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/include/SLES/OpenSLES_Android.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/include/SLES/OpenSLES_AndroidConfiguration.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/include/SLES/OpenSLES_Platform.h.txt",
+          "sha256": "c8f55289dee497a90557d3127338121f5b6bbe94deead8e8c6c7b3122441ece0"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/C3DGroup.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/CAudioPlayer.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/CAudioRecorder.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/CEngine.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/COutputMix.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/I3DCommit.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/I3DDoppler.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/I3DGrouping.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/I3DLocation.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/I3DMacroscopic.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/I3DSource.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IAndroidConfiguration.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IAndroidEffect.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IAndroidEffectCapabilities.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IAndroidEffectSend.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IAudioDecoderCapabilities.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IAudioEncoder.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IAudioEncoderCapabilities.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IAudioIODeviceCapabilities.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IBassBoost.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IBufferQueue.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IDeviceVolume.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IDynamicInterfaceManagement.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IDynamicSource.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IEffectSend.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IEngine.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IEngineCapabilities.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IEnvironmentalReverb.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IEqualizer.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IID_to_MPH.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/ILEDArray.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IMIDIMessage.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IMIDIMuteSolo.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IMIDITempo.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IMIDITime.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IMetadataExtraction.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IMetadataTraversal.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IMuteSolo.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IObject.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IOutputMix.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IOutputMixExt.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IPitch.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IPlay.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IPlaybackRate.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IPrefetchStatus.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IPresetReverb.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IRatePitch.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IRecord.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/ISeek.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IThreadSync.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IVibra.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IVirtualizer.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IVisualization.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/IVolume.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/MPH.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/MPH_to.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/MPH_to.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/OpenSLESUT.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/OpenSLESUT.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/OpenSLES_IID.c.txt",
+          "sha256": "181f31abea0b05e584028dc11e80c59e00a352beda3ae20d1fc5044282e17fd6"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/OutputMixExt.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/SDL.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/SLSndFile.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/SndFile.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/ThreadPool.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/ThreadPool.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_AudioPlayer.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_AudioPlayer.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_AudioRecorder.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_AudioRecorder.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_Effect.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_Effect.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_OutputMix.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_OutputMix.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_SfPlayer.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_SfPlayer.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_prompts.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/android_sles_conversions.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/classes.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/devices.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/devices.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/locks.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/locks.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/platform.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/sles.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/sles_allinclusive.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/sllog.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/sllog.h.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/sync.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/libopensles/trace.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/automated/BufferQueue_test.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestBassBoostPath.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestEffectCapabilities.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestEqFdPath.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestEqOutputPath.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestFeedback.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestPlayFdPath.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestRecBuffQueue.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestSawtoothBufferQueue.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestSendToPresetReverb.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestVirtualizerPath.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/listening/seekTorture.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/listening/slesTest_playMuteSolo.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestLoopUri.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestPlayStreamType.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestPlayUri.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestPlayUri2.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestSlowDownUri.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTest_playStates.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/mimeUri_test.cpp.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/sandbox/configbq.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/sandbox/engine.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/sandbox/intbufq.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/sandbox/multiplay.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/sandbox/object.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tests/sandbox/reverb.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tools/hashgen/frag1.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tools/hashgen/part1.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        },
+        {
+          "path": "legal/third-party/source/libopensles-standalone/headers/tools/permute/permute.c.txt",
+          "sha256": "131e5d98bc2082b1f9919c648a7f097191afe4ebfc1d1e69693b4d1faf8d47f2"
+        }
+      ]
+    },
+    {
+      "name": "nb-qemu",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://gitlab.com/android_translation_layer/qemu-based-native-bridge/nb-qemu.git",
+      "pinned_revision": "973514eccba7271df890ec7e1910a53725bf4ff5",
+      "checked_out_revision": "973514eccba7271df890ec7e1910a53725bf4ff5",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/nb-qemu/libnb-qemu-guest/bionic/jemalloc/COPYING",
+          "sha256": "5e49cb5013479e951cea2b6120ad2ff3c547463f11435c182bee7d6f391f2133"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/libnb-qemu-guest/bionic/jemalloc/NOTICE",
+          "sha256": "81e01f4f36772001d0370faeb32a728f72300388248f7f993fcda17ce09198d3"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/libnb-qemu-guest/bionic/libc/NOTICE",
+          "sha256": "a1102b85008d5b454aecb95388becb419573e79812834d2ad527f266c696f339"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/COPYING",
+          "sha256": "6f04ae8364d0079a192b14635f4b1da294ce18724c034c39a6a41d1b09df6100"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/COPYING.LIB",
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/LICENSE",
+          "sha256": "139c64b7a9ae62858ff969aae622ecfcf4f1519655bd92d2e70a1a2fb615690e"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/disas/libvixl/LICENCE",
+          "sha256": "bb5a1a3b70bd09824e0a7adc8e956830e80d63455ff492454b1ab915b6b0cc8a"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/docs/system/license.rst",
+          "sha256": "1ea9f46643bc6d1c48ffb24a8e9fb9b6f6bdcf2015ad1f3b1093fb0fb380d9af"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/linux-headers/COPYING",
+          "sha256": "ee5808b032a67f587d3541099d46de34f5bec8cd5976114ba07f1299ee6001ff"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/tests/fp/berkeley-softfloat-3/COPYING.txt",
+          "sha256": "145ea96b4a4a04a1a7738d2a2bf9e830f861971e69606187b018d9e8fc0b95c7"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/tests/fp/berkeley-testfloat-3/COPYING.txt",
+          "sha256": "862c7f1238c07addea5e7af00ae4a9b6e59150029091c4261c896bcdce02a059"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/tests/uefi-test-tools/LICENSE",
+          "sha256": "075489a49d7837af8225dde644936d7d171a17e8e4a339cde3a0808b7ea19614"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/ui/keycodemapdb/LICENSE.BSD",
+          "sha256": "602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/ui/keycodemapdb/LICENSE.GPL2",
+          "sha256": "ab15fd526bd8dd18a9e77ebc139656bf4d33e97fc7238cd11bf60e2b9b8666c6"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu/qemu/ui/keycodemapdb/thirdparty/LICENSE-argparse.txt",
+          "sha256": "6d504d45c4d109f925ef058960b6d1ce2712bb6b5793e926bfc151716ac74048"
+        }
+      ]
+    },
+    {
+      "name": "nb-qemu-bionic",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://gitlab.com/android_translation_layer/qemu-based-native-bridge/nb-qemu-bionic.git",
+      "pinned_revision": "03d71fef83fa9746e15e4c8b386114a22b2c215f",
+      "checked_out_revision": "03d71fef83fa9746e15e4c8b386114a22b2c215f",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/nb-qemu-bionic/jemalloc/COPYING",
+          "sha256": "5e49cb5013479e951cea2b6120ad2ff3c547463f11435c182bee7d6f391f2133"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu-bionic/jemalloc/NOTICE",
+          "sha256": "81e01f4f36772001d0370faeb32a728f72300388248f7f993fcda17ce09198d3"
+        },
+        {
+          "path": "legal/third-party/source/nb-qemu-bionic/libc/NOTICE",
+          "sha256": "a1102b85008d5b454aecb95388becb419573e79812834d2ad527f266c696f339"
+        }
+      ]
+    },
+    {
+      "name": "qemu",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://gitlab.com/android_translation_layer/qemu-based-native-bridge/qemu.git",
+      "pinned_revision": "a590cb154d1703b80265a75df4fca4d51b0dc0ba",
+      "checked_out_revision": "a590cb154d1703b80265a75df4fca4d51b0dc0ba",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/qemu/COPYING",
+          "sha256": "6f04ae8364d0079a192b14635f4b1da294ce18724c034c39a6a41d1b09df6100"
+        },
+        {
+          "path": "legal/third-party/source/qemu/COPYING.LIB",
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+        },
+        {
+          "path": "legal/third-party/source/qemu/LICENSE",
+          "sha256": "139c64b7a9ae62858ff969aae622ecfcf4f1519655bd92d2e70a1a2fb615690e"
+        },
+        {
+          "path": "legal/third-party/source/qemu/disas/libvixl/LICENCE",
+          "sha256": "bb5a1a3b70bd09824e0a7adc8e956830e80d63455ff492454b1ab915b6b0cc8a"
+        },
+        {
+          "path": "legal/third-party/source/qemu/docs/system/license.rst",
+          "sha256": "1ea9f46643bc6d1c48ffb24a8e9fb9b6f6bdcf2015ad1f3b1093fb0fb380d9af"
+        },
+        {
+          "path": "legal/third-party/source/qemu/linux-headers/COPYING",
+          "sha256": "ee5808b032a67f587d3541099d46de34f5bec8cd5976114ba07f1299ee6001ff"
+        },
+        {
+          "path": "legal/third-party/source/qemu/tests/fp/berkeley-softfloat-3/COPYING.txt",
+          "sha256": "145ea96b4a4a04a1a7738d2a2bf9e830f861971e69606187b018d9e8fc0b95c7"
+        },
+        {
+          "path": "legal/third-party/source/qemu/tests/fp/berkeley-testfloat-3/COPYING.txt",
+          "sha256": "862c7f1238c07addea5e7af00ae4a9b6e59150029091c4261c896bcdce02a059"
+        },
+        {
+          "path": "legal/third-party/source/qemu/tests/uefi-test-tools/LICENSE",
+          "sha256": "075489a49d7837af8225dde644936d7d171a17e8e4a339cde3a0808b7ea19614"
+        },
+        {
+          "path": "legal/third-party/source/qemu/ui/keycodemapdb/LICENSE.BSD",
+          "sha256": "602c4c7482de6479dd2e9793cda275e5e63d773dacd1eca689232ab7008fb4fb"
+        },
+        {
+          "path": "legal/third-party/source/qemu/ui/keycodemapdb/LICENSE.GPL2",
+          "sha256": "ab15fd526bd8dd18a9e77ebc139656bf4d33e97fc7238cd11bf60e2b9b8666c6"
+        },
+        {
+          "path": "legal/third-party/source/qemu/ui/keycodemapdb/thirdparty/LICENSE-argparse.txt",
+          "sha256": "6d504d45c4d109f925ef058960b6d1ce2712bb6b5793e926bfc151716ac74048"
+        }
+      ]
+    },
+    {
+      "name": "wolfssl",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://github.com/wolfSSL/wolfssl.git",
+      "pinned_revision": "decea12e223869c8f8f3ab5a53dc90b69f436eb2",
+      "checked_out_revision": "decea12e223869c8f8f3ab5a53dc90b69f436eb2",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/wolfssl/AUTHORS",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "legal/third-party/source/wolfssl/COPYING",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        {
+          "path": "legal/third-party/source/wolfssl/debian/copyright",
+          "sha256": "d6de4f7d84247a30b90b78452b53344fc675e57167bddfa8e808e7c039d92397"
+        }
+      ]
+    },
+    {
+      "name": "zlib",
+      "scope": "pinned upstream source checkout; per-file terms retained",
+      "url": "https://github.com/madler/zlib.git",
+      "pinned_revision": "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf",
+      "checked_out_revision": "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf",
+      "license_expression": null,
+      "license_files": [
+        {
+          "path": "legal/third-party/source/zlib/LICENSE",
+          "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243"
+        },
+        {
+          "path": "legal/third-party/source/zlib/contrib/dotzlib/LICENSE_1_0.txt",
+          "sha256": "36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951"
+        }
+      ]
+    },
+    {
+      "name": "itoa",
+      "version": "1.0.15",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/dtolnay/itoa",
+      "license_expression": "MIT OR Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/itoa-1.0.15/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "legal/third-party/rust/itoa-1.0.15/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "memchr",
+      "version": "2.7.5",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/BurntSushi/memchr",
+      "license_expression": "Unlicense OR MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/memchr-2.7.5/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
+        },
+        {
+          "path": "legal/third-party/rust/memchr-2.7.5/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+        }
+      ]
+    },
+    {
+      "name": "memchr",
+      "version": "2.8.3",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/BurntSushi/memchr",
+      "license_expression": "Unlicense OR MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/memchr-2.8.3/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
+        },
+        {
+          "path": "legal/third-party/rust/memchr-2.8.3/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+        }
+      ]
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.95",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/dtolnay/proc-macro2",
+      "license_expression": "MIT OR Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/proc-macro2-1.0.95/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "legal/third-party/rust/proc-macro2-1.0.95/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "quote",
+      "version": "1.0.40",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/dtolnay/quote",
+      "license_expression": "MIT OR Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/quote-1.0.40/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "legal/third-party/rust/quote-1.0.40/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "ryu",
+      "version": "1.0.20",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/dtolnay/ryu",
+      "license_expression": "Apache-2.0 OR BSL-1.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/ryu-1.0.20/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "legal/third-party/rust/ryu-1.0.20/LICENSE-BOOST",
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+        }
+      ]
+    },
+    {
+      "name": "serde",
+      "version": "1.0.219",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/serde-rs/serde",
+      "license_expression": "MIT OR Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/serde-1.0.219/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "legal/third-party/rust/serde-1.0.219/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "serde_derive",
+      "version": "1.0.219",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/serde-rs/serde",
+      "license_expression": "MIT OR Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/serde_derive-1.0.219/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "legal/third-party/rust/serde_derive-1.0.219/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.140",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/serde-rs/json",
+      "license_expression": "MIT OR Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/serde_json-1.0.140/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "legal/third-party/rust/serde_json-1.0.140/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "2.0.104",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/dtolnay/syn",
+      "license_expression": "MIT OR Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/syn-2.0.104/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "legal/third-party/rust/syn-2.0.104/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.18",
+      "scope": "resolved Rust dependency (includes build/proc-macro dependencies)",
+      "url": "https://github.com/dtolnay/unicode-ident",
+      "license_expression": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/rust/unicode-ident-1.0.18/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "legal/third-party/rust/unicode-ident-1.0.18/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "path": "legal/third-party/rust/unicode-ident-1.0.18/LICENSE-UNICODE",
+          "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1"
+        }
+      ]
+    },
+    {
+      "name": "alsa-lib",
+      "version": "1.2.16.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.alsa-project.org",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "aom",
+      "version": "3.15.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://aomedia.org/",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/aom/LICENSE",
+          "sha256": "4764a286d8b2faeaf42f4418e7d7a28d58fc8fd4d00a3d0a7f44b0a4099de7f2"
+        },
+        {
+          "path": "legal/third-party/system/aom/PATENTS",
+          "sha256": "661fb8e504744e95587b556b94a58343448300606a41bea8c7a9b97125696e61"
+        }
+      ]
+    },
+    {
+      "name": "avahi",
+      "version": "1:0.9rc5-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/avahi/avahi",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "brotli",
+      "version": "1.2.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/google/brotli",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/brotli/LICENSE",
+          "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        }
+      ]
+    },
+    {
+      "name": "bzip2",
+      "version": "1.0.8-6",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://sourceware.org/bzip2/",
+      "license_expression": "BSD",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/bzip2/LICENSE",
+          "sha256": "c6dbbf828498be844a89eaa3b84adbab3199e342eb5cb2ed2f0d4ba7ec0f38a3"
+        }
+      ]
+    },
+    {
+      "name": "cairo",
+      "version": "1.18.6-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://cairographics.org/",
+      "license_expression": "LGPL-2.1-only OR MPL-1.1",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-only.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        },
+        {
+          "path": "legal/third-party/common/MPL-1.1.txt",
+          "sha256": "6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795"
+        }
+      ]
+    },
+    {
+      "name": "dav1d",
+      "version": "1.5.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://code.videolan.org/videolan/dav1d",
+      "license_expression": "BSD-2-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/dav1d/COPYING",
+          "sha256": "dd92c3c2247c5651606fc23a5e2d6a1ebc5ace9a3e49cbde0e12f05ad1cb1ee5"
+        }
+      ]
+    },
+    {
+      "name": "dbus",
+      "version": "1.16.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.freedesktop.org/wiki/Software/dbus/",
+      "license_expression": "AFL-2.1 OR GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/dbus/AFL-2.1.txt",
+          "sha256": "93bb4f7417aa775bab9026cc3d0af28aeb64451fc5a8ec651876785edd8eaf9b"
+        },
+        {
+          "path": "legal/third-party/system/dbus/COPYING",
+          "sha256": "150e5d08e1cb5e62b65967d7931acad2c42d98ec1bbb584bebb01921cbc853c2"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "e2fsprogs",
+      "version": "1.47.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "http://e2fsprogs.sourceforge.net",
+      "license_expression": "GPL  LGPL  MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "expat",
+      "version": "2.9.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://libexpat.github.io/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/expat/COPYING",
+          "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+        }
+      ]
+    },
+    {
+      "name": "ffmpeg",
+      "version": "2:9.0.2-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://ffmpeg.org",
+      "license_expression": "GPL-3.0-only",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-3.0-only.txt",
+          "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+        }
+      ]
+    },
+    {
+      "name": "fontconfig",
+      "version": "2:2.18.3-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.freedesktop.org/wiki/Software/fontconfig/",
+      "license_expression": "HPND AND Unicode-DFS-2016",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/fontconfig/COPYING",
+          "sha256": "51a51aa9823704fd90bccc616cdd17ebabb5b2b3e9cbde886ca02c7002288067"
+        }
+      ]
+    },
+    {
+      "name": "freetype2",
+      "version": "2.14.3-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.freetype.org/",
+      "license_expression": "FTL OR GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/freetype2/FTL.TXT",
+          "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "fribidi",
+      "version": "1.0.17-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/fribidi/fribidi",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "gdk-pixbuf2",
+      "version": "2.44.8-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.gnome.org/GNOME/gdk-pixbuf",
+      "license_expression": "LGPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.0-or-later.txt",
+          "sha256": "86dc99d7e5060915ab1dfc1378b7dd351c62088bfa74067e8aa1868c6fdba7d8"
+        }
+      ]
+    },
+    {
+      "name": "glib2",
+      "version": "2.90.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.gnome.org/GNOME/glib",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "glibc",
+      "version": "2.44+r50+g1848099f063e-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.gnu.org/software/libc",
+      "license_expression": "GPL-2.0-or-later  LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "glycin",
+      "version": "2.2.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gnome.pages.gitlab.gnome.org/glycin/",
+      "license_expression": "MPL-2.0 OR LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/MPL-2.0.txt",
+          "sha256": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "gmp",
+      "version": "6.3.0-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gmplib.org/",
+      "license_expression": "GPL-2.0-or-later  LGPL-3.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-3.0-or-later.txt",
+          "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1"
+        }
+      ]
+    },
+    {
+      "name": "gnutls",
+      "version": "3.8.13-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.gnutls.org/",
+      "license_expression": "GPL-3.0-or-later AND LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-3.0-or-later.txt",
+          "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "graphene",
+      "version": "1.10.8-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://ebassi.github.io/graphene/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/graphene/LICENSE.txt",
+          "sha256": "cfd9fd7b2be592d2c0910d32dc1d8910c08dc0670b1d9ce417a82fa9eb788df9"
+        }
+      ]
+    },
+    {
+      "name": "graphite",
+      "version": "1:1.3.15-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://graphite.sil.org/",
+      "license_expression": "LGPL-2.1-or-later OR MPL-2.0 OR GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/graphite/COPYING",
+          "sha256": "2c272829ff23f182c8bf7ea12fedea69b0ae148663123ed5240c117cb129c9c1"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        },
+        {
+          "path": "legal/third-party/common/MPL-2.0.txt",
+          "sha256": "66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "gsm",
+      "version": "1.0.24-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.quut.com/gsm/",
+      "license_expression": "custom",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/gsm/license.txt",
+          "sha256": "81c68a3374937ed9b5e4929c709e81a2c4b35b5d1f450ecf8c473e2daea46ff6"
+        }
+      ]
+    },
+    {
+      "name": "gst-plugins-bad-libs",
+      "version": "1.28.7-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gstreamer.freedesktop.org/",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "gst-plugins-base-libs",
+      "version": "1.28.7-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gstreamer.freedesktop.org/",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "gstreamer",
+      "version": "1.28.7-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gstreamer.freedesktop.org/",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "gtk4",
+      "version": "1:4.24.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.gtk.org/",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "harfbuzz",
+      "version": "14.6.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://harfbuzz.github.io/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/harfbuzz/COPYING",
+          "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64"
+        }
+      ]
+    },
+    {
+      "name": "harfbuzz-icu",
+      "version": "14.6.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://harfbuzz.github.io/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/harfbuzz-icu/COPYING",
+          "sha256": "ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64"
+        }
+      ]
+    },
+    {
+      "name": "hidapi",
+      "version": "0.15.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/libusb/hidapi",
+      "license_expression": "GPL3  BSD  custom",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/hidapi/LICENSE-bsd.txt",
+          "sha256": "30eb1bef29b46f8ba7ab8b416035dbd93cb034a45481dd97815b944284582cd2"
+        },
+        {
+          "path": "legal/third-party/system/hidapi/LICENSE-gpl3.txt",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        {
+          "path": "legal/third-party/system/hidapi/LICENSE-orig.txt",
+          "sha256": "fb5436aa63d1b71a8dfbf74ecaf1a5b4e1ec4df7f80074d11fec99284f69ca5f"
+        },
+        {
+          "path": "legal/third-party/system/hidapi/LICENSE.txt",
+          "sha256": "7d3b087c34f35d4d538e3bcddd1ff8f66e92f9ef336881999482800ddf840913"
+        }
+      ]
+    },
+    {
+      "name": "highway",
+      "version": "1.4.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/google/highway/",
+      "license_expression": "Apache-2.0 OR BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/highway/LICENSE",
+          "sha256": "e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af"
+        },
+        {
+          "path": "legal/third-party/common/Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        }
+      ]
+    },
+    {
+      "name": "hyphen",
+      "version": "2.8.9-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/hunspell/hyphen",
+      "license_expression": "GPL-2.0-only OR LGPL-2.1-or-later OR MPL-1.1",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/hyphen/LICENSE",
+          "sha256": "8674da7542da10dec11e50a0d3cdad219a79de80f405bc54894fb20207944d94"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        },
+        {
+          "path": "legal/third-party/common/MPL-1.1.txt",
+          "sha256": "6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795"
+        }
+      ]
+    },
+    {
+      "name": "icu",
+      "version": "78.3-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://icu.unicode.org",
+      "license_expression": "LicenseRef-Unicode-3.0  BSD-2-Clause  BSD-3-Clause  NAIST-2003",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/icu/LICENSE",
+          "sha256": "e55522d81edc687a341a4411e0776e54ca654e90147f354a90458aaced4116af"
+        }
+      ]
+    },
+    {
+      "name": "jbigkit",
+      "version": "2.1-8",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.cl.cam.ac.uk/~mgk25/jbigkit/",
+      "license_expression": "GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "json-glib",
+      "version": "1.10.8-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gnome.pages.gitlab.gnome.org/json-glib/",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "keyutils",
+      "version": "1.6.3-4",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.kernel.org/",
+      "license_expression": "GPL-2.0-or-later  LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "krb5",
+      "version": "1.22.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://web.mit.edu/kerberos/",
+      "license_expression": "custom",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/krb5/LICENSE",
+          "sha256": "d37fcb886de2ad1c602f61c99c6893bcbd9a1949f54d9a6bb40d191204eb605e"
+        }
+      ]
+    },
+    {
+      "name": "lame",
+      "version": "4.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "http://lame.sourceforge.net/",
+      "license_expression": "LGPL-2.0-only",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.0-only.txt",
+          "sha256": "86dc99d7e5060915ab1dfc1378b7dd351c62088bfa74067e8aa1868c6fdba7d8"
+        }
+      ]
+    },
+    {
+      "name": "lcms2",
+      "version": "2.19.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "http://www.littlecms.com/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/lcms2/LICENSE",
+          "sha256": "6dbd60437f8ef91d8de1f08ad75882547fd4931bfcc3566a0735f28db1484d31"
+        }
+      ]
+    },
+    {
+      "name": "leancrypto",
+      "version": "1.9.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://leancrypto.org",
+      "license_expression": "GPL-2.0-or-later  LicenseRef-BSDvariant  LicenseRef-leancrypto",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/leancrypto/LICENSE",
+          "sha256": "6eace59ee3c3e03069b2f5bd2c18e61a555c48bd38ae0930f73cfebe513b24cb"
+        },
+        {
+          "path": "legal/third-party/system/leancrypto/LICENSE.bsd",
+          "sha256": "13aa749a5b0a454917a944ed8fffc530b784f5ead522b1aacaf4ec8aa55a6239"
+        },
+        {
+          "path": "legal/third-party/system/leancrypto/LICENSE.gplv2",
+          "sha256": "e6d6a009505e345fe949e1310334fcb0747f28dae2856759de102ab66b722cb4"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "libatomic",
+      "version": "16.2.1+r23+gd564253eb6c8-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gcc.gnu.org",
+      "license_expression": "GPL-3.0-or-later WITH GCC-exception-3.1  GFDL-1.3-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libatomic/RUNTIME.LIBRARY.EXCEPTION",
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        },
+        {
+          "path": "legal/third-party/common/GPL-3.0-or-later.txt",
+          "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+        },
+        {
+          "path": "legal/third-party/common/GFDL-1.3-or-later.txt",
+          "sha256": "d024962f1f4966c102b40d9fd9cc834a3f0b3c1397b41444b7cd7925640dc929"
+        }
+      ]
+    },
+    {
+      "name": "libavif",
+      "version": "1.4.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/AOMediaCodec/libavif",
+      "license_expression": "LicenseRef-libavif",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libavif/LICENSE",
+          "sha256": "165abf92cc04b39e80d29cadea7a6a7e8fddf59407d4ad2616507a7ebe8216f9"
+        }
+      ]
+    },
+    {
+      "name": "libbsd",
+      "version": "0.12.2-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://libbsd.freedesktop.org",
+      "license_expression": "custom",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libbsd/LICENSE",
+          "sha256": "978426553ab7b9cfb4503d98e578a77b8c3142c099100aa9791fd21be5a95f97"
+        }
+      ]
+    },
+    {
+      "name": "libcloudproviders",
+      "version": "0.4.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.gnome.org/GNOME/libcloudproviders",
+      "license_expression": "LGPL-3.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-3.0-or-later.txt",
+          "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1"
+        }
+      ]
+    },
+    {
+      "name": "libcolord",
+      "version": "1.4.8-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.freedesktop.org/software/colord/",
+      "license_expression": "GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "libcups",
+      "version": "2:2.4.20-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://openprinting.github.io/cups/",
+      "license_expression": "Apache-2.0 WITH LLVM-exception AND BSD-3-Clause AND Zlib AND BSD-2-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libcups/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "legal/third-party/system/libcups/NOTICE",
+          "sha256": "977206f041b9a6f47ac00531e1242c0fab7063da71178f8d868b167b70866b6d"
+        },
+        {
+          "path": "legal/third-party/common/Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        }
+      ]
+    },
+    {
+      "name": "libdatrie",
+      "version": "0.2.14-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://linux.thai.net/projects/datrie",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "libdeflate",
+      "version": "1.26-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/ebiggers/libdeflate",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libdeflate/COPYING",
+          "sha256": "4ad69099cb4374836fd27583d9991e2838cd86b6e4666ab26b2d32582c91e73a"
+        }
+      ]
+    },
+    {
+      "name": "libdrm",
+      "version": "2.4.134-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://dri.freedesktop.org/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libdrm/COPYING",
+          "sha256": "9631d4f694952e3e6ae5a05534c2e93e994e47d3413677a3a00e45c8cef6db93"
+        }
+      ]
+    },
+    {
+      "name": "libelf",
+      "version": "0.196-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://sourceware.org/elfutils/",
+      "license_expression": "GPL-2.0-or-later OR LGPL-3.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-3.0-or-later.txt",
+          "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1"
+        }
+      ]
+    },
+    {
+      "name": "libepoxy",
+      "version": "1.5.10-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/anholt/libepoxy",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libepoxy/COPYING",
+          "sha256": "8d5144666f9c4df9bbd69b8900086d5979259152a1060421cdcc0fb9061a1c12"
+        }
+      ]
+    },
+    {
+      "name": "libevdev",
+      "version": "1.14.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.freedesktop.org/wiki/Software/libevdev/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libevdev/COPYING",
+          "sha256": "6f13de7ce28e4948ba95170e0723ee1254c1978ce1f127af82aeca597b567cb9"
+        }
+      ]
+    },
+    {
+      "name": "libffi",
+      "version": "3.8.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://sourceware.org/libffi/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libffi/LICENSE",
+          "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+        }
+      ]
+    },
+    {
+      "name": "libgcc",
+      "version": "16.2.1+r23+gd564253eb6c8-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gcc.gnu.org",
+      "license_expression": "GPL-3.0-or-later WITH GCC-exception-3.1  GFDL-1.3-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libgcc/RUNTIME.LIBRARY.EXCEPTION",
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        },
+        {
+          "path": "legal/third-party/common/GPL-3.0-or-later.txt",
+          "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+        },
+        {
+          "path": "legal/third-party/common/GFDL-1.3-or-later.txt",
+          "sha256": "d024962f1f4966c102b40d9fd9cc834a3f0b3c1397b41444b7cd7925640dc929"
+        }
+      ]
+    },
+    {
+      "name": "libgcrypt",
+      "version": "1.12.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.gnupg.org",
+      "license_expression": "BSD-3-Clause  BSD-3-Clause OR GPL-2.0-only  GPL-2.0-or-later  LGPL-2.0-or-later  LGPL-2.1-or-later  X11  LicenseRef-scancode-public-domain  LicenseRef-OCB1",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libgcrypt/COPYING.LIB",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+        },
+        {
+          "path": "legal/third-party/system/libgcrypt/LICENSES",
+          "sha256": "2a047a5799926c3cd705ce6df4b560d67578061ad5019fbff2a4609a3f0090bd"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.0-or-later.txt",
+          "sha256": "86dc99d7e5060915ab1dfc1378b7dd351c62088bfa74067e8aa1868c6fdba7d8"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "libglvnd",
+      "version": "1.7.0-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.freedesktop.org/glvnd/libglvnd",
+      "license_expression": "custom:BSD-like",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libglvnd/LICENSE",
+          "sha256": "1a99f7487849c41fc3520e0af3dfcf28a0df05e78956d9ec58c2c52b1f20a77d"
+        }
+      ]
+    },
+    {
+      "name": "libgomp",
+      "version": "16.2.1+r23+gd564253eb6c8-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gcc.gnu.org",
+      "license_expression": "GPL-3.0-or-later WITH GCC-exception-3.1  GFDL-1.3-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libgomp/RUNTIME.LIBRARY.EXCEPTION",
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        },
+        {
+          "path": "legal/third-party/common/GPL-3.0-or-later.txt",
+          "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+        },
+        {
+          "path": "legal/third-party/common/GFDL-1.3-or-later.txt",
+          "sha256": "d024962f1f4966c102b40d9fd9cc834a3f0b3c1397b41444b7cd7925640dc929"
+        }
+      ]
+    },
+    {
+      "name": "libgpg-error",
+      "version": "1.61-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.gnupg.org",
+      "license_expression": "LGPL-2.1-or-later  BSD-3-Clause OR LGPL-2.1-or-later  FSFULLR  GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libgpg-error/COPYING",
+          "sha256": "231f7edcc7352d7734a96eef0b8030f77982678c516876fcb81e25b32d68564c"
+        },
+        {
+          "path": "legal/third-party/system/libgpg-error/COPYING.LIB",
+          "sha256": "a9bdde5616ecdd1e980b44f360600ee8783b1f99b8cc83a2beb163a0a390e861"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "libgudev",
+      "version": "238-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.gnome.org/GNOME/libgudev",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "libidn2",
+      "version": "2.3.8-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.gnu.org/software/libidn/#libidn2",
+      "license_expression": "GPL2  LGPL3",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-3.0-only.txt",
+          "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1"
+        }
+      ]
+    },
+    {
+      "name": "libjpeg-turbo",
+      "version": "3.2.0-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://libjpeg-turbo.org/",
+      "license_expression": "BSD-3-Clause  IJG",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libjpeg-turbo/LICENSE.md",
+          "sha256": "ba6bceebcba0fdd35488477c2cca8c4632ce82c74dbfbc87d886ce6fc4433579"
+        },
+        {
+          "path": "legal/third-party/system/libjpeg-turbo/README.ijg",
+          "sha256": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6"
+        }
+      ]
+    },
+    {
+      "name": "libjxl",
+      "version": "0.12.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://jpeg.org/jpegxl/",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libjxl/LICENSE",
+          "sha256": "8405932022a556380c2d8c272eff154a923feb197233f348ce5f7334fb0a5ede"
+        },
+        {
+          "path": "legal/third-party/system/libjxl/PATENTS",
+          "sha256": "91915f8ae056a68a3c5bdf05d9f6f78bb6903e27a8ca3a8434c9e4ac87300575"
+        }
+      ]
+    },
+    {
+      "name": "libmd",
+      "version": "1.3.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.hadrons.org/software/libmd/",
+      "license_expression": "BSD-3-Clause AND BSD-2-Clause AND ISC AND Beerware AND CC-PDM-1.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libmd/COPYING",
+          "sha256": "4971a2b7065117a01cb04430b53ba37c4c6181d4aa8a3a983a3f7042d1625f19"
+        }
+      ]
+    },
+    {
+      "name": "libnghttp2",
+      "version": "1.70.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://nghttp2.org/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libnghttp2/COPYING",
+          "sha256": "6b94f3abc1aabd0c72a7c7d92a77f79dda7c8a0cb3df839a97890b4116a2de2a"
+        }
+      ]
+    },
+    {
+      "name": "libogg",
+      "version": "1.3.6-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.xiph.org/ogg/",
+      "license_expression": "BSD",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libogg/COPYING",
+          "sha256": "d2ab5758336489da61c12cc5bb757da5339c4ae9001f9bb0562b4370249af814"
+        }
+      ]
+    },
+    {
+      "name": "libp11-kit",
+      "version": "0.26.5-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://p11-glue.freedesktop.org",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libp11-kit/COPYING",
+          "sha256": "2e1ba993904df807a10c3eda1e5c272338edc35674b679773a8b3ad460731054"
+        }
+      ]
+    },
+    {
+      "name": "libpng",
+      "version": "1.6.59-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "http://www.libpng.org/pub/png/libpng.html",
+      "license_expression": "libpng-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libpng/LICENSE",
+          "sha256": "bdb0a645ea18c60507d0368379b1ac5474b92255fcc2d115e07486a7672ba526"
+        }
+      ]
+    },
+    {
+      "name": "libpsl",
+      "version": "0.21.5-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/rockdaboot/libpsl",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libpsl/COPYING",
+          "sha256": "322392e6001b2b3b0fca705dc9f11f26e12441188ecde50eb1d22909980b2925"
+        }
+      ]
+    },
+    {
+      "name": "librsvg",
+      "version": "2:2.63.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.gnome.org/GNOME/librsvg",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "libseccomp",
+      "version": "2.6.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/seccomp/libseccomp",
+      "license_expression": "LGPL-2.1-only",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-only.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "libsecret",
+      "version": "0.21.8.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gnome.pages.gitlab.gnome.org/libsecret/",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "libsoup3",
+      "version": "3.8.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://libsoup.gnome.org/",
+      "license_expression": "LGPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.0-or-later.txt",
+          "sha256": "86dc99d7e5060915ab1dfc1378b7dd351c62088bfa74067e8aa1868c6fdba7d8"
+        }
+      ]
+    },
+    {
+      "name": "libsoxr",
+      "version": "0.1.3-5",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://sourceforge.net/p/soxr/wiki/Home/",
+      "license_expression": "LGPL-2.1-only  LicenseRef-soxr",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libsoxr/LICENCE",
+          "sha256": "dc98676341fdcd29d9f279c9679d6a75288785b174ded8d1b2e316c366166135"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-only.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "libstdc++",
+      "version": "16.2.1+r23+gd564253eb6c8-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gcc.gnu.org",
+      "license_expression": "GPL-3.0-or-later WITH GCC-exception-3.1  GFDL-1.3-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libstdc++/RUNTIME.LIBRARY.EXCEPTION",
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        },
+        {
+          "path": "legal/third-party/common/GPL-3.0-or-later.txt",
+          "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+        },
+        {
+          "path": "legal/third-party/common/GFDL-1.3-or-later.txt",
+          "sha256": "d024962f1f4966c102b40d9fd9cc834a3f0b3c1397b41444b7cd7925640dc929"
+        }
+      ]
+    },
+    {
+      "name": "libtasn1",
+      "version": "4.21.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.gnu.org/software/libtasn1/",
+      "license_expression": "GPL-3.0-or-later  LGPL-2.1-or-later  GFDL-1.3-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libtasn1/COPYING",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        },
+        {
+          "path": "legal/third-party/common/GPL-3.0-or-later.txt",
+          "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        },
+        {
+          "path": "legal/third-party/common/GFDL-1.3-or-later.txt",
+          "sha256": "d024962f1f4966c102b40d9fd9cc834a3f0b3c1397b41444b7cd7925640dc929"
+        }
+      ]
+    },
+    {
+      "name": "libthai",
+      "version": "0.1.30-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://linux.thai.net/projects/libthai",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "libtheora",
+      "version": "1.2.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.theora.org/",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libtheora/COPYING",
+          "sha256": "8417fad7da775735564e209484a2e011e0fa201e94f01fdbee6e4977e478e6fc"
+        },
+        {
+          "path": "legal/third-party/system/libtheora/LICENSE",
+          "sha256": "2c902950c73a63cd285dc0c36573de9c5fefe66d49312949c51d941f33e92932"
+        }
+      ]
+    },
+    {
+      "name": "libtiff",
+      "version": "4.7.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "http://www.simplesystems.org/libtiff/",
+      "license_expression": "libtiff",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libtiff/LICENSE.md",
+          "sha256": "0e27c2382d7b8147972bbb746e04059a1152c8d0fda9d03ef1399d1a433c4ade"
+        }
+      ]
+    },
+    {
+      "name": "libunistring",
+      "version": "1.4.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.gnu.org/software/libunistring/",
+      "license_expression": "GPL-2.0-or-later  LGPL-3.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-3.0-or-later.txt",
+          "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1"
+        }
+      ]
+    },
+    {
+      "name": "libunwind",
+      "version": "1.8.3-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.nongnu.org/libunwind/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libunwind/COPYING",
+          "sha256": "6a0dbbdaec2b3136b7bf045586f4212bdf74e7af688bf9dfe9154607cf5ec156"
+        }
+      ]
+    },
+    {
+      "name": "libva",
+      "version": "2.24.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://intel.github.io/libva/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libva/COPYING",
+          "sha256": "c86a782ee845b52472dae9b9d79fb915d333628ac0efe49cdce63644814931de"
+        }
+      ]
+    },
+    {
+      "name": "libvdpau",
+      "version": "1.5-4",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.freedesktop.org/wiki/Software/VDPAU/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libvdpau/COPYING",
+          "sha256": "ce4af7294872ff07f6e82ae5f1f5eba926215b1e2fb6d55d64759de082458d61"
+        }
+      ]
+    },
+    {
+      "name": "libvorbis",
+      "version": "1.3.7-4",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.xiph.org/vorbis/",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libvorbis/COPYING",
+          "sha256": "ec1815db59fcd302846df949d7424876cb2e2dc5ed1606c5fb0b36787b1cf43a"
+        }
+      ]
+    },
+    {
+      "name": "libvpl",
+      "version": "2.17.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://intel.github.io/libvpl/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libvpl/license.txt",
+          "sha256": "bf1cfac2e2792b6e1e995ce103d70796aecaf2ec7e4c5fe5474f7acec7b4a677"
+        },
+        {
+          "path": "legal/third-party/system/libvpl/third-party-programs.txt",
+          "sha256": "e3c92992b1df02b467ac086d7d3730f4c1fc2c2a1f2c520657c4c9f2085305a3"
+        }
+      ]
+    },
+    {
+      "name": "libvpx",
+      "version": "1.17.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.webmproject.org/",
+      "license_expression": "custom:BSD",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libvpx/LICENSE",
+          "sha256": "8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615"
+        }
+      ]
+    },
+    {
+      "name": "libwebp",
+      "version": "1.6.0-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://developers.google.com/speed/webp/",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libwebp/COPYING",
+          "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf"
+        }
+      ]
+    },
+    {
+      "name": "libx11",
+      "version": "1.8.13-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.freedesktop.org/xorg/lib/libx11",
+      "license_expression": "MIT AND X11",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libx11/COPYING",
+          "sha256": "eda0c2ed1cae0280c7fe79762eaad8ad31c044afc64e71e92ef2c6f3cd7bc395"
+        }
+      ]
+    },
+    {
+      "name": "libxau",
+      "version": "1.0.12-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xorg.freedesktop.org/",
+      "license_expression": "MIT-open-group",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxau/COPYING",
+          "sha256": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa"
+        }
+      ]
+    },
+    {
+      "name": "libxcb",
+      "version": "1.17.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.freedesktop.org/xorg/lib/libxcb",
+      "license_expression": "X11",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxcb/COPYING",
+          "sha256": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd"
+        }
+      ]
+    },
+    {
+      "name": "libxcursor",
+      "version": "1.2.3-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.freedesktop.org/xorg/lib/libxcursor",
+      "license_expression": "HPND-sell-variant",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxcursor/COPYING",
+          "sha256": "ad2e9d279088c5d612fb0e506ea8bb7d9f01b411e7f4b97b64589c3cd48a68f1"
+        }
+      ]
+    },
+    {
+      "name": "libxdamage",
+      "version": "1.1.7-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xorg.freedesktop.org/",
+      "license_expression": "HPND-sell-variant",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxdamage/COPYING",
+          "sha256": "33effe928634be12e668465c3935c5570ff2787b970b15d9243d69df42302c57"
+        }
+      ]
+    },
+    {
+      "name": "libxdmcp",
+      "version": "1.1.5-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.freedesktop.org/xorg/lib/libxdmcp",
+      "license_expression": "MIT-open-group",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxdmcp/COPYING",
+          "sha256": "8a3c3f35b0dbcb60a4e242b9e4394a352a65bb27deb2938ea1e2e62a626e16e9"
+        }
+      ]
+    },
+    {
+      "name": "libxext",
+      "version": "1.3.7-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.freedesktop.org/xorg/lib/libxext",
+      "license_expression": "LicenseRef-libxext",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxext/COPYING",
+          "sha256": "fd62910be4b13829d94e76c1447cf840953f0e225c4dc6c79349c84dd0557f22"
+        }
+      ]
+    },
+    {
+      "name": "libxfixes",
+      "version": "6.0.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xorg.freedesktop.org/",
+      "license_expression": "MIT  HPND-sell-variant",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxfixes/COPYING",
+          "sha256": "a07d8a5a6972638a745a03983207a1052881c24eea29021fdca7794bea8d7774"
+        }
+      ]
+    },
+    {
+      "name": "libxi",
+      "version": "1.8.3-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xorg.freedesktop.org",
+      "license_expression": "MIT-open-group  SMLNJ  MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxi/COPYING",
+          "sha256": "9392174bc86e291369fd2f61f3ed325962735a5f5c585ce8d7ebd365e2a5639f"
+        }
+      ]
+    },
+    {
+      "name": "libxinerama",
+      "version": "1.1.6-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xorg.freedesktop.org/",
+      "license_expression": "MIT  MIT-open-group  X11",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxinerama/COPYING",
+          "sha256": "1d4e533646e02aa0e4192eb5355c1a9dd5d01b00412f01fb73856f0e7a638a84"
+        }
+      ]
+    },
+    {
+      "name": "libxkbcommon",
+      "version": "1.13.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xkbcommon.org/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxkbcommon/LICENSE",
+          "sha256": "967e97b28658f0037bbe164a237bdfb0c3ec790e67f6c29372ea5b09306f61f3"
+        }
+      ]
+    },
+    {
+      "name": "libxml2",
+      "version": "2.15.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.gnome.org/GNOME/libxml2/-/wikis/home",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxml2/Copyright",
+          "sha256": "5d4873884a890122a4b9b20ad56ac6f7da1d796a5bfcf04a427970ac96217626"
+        }
+      ]
+    },
+    {
+      "name": "libxrandr",
+      "version": "1.5.5-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xorg.freedesktop.org/",
+      "license_expression": "HPND-sell-variant",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxrandr/COPYING",
+          "sha256": "73777e5be1cef2827d843e4b186803f050c66db472cf8076d88e2b5f71696e67"
+        }
+      ]
+    },
+    {
+      "name": "libxrender",
+      "version": "0.9.12-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xorg.freedesktop.org/",
+      "license_expression": "HPND-sell-variant",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxrender/COPYING",
+          "sha256": "bbe1db89c48816c48248796adac91defd8fbde1141b145f01511781ab87f29a1"
+        }
+      ]
+    },
+    {
+      "name": "libxslt",
+      "version": "1.1.45-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.gnome.org/GNOME/libxslt/-/wikis/home",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxslt/Copyright",
+          "sha256": "7e48e290b6bfccc2ec1b297023a1d77f2fd87417f71fbb9f50aabef40a851819"
+        }
+      ]
+    },
+    {
+      "name": "libyuv",
+      "version": "r2921+644251f25-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://chromium.googlesource.com/libyuv/libyuv/",
+      "license_expression": "custom",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libyuv/LICENSE",
+          "sha256": "2b2cc1180c7e6988328ad2033b04b80117419db9c4c584918bbb3cfec7e9364f"
+        }
+      ]
+    },
+    {
+      "name": "lz4",
+      "version": "1:1.10.0-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://lz4.github.io/lz4/",
+      "license_expression": "GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "lzo",
+      "version": "2.10-5",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.oberhumer.com/opensource/lzo",
+      "license_expression": "GPL",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "mesa",
+      "version": "1:26.2.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.mesa3d.org/",
+      "license_expression": "MIT AND BSD-3-Clause AND SGI-B-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/mesa/license.rst",
+          "sha256": "0d1a0472ecc81830e75c20d59b0ea02841e3db21255e0ebad97ab682c54d6615"
+        }
+      ]
+    },
+    {
+      "name": "mpg123",
+      "version": "1.33.7-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://mpg123.de/",
+      "license_expression": "LGPL-2.1-only",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-only.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "nettle",
+      "version": "4.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.lysator.liu.se/~nisse/nettle",
+      "license_expression": "LGPL-3.0-or-later OR GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-3.0-or-later.txt",
+          "sha256": "996af0513df21f7496288951c41428a03c174e9e4a9d63665c57d670f845ccb1"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "ocl-icd",
+      "version": "2.3.5-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/OCL-dev/ocl-icd",
+      "license_expression": "BSD-2-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/ocl-icd/COPYING",
+          "sha256": "6b10d78a1971cf0a97feb5140f0821cbe53cfd06771852eef7dc3bd7f771251e"
+        }
+      ]
+    },
+    {
+      "name": "opencore-amr",
+      "version": "0.1.6-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://sourceforge.net/projects/opencore-amr/",
+      "license_expression": "Apache",
+      "license_files": []
+    },
+    {
+      "name": "openjpeg2",
+      "version": "2.5.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/uclouvain/openjpeg",
+      "license_expression": "BSD-2-Clause  MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/openjpeg2/LICENSE",
+          "sha256": "a6af136f3e15038a666b61f376612a07d9a4e48cb7c01adbf3e33b3f14ab49b6"
+        }
+      ]
+    },
+    {
+      "name": "openssl",
+      "version": "3.6.5-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.openssl.org",
+      "license_expression": "Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/openssl/LICENSE.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+        },
+        {
+          "path": "legal/third-party/common/Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        }
+      ]
+    },
+    {
+      "name": "opus",
+      "version": "1.6.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.opus-codec.org/",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/opus/COPYING",
+          "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+        }
+      ]
+    },
+    {
+      "name": "orc",
+      "version": "0.4.44-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gstreamer.freedesktop.org/modules/orc.html",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/orc/COPYING",
+          "sha256": "4f5dabb1b44bb6fc5cd53820b1f103147ad61b395a57903991325bd1b85d97bf"
+        }
+      ]
+    },
+    {
+      "name": "pango",
+      "version": "1:1.58.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.pango.org/",
+      "license_expression": "LGPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.0-or-later.txt",
+          "sha256": "86dc99d7e5060915ab1dfc1378b7dd351c62088bfa74067e8aa1868c6fdba7d8"
+        }
+      ]
+    },
+    {
+      "name": "pcre2",
+      "version": "10.49-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/PCRE2Project/pcre2",
+      "license_expression": "BSD-2-Clause  BSD-3-Clause WITH PCRE2-exception",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/pcre2/BSD-2-Clause.txt",
+          "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+        },
+        {
+          "path": "legal/third-party/system/pcre2/BSD-3-Clause.txt",
+          "sha256": "91f6f2043c607e9db392ca6b4fafd56825a2d5ca741cb3a56d8f817d8d9a9753"
+        },
+        {
+          "path": "legal/third-party/system/pcre2/PCRE2-exception.txt",
+          "sha256": "0f4dc0103aae07a56554857b155898caad2f52ad81d095853b7ea2ee806fcc46"
+        }
+      ]
+    },
+    {
+      "name": "pixman",
+      "version": "0.46.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.freedesktop.org/pixman/pixman",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/pixman/COPYING",
+          "sha256": "fac9270f0987b96ff4533fca3548c633e02083cbba4a0172a3b149b2e4019793"
+        }
+      ]
+    },
+    {
+      "name": "rav1e",
+      "version": "0.8.1-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/xiph/rav1e/",
+      "license_expression": "BSD-2-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/rav1e/LICENSE",
+          "sha256": "2dd0a109751e939dec3f80ddcfbc1ba91553f18c574399e85c159632182a2c0a"
+        },
+        {
+          "path": "legal/third-party/system/rav1e/PATENTS",
+          "sha256": "7b14a70c194b19dbd0625e7eac839a63200f67484521ce5e8d8244b127e8907a"
+        }
+      ]
+    },
+    {
+      "name": "snappy",
+      "version": "1.2.2-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/google/snappy",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/snappy/COPYING",
+          "sha256": "55172044f7e241207117448a4d9d6ba1d0925c8ad66b5d4c08c70adfa9cc3de6"
+        }
+      ]
+    },
+    {
+      "name": "speex",
+      "version": "1.2.1-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.speex.org/",
+      "license_expression": "BSD",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/speex/COPYING",
+          "sha256": "2654a4264b2bfe298dedc508748d140111840c315cc8eb646a3a68c13fa75b01"
+        }
+      ]
+    },
+    {
+      "name": "sqlite",
+      "version": "3.53.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.sqlite.org/",
+      "license_expression": "LicenseRef-Sqlite",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/sqlite/license.txt",
+          "sha256": "4e57d9ac979f1c9872e69799c2597eeef4c6ce7224f3ede0bf9dc8d217b1e65d"
+        }
+      ]
+    },
+    {
+      "name": "svt-av1",
+      "version": "4.2.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.com/AOMediaCodec/SVT-AV1",
+      "license_expression": "BSD-3-Clause  LicenseRef-AOMPL-1.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/svt-av1/LICENSE.md",
+          "sha256": "0acc2fcb27472bdc9aaf8b71f37055bbdac4f54671b7d922f241bd7fcd0dd3e6"
+        },
+        {
+          "path": "legal/third-party/system/svt-av1/PATENTS.md",
+          "sha256": "20678ab10402659106dc4c147c97b2a6e94b5c0695415e15a8f195ebc3547922"
+        }
+      ]
+    },
+    {
+      "name": "systemd-libs",
+      "version": "262-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.github.com/systemd/systemd",
+      "license_expression": "LGPL-2.1-or-later  CC0-1.0  GPL-2.0-or-later WITH Linux-syscall-note",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        },
+        {
+          "path": "legal/third-party/common/CC0-1.0.txt",
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "tinysparql",
+      "version": "3.12.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://tinysparql.org/",
+      "license_expression": "GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "tpm2-tss",
+      "version": "4.2.0-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/tpm2-software/tpm2-tss",
+      "license_expression": "BSD-2-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/tpm2-tss/LICENSE",
+          "sha256": "18c1bf4b1ba1fb2c4ffa7398c234d83c0d55475298e470ae1e5e3a8a8bd2e448"
+        }
+      ]
+    },
+    {
+      "name": "util-linux-libs",
+      "version": "2.42.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/util-linux/util-linux",
+      "license_expression": "BSD-2-Clause  BSD-3-Clause  BSD-4-Clause-UC  GPL-2.0-only  GPL-2.0-or-later  GPL-3.0-or-later  ISC  LGPL-2.1-or-later  LicenseRef-PublicDomain",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/util-linux-libs/COPYING.BSD-2-Clause",
+          "sha256": "527f738966ca396cd5a68c1509390de2a780c6b614d9ee57f7544a6161938ed1"
+        },
+        {
+          "path": "legal/third-party/system/util-linux-libs/COPYING.BSD-3-Clause",
+          "sha256": "9b718a9460fed5952466421235bc79eb49d4e9eacc920d7a9dd6285ab8fd6c6d"
+        },
+        {
+          "path": "legal/third-party/system/util-linux-libs/COPYING.BSD-4-Clause-UC",
+          "sha256": "ba7640f00d93e72e92b94b9d71f25ec53bac2f1682f5c4adcccb0018359f60f8"
+        },
+        {
+          "path": "legal/third-party/system/util-linux-libs/COPYING.ISC",
+          "sha256": "e53348ce276358e9997014071c5294b36a18c4b34f32f00ee57b9acce0aafd63"
+        },
+        {
+          "path": "legal/third-party/system/util-linux-libs/util-linux-BSD-2-Clause.txt",
+          "sha256": "6ffedbc0f7878612d2b23589f1ff2ab15633e1df7963a5d9fc750ec5500c7e7a"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/GPL-3.0-or-later.txt",
+          "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "vulkan-icd-loader",
+      "version": "1.4.363.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.vulkan.org/",
+      "license_expression": "Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        }
+      ]
+    },
+    {
+      "name": "wayland",
+      "version": "1.26.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://wayland.freedesktop.org/",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/wayland/COPYING",
+          "sha256": "6eefcb023622a463168a5c20add95fd24a38c7482622a9254a23b99b7c153061"
+        }
+      ]
+    },
+    {
+      "name": "x264",
+      "version": "3:0.165.r3222.b35605a-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.videolan.org/developers/x264.html",
+      "license_expression": "GPL-2.0-only",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "x265",
+      "version": "4.3-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.x265.org/",
+      "license_expression": "GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "xvidcore",
+      "version": "1.3.7-4",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.xvid.com/",
+      "license_expression": "GPL-2.0-only",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    },
+    {
+      "name": "xz",
+      "version": "5.8.4-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://tukaani.org/xz/",
+      "license_expression": "GPL-2.0-or-later AND 0BSD AND LicenseRef-Public-Domain AND LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "zlib",
+      "version": "1:1.3.2-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.zlib.net/",
+      "license_expression": "Zlib",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/zlib/LICENSE",
+          "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+        }
+      ]
+    },
+    {
+      "name": "zstd",
+      "version": "1.5.7-3",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://facebook.github.io/zstd/",
+      "license_expression": "BSD-3-Clause  GPL-2.0-only",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/zstd/LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        }
+      ]
+    }
+  ],
+  "prefix_license_files": [
+    {
+      "path": "legal/third-party/prefix/jadx/LICENSE",
+      "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+    },
+    {
+      "path": "legal/third-party/prefix/jadx/NOTICE",
+      "sha256": "3f34304fa0b9da79fae989cca556d22bd3d08786d6ba171f529a00bfc880e365"
+    },
+    {
+      "path": "legal/third-party/prefix/vulkan-headers/MIT.txt",
+      "sha256": "1ca3502222d967f3be5751c55f6b7ee735b5383909c3b501495f54b216dbf227"
+    },
+    {
+      "path": "legal/third-party/prefix/webkitgtk-6.0/LICENSE",
+      "sha256": "5c153df881ea63e0498143991d43c1e1e0118850111a59a1aed9b616af015d8e"
+    },
+    {
+      "path": "legal/third-party/prefix/woff2/LICENSE",
+      "sha256": "d42a3e363d99da22b860ab760faa37dfa9781d74c9f3ed634d05109081616513"
+    },
+    {
+      "path": "legal/third-party/prefix/xorg-xwininfo/COPYING",
+      "sha256": "1be1f0763a5efd08e48089c52728a822bf769b690a2fd82fbab456cfffee822f"
+    },
+    {
+      "path": "legal/third-party/prefix/zip/LICENSE",
+      "sha256": "8ecd6c1bab449127eb665cef1561e73a8bce52e217375f6f466939e137b1e110"
+    }
+  ],
+  "remaining_review": [
+    "libopensles-standalone: source-header notices collected; review per-file terms and required full license texts",
+    "Owned runtime is not running; live optional-library observation was skipped without starting the game.",
+    "System e2fsprogs: legacy declaration GPL; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.",
+    "System libidn2: legacy declaration GPL2; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.",
+    "System libidn2: legacy declaration LGPL3; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.",
+    "System lzo: legacy declaration GPL; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.",
+    "System opencore-amr: license text not collected automatically",
+    "Project default is GPL-3.0-or-later; preserve every explicit existing file-level and upstream license (see LICENSE_POLICY.md).",
+    "Review license compatibility and source headers, including mixed-license upstream subcomponents.",
+    "Create corresponding source archives for each distributed binary, with CLBB patches and build instructions; links alone are not the completed source-delivery plan.",
+    "Define final installer payload and audit optional plugins/fonts/codecs and private-prefix package versions; live mapped libraries are not a complete dependency closure.",
+    "Game APK/resources are proprietary and excluded. This inventory grants no MOONTON redistribution or service permission."
+  ]
+}

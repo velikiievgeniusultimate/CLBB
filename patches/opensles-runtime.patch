@@ -1,0 +1,36 @@
+diff --git a/libopensles/SDL.c b/libopensles/SDL.c
+index 909be37..da9a877 100644
+--- a/libopensles/SDL.c
++++ b/libopensles/SDL.c
+@@ -18,16 +18,22 @@
+ 
+ #include "sles_allinclusive.h"
+ #include <SDL.h>
++#include <dlfcn.h>
++#include <stdatomic.h>
++typedef float (*ClbbMasterGain)(void);
++static _Atomic(ClbbMasterGain) clbb_master_gain;
+ 
+ /** \brief Copy PCM data into the SDL stream, applying the player's gains */
+ 
+ static void SDL_mix(const short *source, short *destination, SLuint32 size,
+     SLuint32 channels, const float *gains)
+ {
++    ClbbMasterGain master_gain = atomic_load_explicit(&clbb_master_gain, memory_order_relaxed);
++    const float master = master_gain ? master_gain() : 1.0f;
+     for (SLuint32 i = 0; i < size / sizeof(short); ++i) {
+         SLuint32 channel = i % channels;
+         float gain = channel < STEREO_CHANNELS ? gains[channel] : 1.0f;
+-        destination[i] = source[i] * gain;
++        destination[i] = source[i] * gain * master;
+     }
+ }
+ 
+@@ -142,6 +148,7 @@ static void SDLCALL SDL_callback(void *context, Uint8 *stream, int len)
+ 
+ SLresult SDL_open(CAudioPlayer *audioPlayer)
+ {
++    atomic_store_explicit(&clbb_master_gain,(ClbbMasterGain)dlsym(RTLD_DEFAULT,"clbb_master_gain"),memory_order_relaxed);
+     if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+         SL_LOGE("Unable to initialize SDL audio: %s", SDL_GetError());
+         return SL_RESULT_RESOURCE_ERROR;

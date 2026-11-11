@@ -1,0 +1,307 @@
+diff --git a/art/runtime/Android.mk b/art/runtime/Android.mk
+index 9b13aaa8..bfc6972d 100644
+--- a/art/runtime/Android.mk
++++ b/art/runtime/Android.mk
+@@ -208,6 +208,7 @@ libart_defaults_LDLIBS   =  \
+         -ldl_bio \
+         -llz4
+ libart_defaults_SHARED_LIBS =  \
++        libziparchive \
+         libartpalette \
+         libnativebridge \
+         libbacktrace \
+@@ -652,4 +653,3 @@ LOCAL_SHARED_LIBRARIES =  \
+ LOCAL_C_INCLUDES = $(ART_C_INCLUDES)
+ LOCAL_CPP_EXTENSION = .cc
+ include $(BUILD_HOST_STATIC_LIBRARY)
+-
+diff --git a/art/runtime/arch/x86_64/entrypoints_init_x86_64.cc b/art/runtime/arch/x86_64/entrypoints_init_x86_64.cc
+index 51b1d4e3..aa43898d 100644
+--- a/art/runtime/arch/x86_64/entrypoints_init_x86_64.cc
++++ b/art/runtime/arch/x86_64/entrypoints_init_x86_64.cc
+@@ -16,6 +16,13 @@
+  
+ #include <math.h>
+ 
++/* CLBB: keep the baseline x86_64 libm ABI when building on newer glibc.
++ * These changes retain the existing license of this file. */
++#if defined(__linux__) && defined(__x86_64__) && defined(__GLIBC__)
++__asm__(".symver cosh,cosh@GLIBC_2.2.5\n.symver sinh,sinh@GLIBC_2.2.5");
++#endif
++
++
+ #include <math.h>
+ 
+ #include "entrypoints/jni/jni_entrypoints.h"
+diff --git a/art/runtime/jni/java_vm_ext.cc b/art/runtime/jni/java_vm_ext.cc
+index 4d3ca300..70c97c60 100644
+--- a/art/runtime/jni/java_vm_ext.cc
++++ b/art/runtime/jni/java_vm_ext.cc
+@@ -1006,8 +1006,13 @@ bool JavaVMExt::LoadNativeLibrary(JNIEnv* env,
+   }
+ 
+   if (handle == nullptr) {
+-    *error_msg = bionic_dlerror();
+-    VLOG(jni) << "bionic_dlopen(\"" << path << "\", RTLD_NOW) failed: " << *error_msg;
++    // NativeBridge maintains its own loader error, separate from bionic_dlerror.
++    const char* loader_error = needs_native_bridge
++        ? android::NativeBridgeGetError()
++        : bionic_dlerror();
++    *error_msg = loader_error != nullptr ? loader_error : "dlopen failed without an error message";
++    VLOG(jni) << (needs_native_bridge ? "NativeBridgeLoadLibrary" : "bionic_dlopen")
++              << "(\"" << path << "\", RTLD_NOW) failed: " << *error_msg;
+     return false;
+   }
+ 
+diff --git a/art/runtime/oat_file_assistant.cc b/art/runtime/oat_file_assistant.cc
+index 8645ef12..6544171f 100644
+--- a/art/runtime/oat_file_assistant.cc
++++ b/art/runtime/oat_file_assistant.cc
+@@ -44,6 +44,7 @@
+ #include "runtime.h"
+ #include "scoped_thread_state_change-inl.h"
+ #include "vdex_file.h"
++#include "ziparchive/zip_archive.h"
+ 
+ namespace art {
+ 
+@@ -204,10 +205,48 @@ bool OatFileAssistant::IsUpToDate() {
+   return GetBestInfo().Status() == kOatUpToDate;
+ }
+ 
++// A resource-only split remains in the class/resource path, but cannot produce
++// compiled code. HasOriginalDexFiles() also returns false on ZIP errors, so it
++// cannot distinguish this case. Use the existing ZIP reader conservatively:
++// only a successfully opened, fully iterated archive can skip dex2oat. Any root
++// classes*.dex (including malformed/non-sequential multidex) keeps the normal
++// compiler/error path. Do not cache by pathname: an APK can be replaced.
++static bool IsResourceOnlyArchive(const char* filename, int zip_fd) {
++  ZipArchiveHandle archive = nullptr;
++  int32_t result = zip_fd >= 0
++      ? OpenArchiveFd(zip_fd, filename, &archive, /*assume_ownership=*/ false)
++      : OpenArchive(filename, &archive);
++  if (result != 0) {
++    CloseArchive(archive);
++    return false;
++  }
++  void* cookie = nullptr;
++  result = StartIteration(archive, &cookie);
++  if (result != 0) {
++    CloseArchive(archive);
++    return false;
++  }
++  ZipEntry64 entry;
++  std::string_view name;
++  bool resource_only = true;
++  while ((result = Next(cookie, &entry, &name)) == 0) {
++    if (name.find('/') == std::string_view::npos &&
++        name.substr(0, 7) == "classes" &&
++        name.size() >= 11 && name.substr(name.size() - 4) == ".dex") {
++      resource_only = false;
++      break;
++    }
++  }
++  // Next returns -1 only at the normal end of iteration. All other errors
++  // preserve the existing compiler diagnostics instead of claiming "no dex".
++  resource_only = resource_only && result == -1;
++  EndIteration(cookie);
++  CloseArchive(archive);
++  return resource_only;
++}
++
+ std::unique_ptr<OatFile> OatFileAssistant::GetBestOatFile() {
+-  // framework-res.apk contains no dex files.
+-  bool is_framework_res = dex_location_.compare(dex_location_.size() - (sizeof("framework-res.apk")-1), sizeof("framework-res.apk")-1, "framework-res.apk") == 0;
+-  if (!IsUpToDate() && !is_framework_res) {
++  if (!IsUpToDate() && !IsResourceOnlyArchive(dex_location_.c_str(), zip_fd_)) {
+     // Compile the dex file.
+     std::vector<std::string> arg_vector;
+ 
+diff --git a/art/runtime/thread.cc b/art/runtime/thread.cc
+index b0b29bc6..b74eda89 100644
+--- a/art/runtime/thread.cc
++++ b/art/runtime/thread.cc
+@@ -22,6 +22,7 @@
+ #include <signal.h>
+ #include <sys/resource.h>
+ #include <sys/time.h>
++#include <time.h>
+ 
+ #if __has_feature(hwaddress_sanitizer)
+ #include <sanitizer/hwasan_interface.h>
+@@ -56,6 +57,7 @@
+ #include "base/to_str.h"
+ #include "base/utils.h"
+ #include "class_linker-inl.h"
++#include "clbb_boot_park_trace.h"
+ #include "class_root.h"
+ #include "debugger.h"
+ #include "dex/descriptors_names.h"
+@@ -295,6 +297,89 @@ enum {
+   kNoPermitWaiterWaiting = 2
+ };
+ 
++namespace {
++
++static uint64_t ClbbBootParkMonotonicNs() {
++  timespec now;
++  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
++    return 0;
++  }
++  return static_cast<uint64_t>(now.tv_sec) * UINT64_C(1000000000) + now.tv_nsec;
++}
++
++static uint32_t ClbbBootParkTraceStart(Thread* self, bool is_absolute, int64_t time)
++    REQUIRES_SHARED(Locks::mutator_lock_) {
++  // Cached once, strict opt-in. Default OFF avoids clock/name/stack work.
++  static const bool enabled = clbb_boot_park_trace::Enabled(getenv("CLBB_BOOT_PARK_TRACE"));
++  if (!enabled) {
++    return 0;
++  }
++  const int saved_errno = errno;
++  int64_t realtime_ms = -1;
++  if (is_absolute) {
++    timespec now;
++    if (clock_gettime(CLOCK_REALTIME, &now) == 0) {
++      realtime_ms = static_cast<int64_t>(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
++    }
++  }
++  if (!clbb_boot_park_trace::LongRequest(is_absolute, time, realtime_ms)) {
++    errno = saved_errno;
++    return 0;
++  }
++  // Use the same OS thread name as GDB. A Unity pthread may have changed its
++  // native name after JNI attachment without changing ART's managed name.
++  char name[16] = {};
++#if defined(__linux__)
++  if (pthread_getname_np(pthread_self(), name, sizeof(name)) != 0 ||
++      !clbb_boot_park_trace::TargetThread(name)) {
++#else
++  std::string managed_name;
++  self->GetThreadName(managed_name);
++  if (!clbb_boot_park_trace::TargetThread(managed_name.c_str())) {
++#endif
++    errno = saved_errno;
++    return 0;
++  }
++  static std::atomic<uint32_t> count{0};
++  const uint32_t sequence = clbb_boot_park_trace::Reserve(count);
++  if (sequence != 0) {
++    // Current thread is still Runnable with the shared mutator lock here.
++    // Existing DumpJavaStack saves/restores a pending Java exception. Disabling
++    // lock dumping avoids verifier/object rendering and prints method names,
++    // source locations only; no argument values or object contents are read.
++    std::ostringstream stack;
++    self->DumpJavaStack(stack, /* check_suspended= */ false, /* dump_locks= */ false);
++    LOG(INFO) << "[CLBB BOOT PARK] phase=enter sequence=" << sequence
++              << " tid=" << self->GetTid()
++              << " requested_time=" << time
++              << " is_absolute=" << is_absolute
++              << " time_unit=" << (is_absolute ? "epoch_ms" : "relative_ns")
++              << " monotonic_ns=" << ClbbBootParkMonotonicNs()
++              << "\n" << stack.str();
++  }
++  errno = saved_errno;
++  return sequence;
++}
++
++static void ClbbBootParkTraceFinish(Thread* self,
++                                    uint32_t sequence,
++                                    uint64_t start_ns,
++                                    bool timed_out) {
++  if (sequence == 0) {
++    return;
++  }
++  const int saved_errno = errno;
++  const uint64_t finish_ns = ClbbBootParkMonotonicNs();
++  LOG(INFO) << "[CLBB BOOT PARK] phase=exit sequence=" << sequence
++            << " tid=" << self->GetTid()
++            << " monotonic_ns=" << finish_ns
++            << " park_duration_ns=" << (finish_ns >= start_ns ? finish_ns - start_ns : 0)
++            << " timed_out=" << timed_out;
++  errno = saved_errno;
++}
++
++}  // namespace
++
+ void Thread::Park(bool is_absolute, int64_t time) {
+   DCHECK(this == Thread::Current());
+ #if ART_USE_FUTEXES
+@@ -305,6 +390,8 @@ void Thread::Park(bool is_absolute, int64_t time) {
+   int old_state = tls32_.park_state_.fetch_add(1, std::memory_order_relaxed);
+   if (old_state == kNoPermit) {
+     // no permit was available. block thread until later.
++    const uint32_t clbb_trace = ClbbBootParkTraceStart(this, is_absolute, time);
++    const uint64_t clbb_park_start_ns = clbb_trace != 0 ? ClbbBootParkMonotonicNs() : 0;
+     Runtime::Current()->GetRuntimeCallbacks()->ThreadParkStart(is_absolute, time);
+     bool timed_out = false;
+     if (!is_absolute && time == 0) {
+@@ -379,6 +466,7 @@ void Thread::Park(bool is_absolute, int64_t time) {
+     tls32_.park_state_.store(kNoPermit, std::memory_order_relaxed);
+     // TODO: Call to signal jvmti here
+     Runtime::Current()->GetRuntimeCallbacks()->ThreadParkFinished(timed_out);
++    ClbbBootParkTraceFinish(this, clbb_trace, clbb_park_start_ns, timed_out);
+   } else {
+     // the fetch_add has consumed the permit. immediately return.
+     DCHECK_EQ(old_state, kPermitAvailable);
+diff --git a/libcore/ojluni/src/main/native/Math.c b/libcore/ojluni/src/main/native/Math.c
+index 3191ade9..22d793eb 100644
+--- a/libcore/ojluni/src/main/native/Math.c
++++ b/libcore/ojluni/src/main/native/Math.c
+@@ -25,6 +25,13 @@
+ #include <stdlib.h>
+ #include <math.h>
+ 
++/* CLBB: keep the baseline x86_64 libm ABI when building on newer glibc.
++ * These changes retain the existing license of this file. */
++#if defined(__linux__) && defined(__x86_64__) && defined(__GLIBC__)
++__asm__(".symver cosh,cosh@GLIBC_2.2.5\n.symver sinh,sinh@GLIBC_2.2.5");
++#endif
++
++
+ JNIEXPORT jdouble JNICALL
+ Math_cos(JNIEnv *env, jclass unused, jdouble d) {
+     return cos(d);
+diff --git a/art/runtime/clbb_boot_park_trace.h b/art/runtime/clbb_boot_park_trace.h
+new file mode 100644
+index 00000000..49396312
+--- /dev/null
++++ b/art/runtime/clbb_boot_park_trace.h
+@@ -0,0 +1,37 @@
++#ifndef ART_RUNTIME_CLBB_BOOT_PARK_TRACE_H_
++#define ART_RUNTIME_CLBB_BOOT_PARK_TRACE_H_
++
++#include <atomic>
++#include <cstdint>
++#include <cstring>
++
++namespace art {
++namespace clbb_boot_park_trace {
++// Diagnostic policy only; no ART objects, JNI calls, locks or wait operations.
++inline bool Enabled(const char* value) {
++  return value != nullptr && std::strcmp(value, "1") == 0;
++}
++inline bool LongRequest(bool is_absolute, int64_t time, int64_t realtime_ms) {
++  if (!is_absolute) {
++    return time == 0 || time >= INT64_C(1000000000);
++  }
++  // Absolute park time uses epoch milliseconds, not relative nanoseconds.
++  return realtime_ms >= 0 && time > realtime_ms && time - realtime_ms >= 1000;
++}
++inline bool TargetThread(const char* name) {
++  return name != nullptr && std::strcmp(name, "UnityMain") == 0;
++}
++inline uint32_t Reserve(std::atomic<uint32_t>& count) {
++  uint32_t current = count.load(std::memory_order_relaxed);
++  while (current < 8) {
++    if (count.compare_exchange_weak(current, current + 1,
++                                   std::memory_order_relaxed,
++                                   std::memory_order_relaxed)) {
++      return current + 1;
++    }
++  }
++  return 0;
++}
++}  // namespace clbb_boot_park_trace
++}  // namespace art
++#endif  // ART_RUNTIME_CLBB_BOOT_PARK_TRACE_H_

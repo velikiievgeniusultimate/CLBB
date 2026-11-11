@@ -1,0 +1,1227 @@
+CLBB — УПОМИНАНИЯ СТОРОННИХ КОМПОНЕНТОВ / THIRD-PARTY NOTICES
+Черновой реестр: это не завершённая проверка готовности к публикации.
+Исходные тексты лицензий и уведомлений сохранены в legal/third-party/.
+Оригинальные лицензии не заменяются нашей лицензией. APK и данные аккаунтов не включены.
+
+DRAFT INVENTORY
+Original copyright, license, NOTICE and AUTHORS texts are retained in legal/third-party/.
+This file does not relicense upstream code and is not a completed release audit.
+No game APK, account information, cookies or gameplay recordings are included.
+
+art_standalone
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://gitlab.com/android_translation_layer/art_standalone.git
+Revision / Ревизия: 7ead96be8423b3789457b920336149f3f35a61d0
+License/notice text / Текст: legal/third-party/source/art_standalone/adb/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/art/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/art/dt_fd_forward/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/art/openjdkjvm/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/art/openjdkjvmti/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/dalvik/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/dalvik/dexdump/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/dalvik/dx/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/apache-http/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/apache-xml/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/bouncycastle/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/fdlibm/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/hamcrest/LICENSE.txt
+License/notice text / Текст: legal/third-party/source/art_standalone/external/hamcrest/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/icu/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/junit/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/libunwind/AUTHORS
+License/notice text / Текст: legal/third-party/source/art_standalone/external/libunwind/COPYING
+License/notice text / Текст: legal/third-party/source/art_standalone/external/libunwind/LICENSE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/libunwind/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/external/okhttp/LICENSE.txt
+License/notice text / Текст: legal/third-party/source/art_standalone/external/okhttp/okio/LICENSE.txt
+License/notice text / Текст: legal/third-party/source/art_standalone/external/safe-iop/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/libandroidfw/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/libbase/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/libcore/LICENSE
+License/notice text / Текст: legal/third-party/source/art_standalone/libcore/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/libcore/luni/license.html
+License/notice text / Текст: legal/third-party/source/art_standalone/libcore/ojluni/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/libnativehelper/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/prebuilts/misc/common/jarjar/LICENSE.txt
+License/notice text / Текст: legal/third-party/source/art_standalone/system/core/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/system/core/libcutils/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/system/core/liblog/NOTICE
+License/notice text / Текст: legal/third-party/source/art_standalone/system/core/libutils/NOTICE
+
+atl
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://gitlab.com/android_translation_layer/android_translation_layer.git
+Revision / Ревизия: bbb4d469405cdaea585475b17daef13202bc7e23
+License/notice text / Текст: legal/third-party/source/atl/LICENSE.txt
+License/notice text / Текст: legal/third-party/source/atl/res/framework-res/NOTICE
+
+bionic_translation
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://gitlab.com/android_translation_layer/bionic_translation.git
+Revision / Ревизия: 6253dec7f24a57a94039a088cb436d880e92e3be
+License/notice text / Текст: legal/third-party/source/bionic_translation/linker/NOTICE
+
+libglvnd
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://github.com/NVIDIA/libglvnd.git
+Revision / Ревизия: faa23f21fc677af5792825dc30cb1ccef4bf33a6
+License/notice text / Текст: legal/third-party/source/libglvnd/src/util/cJSON/LICENSE
+License/notice text / Текст: legal/third-party/source/libglvnd/src/util/uthash/LICENSE
+
+libopensles-standalone
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://gitlab.com/android_translation_layer/libopensles-standalone.git
+Revision / Ревизия: c6982620c7dadeb90220b23c575b25eeffda765f
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/include/SLES/OpenSLES.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/include/SLES/OpenSLES_Android.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/include/SLES/OpenSLES_AndroidConfiguration.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/include/SLES/OpenSLES_Platform.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/C3DGroup.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/CAudioPlayer.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/CAudioRecorder.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/CEngine.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/COutputMix.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/I3DCommit.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/I3DDoppler.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/I3DGrouping.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/I3DLocation.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/I3DMacroscopic.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/I3DSource.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IAndroidConfiguration.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IAndroidEffect.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IAndroidEffectCapabilities.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IAndroidEffectSend.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IAudioDecoderCapabilities.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IAudioEncoder.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IAudioEncoderCapabilities.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IAudioIODeviceCapabilities.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IBassBoost.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IBufferQueue.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IDeviceVolume.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IDynamicInterfaceManagement.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IDynamicSource.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IEffectSend.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IEngine.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IEngineCapabilities.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IEnvironmentalReverb.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IEqualizer.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IID_to_MPH.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/ILEDArray.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IMIDIMessage.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IMIDIMuteSolo.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IMIDITempo.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IMIDITime.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IMetadataExtraction.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IMetadataTraversal.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IMuteSolo.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IObject.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IOutputMix.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IOutputMixExt.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IPitch.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IPlay.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IPlaybackRate.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IPrefetchStatus.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IPresetReverb.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IRatePitch.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IRecord.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/ISeek.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IThreadSync.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IVibra.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IVirtualizer.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IVisualization.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/IVolume.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/MPH.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/MPH_to.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/MPH_to.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/OpenSLESUT.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/OpenSLESUT.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/OpenSLES_IID.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/OutputMixExt.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/SDL.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/SLSndFile.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/SndFile.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/ThreadPool.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/ThreadPool.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_AudioPlayer.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_AudioPlayer.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_AudioRecorder.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_AudioRecorder.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_Effect.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_Effect.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_OutputMix.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_OutputMix.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_SfPlayer.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_SfPlayer.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_prompts.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/android_sles_conversions.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/classes.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/devices.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/devices.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/locks.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/locks.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/platform.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/sles.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/sles_allinclusive.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/sllog.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/sllog.h.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/sync.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/libopensles/trace.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/automated/BufferQueue_test.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestBassBoostPath.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestEffectCapabilities.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestEqFdPath.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestEqOutputPath.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestFeedback.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestPlayFdPath.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestRecBuffQueue.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestSawtoothBufferQueue.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestSendToPresetReverb.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/examples/slesTestVirtualizerPath.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/listening/seekTorture.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/listening/slesTest_playMuteSolo.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestLoopUri.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestPlayStreamType.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestPlayUri.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestPlayUri2.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTestSlowDownUri.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/mimeUri/slesTest_playStates.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/mimeUri_test.cpp.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/sandbox/configbq.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/sandbox/engine.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/sandbox/intbufq.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/sandbox/multiplay.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/sandbox/object.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tests/sandbox/reverb.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tools/hashgen/frag1.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tools/hashgen/part1.c.txt
+License/notice text / Текст: legal/third-party/source/libopensles-standalone/headers/tools/permute/permute.c.txt
+
+nb-qemu
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://gitlab.com/android_translation_layer/qemu-based-native-bridge/nb-qemu.git
+Revision / Ревизия: 973514eccba7271df890ec7e1910a53725bf4ff5
+License/notice text / Текст: legal/third-party/source/nb-qemu/libnb-qemu-guest/bionic/jemalloc/COPYING
+License/notice text / Текст: legal/third-party/source/nb-qemu/libnb-qemu-guest/bionic/jemalloc/NOTICE
+License/notice text / Текст: legal/third-party/source/nb-qemu/libnb-qemu-guest/bionic/libc/NOTICE
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/COPYING
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/COPYING.LIB
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/LICENSE
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/disas/libvixl/LICENCE
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/docs/system/license.rst
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/linux-headers/COPYING
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/tests/fp/berkeley-softfloat-3/COPYING.txt
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/tests/fp/berkeley-testfloat-3/COPYING.txt
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/tests/uefi-test-tools/LICENSE
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/ui/keycodemapdb/LICENSE.BSD
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/ui/keycodemapdb/LICENSE.GPL2
+License/notice text / Текст: legal/third-party/source/nb-qemu/qemu/ui/keycodemapdb/thirdparty/LICENSE-argparse.txt
+
+nb-qemu-bionic
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://gitlab.com/android_translation_layer/qemu-based-native-bridge/nb-qemu-bionic.git
+Revision / Ревизия: 03d71fef83fa9746e15e4c8b386114a22b2c215f
+License/notice text / Текст: legal/third-party/source/nb-qemu-bionic/jemalloc/COPYING
+License/notice text / Текст: legal/third-party/source/nb-qemu-bionic/jemalloc/NOTICE
+License/notice text / Текст: legal/third-party/source/nb-qemu-bionic/libc/NOTICE
+
+qemu
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://gitlab.com/android_translation_layer/qemu-based-native-bridge/qemu.git
+Revision / Ревизия: a590cb154d1703b80265a75df4fca4d51b0dc0ba
+License/notice text / Текст: legal/third-party/source/qemu/COPYING
+License/notice text / Текст: legal/third-party/source/qemu/COPYING.LIB
+License/notice text / Текст: legal/third-party/source/qemu/LICENSE
+License/notice text / Текст: legal/third-party/source/qemu/disas/libvixl/LICENCE
+License/notice text / Текст: legal/third-party/source/qemu/docs/system/license.rst
+License/notice text / Текст: legal/third-party/source/qemu/linux-headers/COPYING
+License/notice text / Текст: legal/third-party/source/qemu/tests/fp/berkeley-softfloat-3/COPYING.txt
+License/notice text / Текст: legal/third-party/source/qemu/tests/fp/berkeley-testfloat-3/COPYING.txt
+License/notice text / Текст: legal/third-party/source/qemu/tests/uefi-test-tools/LICENSE
+License/notice text / Текст: legal/third-party/source/qemu/ui/keycodemapdb/LICENSE.BSD
+License/notice text / Текст: legal/third-party/source/qemu/ui/keycodemapdb/LICENSE.GPL2
+License/notice text / Текст: legal/third-party/source/qemu/ui/keycodemapdb/thirdparty/LICENSE-argparse.txt
+
+wolfssl
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://github.com/wolfSSL/wolfssl.git
+Revision / Ревизия: decea12e223869c8f8f3ab5a53dc90b69f436eb2
+License/notice text / Текст: legal/third-party/source/wolfssl/AUTHORS
+License/notice text / Текст: legal/third-party/source/wolfssl/COPYING
+License/notice text / Текст: legal/third-party/source/wolfssl/debian/copyright
+
+zlib
+Scope / Область: pinned upstream source checkout; per-file terms retained
+License / Лицензия: See original file-level terms; review pending
+Upstream / Источник: https://github.com/madler/zlib.git
+Revision / Ревизия: 51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf
+License/notice text / Текст: legal/third-party/source/zlib/LICENSE
+License/notice text / Текст: legal/third-party/source/zlib/contrib/dotzlib/LICENSE_1_0.txt
+
+itoa 1.0.15
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: MIT OR Apache-2.0
+Upstream / Источник: https://github.com/dtolnay/itoa
+License/notice text / Текст: legal/third-party/rust/itoa-1.0.15/LICENSE-APACHE
+License/notice text / Текст: legal/third-party/rust/itoa-1.0.15/LICENSE-MIT
+
+memchr 2.7.5
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: Unlicense OR MIT
+Upstream / Источник: https://github.com/BurntSushi/memchr
+License/notice text / Текст: legal/third-party/rust/memchr-2.7.5/COPYING
+License/notice text / Текст: legal/third-party/rust/memchr-2.7.5/LICENSE-MIT
+
+memchr 2.8.3
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: Unlicense OR MIT
+Upstream / Источник: https://github.com/BurntSushi/memchr
+License/notice text / Текст: legal/third-party/rust/memchr-2.8.3/COPYING
+License/notice text / Текст: legal/third-party/rust/memchr-2.8.3/LICENSE-MIT
+
+proc-macro2 1.0.95
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: MIT OR Apache-2.0
+Upstream / Источник: https://github.com/dtolnay/proc-macro2
+License/notice text / Текст: legal/third-party/rust/proc-macro2-1.0.95/LICENSE-APACHE
+License/notice text / Текст: legal/third-party/rust/proc-macro2-1.0.95/LICENSE-MIT
+
+quote 1.0.40
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: MIT OR Apache-2.0
+Upstream / Источник: https://github.com/dtolnay/quote
+License/notice text / Текст: legal/third-party/rust/quote-1.0.40/LICENSE-APACHE
+License/notice text / Текст: legal/third-party/rust/quote-1.0.40/LICENSE-MIT
+
+ryu 1.0.20
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: Apache-2.0 OR BSL-1.0
+Upstream / Источник: https://github.com/dtolnay/ryu
+License/notice text / Текст: legal/third-party/rust/ryu-1.0.20/LICENSE-APACHE
+License/notice text / Текст: legal/third-party/rust/ryu-1.0.20/LICENSE-BOOST
+
+serde 1.0.219
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: MIT OR Apache-2.0
+Upstream / Источник: https://github.com/serde-rs/serde
+License/notice text / Текст: legal/third-party/rust/serde-1.0.219/LICENSE-APACHE
+License/notice text / Текст: legal/third-party/rust/serde-1.0.219/LICENSE-MIT
+
+serde_derive 1.0.219
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: MIT OR Apache-2.0
+Upstream / Источник: https://github.com/serde-rs/serde
+License/notice text / Текст: legal/third-party/rust/serde_derive-1.0.219/LICENSE-APACHE
+License/notice text / Текст: legal/third-party/rust/serde_derive-1.0.219/LICENSE-MIT
+
+serde_json 1.0.140
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: MIT OR Apache-2.0
+Upstream / Источник: https://github.com/serde-rs/json
+License/notice text / Текст: legal/third-party/rust/serde_json-1.0.140/LICENSE-APACHE
+License/notice text / Текст: legal/third-party/rust/serde_json-1.0.140/LICENSE-MIT
+
+syn 2.0.104
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: MIT OR Apache-2.0
+Upstream / Источник: https://github.com/dtolnay/syn
+License/notice text / Текст: legal/third-party/rust/syn-2.0.104/LICENSE-APACHE
+License/notice text / Текст: legal/third-party/rust/syn-2.0.104/LICENSE-MIT
+
+unicode-ident 1.0.18
+Scope / Область: resolved Rust dependency (includes build/proc-macro dependencies)
+License / Лицензия: (MIT OR Apache-2.0) AND Unicode-3.0
+Upstream / Источник: https://github.com/dtolnay/unicode-ident
+License/notice text / Текст: legal/third-party/rust/unicode-ident-1.0.18/LICENSE-APACHE
+License/notice text / Текст: legal/third-party/rust/unicode-ident-1.0.18/LICENSE-MIT
+License/notice text / Текст: legal/third-party/rust/unicode-ident-1.0.18/LICENSE-UNICODE
+
+alsa-lib 1.2.16.1-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://www.alsa-project.org
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+aom 3.15.1-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause
+Upstream / Источник: https://aomedia.org/
+License/notice text / Текст: legal/third-party/system/aom/LICENSE
+License/notice text / Текст: legal/third-party/system/aom/PATENTS
+
+avahi 1:0.9rc5-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://github.com/avahi/avahi
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+brotli 1.2.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://github.com/google/brotli
+License/notice text / Текст: legal/third-party/system/brotli/LICENSE
+
+bzip2 1.0.8-6
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD
+Upstream / Источник: https://sourceware.org/bzip2/
+License/notice text / Текст: legal/third-party/system/bzip2/LICENSE
+
+cairo 1.18.6-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-only OR MPL-1.1
+Upstream / Источник: https://cairographics.org/
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-only.txt
+License/notice text / Текст: legal/third-party/common/MPL-1.1.txt
+
+dav1d 1.5.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-2-Clause
+Upstream / Источник: https://code.videolan.org/videolan/dav1d
+License/notice text / Текст: legal/third-party/system/dav1d/COPYING
+
+dbus 1.16.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: AFL-2.1 OR GPL-2.0-or-later
+Upstream / Источник: https://www.freedesktop.org/wiki/Software/dbus/
+License/notice text / Текст: legal/third-party/system/dbus/AFL-2.1.txt
+License/notice text / Текст: legal/third-party/system/dbus/COPYING
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+e2fsprogs 1.47.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL  LGPL  MIT
+Upstream / Источник: http://e2fsprogs.sourceforge.net
+License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
+
+expat 2.9.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://libexpat.github.io/
+License/notice text / Текст: legal/third-party/system/expat/COPYING
+
+ffmpeg 2:9.0.2-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-3.0-only
+Upstream / Источник: https://ffmpeg.org
+License/notice text / Текст: legal/third-party/common/GPL-3.0-only.txt
+
+fontconfig 2:2.18.3-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: HPND AND Unicode-DFS-2016
+Upstream / Источник: https://www.freedesktop.org/wiki/Software/fontconfig/
+License/notice text / Текст: legal/third-party/system/fontconfig/COPYING
+
+freetype2 2.14.3-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: FTL OR GPL-2.0-or-later
+Upstream / Источник: https://www.freetype.org/
+License/notice text / Текст: legal/third-party/system/freetype2/FTL.TXT
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+fribidi 1.0.17-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://github.com/fribidi/fribidi
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+gdk-pixbuf2 2.44.8-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.0-or-later
+Upstream / Источник: https://gitlab.gnome.org/GNOME/gdk-pixbuf
+License/notice text / Текст: legal/third-party/common/LGPL-2.0-or-later.txt
+
+glib2 2.90.1-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://gitlab.gnome.org/GNOME/glib
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+glibc 2.44+r50+g1848099f063e-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later  LGPL-2.1-or-later
+Upstream / Источник: https://www.gnu.org/software/libc
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+glycin 2.2.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MPL-2.0 OR LGPL-2.1-or-later
+Upstream / Источник: https://gnome.pages.gitlab.gnome.org/glycin/
+License/notice text / Текст: legal/third-party/common/MPL-2.0.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+gmp 6.3.0-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later  LGPL-3.0-or-later
+Upstream / Источник: https://gmplib.org/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-3.0-or-later.txt
+
+gnutls 3.8.13-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-3.0-or-later AND LGPL-2.1-or-later
+Upstream / Источник: https://www.gnutls.org/
+License/notice text / Текст: legal/third-party/common/GPL-3.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+graphene 1.10.8-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://ebassi.github.io/graphene/
+License/notice text / Текст: legal/third-party/system/graphene/LICENSE.txt
+
+graphite 1:1.3.15-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later OR MPL-2.0 OR GPL-2.0-or-later
+Upstream / Источник: https://graphite.sil.org/
+License/notice text / Текст: legal/third-party/system/graphite/COPYING
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+License/notice text / Текст: legal/third-party/common/MPL-2.0.txt
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+gsm 1.0.24-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: custom
+Upstream / Источник: https://www.quut.com/gsm/
+License/notice text / Текст: legal/third-party/system/gsm/license.txt
+
+gst-plugins-bad-libs 1.28.7-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://gstreamer.freedesktop.org/
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+gst-plugins-base-libs 1.28.7-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://gstreamer.freedesktop.org/
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+gstreamer 1.28.7-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://gstreamer.freedesktop.org/
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+gtk4 1:4.24.1-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://www.gtk.org/
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+harfbuzz 14.6.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://harfbuzz.github.io/
+License/notice text / Текст: legal/third-party/system/harfbuzz/COPYING
+
+harfbuzz-icu 14.6.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://harfbuzz.github.io/
+License/notice text / Текст: legal/third-party/system/harfbuzz-icu/COPYING
+
+hidapi 0.15.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL3  BSD  custom
+Upstream / Источник: https://github.com/libusb/hidapi
+License/notice text / Текст: legal/third-party/system/hidapi/LICENSE-bsd.txt
+License/notice text / Текст: legal/third-party/system/hidapi/LICENSE-gpl3.txt
+License/notice text / Текст: legal/third-party/system/hidapi/LICENSE-orig.txt
+License/notice text / Текст: legal/third-party/system/hidapi/LICENSE.txt
+
+highway 1.4.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: Apache-2.0 OR BSD-3-Clause
+Upstream / Источник: https://github.com/google/highway/
+License/notice text / Текст: legal/third-party/system/highway/LICENSE
+License/notice text / Текст: legal/third-party/common/Apache-2.0.txt
+
+hyphen 2.8.9-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-only OR LGPL-2.1-or-later OR MPL-1.1
+Upstream / Источник: https://github.com/hunspell/hyphen
+License/notice text / Текст: legal/third-party/system/hyphen/LICENSE
+License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+License/notice text / Текст: legal/third-party/common/MPL-1.1.txt
+
+icu 78.3-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LicenseRef-Unicode-3.0  BSD-2-Clause  BSD-3-Clause  NAIST-2003
+Upstream / Источник: https://icu.unicode.org
+License/notice text / Текст: legal/third-party/system/icu/LICENSE
+
+jbigkit 2.1-8
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later
+Upstream / Источник: https://www.cl.cam.ac.uk/~mgk25/jbigkit/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+json-glib 1.10.8-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://gnome.pages.gitlab.gnome.org/json-glib/
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+keyutils 1.6.3-4
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later  LGPL-2.1-or-later
+Upstream / Источник: https://www.kernel.org/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+krb5 1.22.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: custom
+Upstream / Источник: https://web.mit.edu/kerberos/
+License/notice text / Текст: legal/third-party/system/krb5/LICENSE
+
+lame 4.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.0-only
+Upstream / Источник: http://lame.sourceforge.net/
+License/notice text / Текст: legal/third-party/common/LGPL-2.0-only.txt
+
+lcms2 2.19.1-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: http://www.littlecms.com/
+License/notice text / Текст: legal/third-party/system/lcms2/LICENSE
+
+leancrypto 1.9.1-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later  LicenseRef-BSDvariant  LicenseRef-leancrypto
+Upstream / Источник: https://leancrypto.org
+License/notice text / Текст: legal/third-party/system/leancrypto/LICENSE
+License/notice text / Текст: legal/third-party/system/leancrypto/LICENSE.bsd
+License/notice text / Текст: legal/third-party/system/leancrypto/LICENSE.gplv2
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+libatomic 16.2.1+r23+gd564253eb6c8-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-3.0-or-later WITH GCC-exception-3.1  GFDL-1.3-or-later
+Upstream / Источник: https://gcc.gnu.org
+License/notice text / Текст: legal/third-party/system/libatomic/RUNTIME.LIBRARY.EXCEPTION
+License/notice text / Текст: legal/third-party/common/GPL-3.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/GFDL-1.3-or-later.txt
+
+libavif 1.4.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LicenseRef-libavif
+Upstream / Источник: https://github.com/AOMediaCodec/libavif
+License/notice text / Текст: legal/third-party/system/libavif/LICENSE
+
+libbsd 0.12.2-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: custom
+Upstream / Источник: https://libbsd.freedesktop.org
+License/notice text / Текст: legal/third-party/system/libbsd/LICENSE
+
+libcloudproviders 0.4.1-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-3.0-or-later
+Upstream / Источник: https://gitlab.gnome.org/GNOME/libcloudproviders
+License/notice text / Текст: legal/third-party/common/LGPL-3.0-or-later.txt
+
+libcolord 1.4.8-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later
+Upstream / Источник: https://www.freedesktop.org/software/colord/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+libcups 2:2.4.20-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: Apache-2.0 WITH LLVM-exception AND BSD-3-Clause AND Zlib AND BSD-2-Clause
+Upstream / Источник: https://openprinting.github.io/cups/
+License/notice text / Текст: legal/third-party/system/libcups/LICENSE
+License/notice text / Текст: legal/third-party/system/libcups/NOTICE
+License/notice text / Текст: legal/third-party/common/Apache-2.0.txt
+
+libdatrie 0.2.14-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://linux.thai.net/projects/datrie
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+libdeflate 1.26-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://github.com/ebiggers/libdeflate
+License/notice text / Текст: legal/third-party/system/libdeflate/COPYING
+
+libdrm 2.4.134-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://dri.freedesktop.org/
+License/notice text / Текст: legal/third-party/system/libdrm/COPYING
+
+libelf 0.196-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later OR LGPL-3.0-or-later
+Upstream / Источник: https://sourceware.org/elfutils/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-3.0-or-later.txt
+
+libepoxy 1.5.10-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://github.com/anholt/libepoxy
+License/notice text / Текст: legal/third-party/system/libepoxy/COPYING
+
+libevdev 1.14.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://www.freedesktop.org/wiki/Software/libevdev/
+License/notice text / Текст: legal/third-party/system/libevdev/COPYING
+
+libffi 3.8.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://sourceware.org/libffi/
+License/notice text / Текст: legal/third-party/system/libffi/LICENSE
+
+libgcc 16.2.1+r23+gd564253eb6c8-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-3.0-or-later WITH GCC-exception-3.1  GFDL-1.3-or-later
+Upstream / Источник: https://gcc.gnu.org
+License/notice text / Текст: legal/third-party/system/libgcc/RUNTIME.LIBRARY.EXCEPTION
+License/notice text / Текст: legal/third-party/common/GPL-3.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/GFDL-1.3-or-later.txt
+
+libgcrypt 1.12.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause  BSD-3-Clause OR GPL-2.0-only  GPL-2.0-or-later  LGPL-2.0-or-later  LGPL-2.1-or-later  X11  LicenseRef-scancode-public-domain  LicenseRef-OCB1
+Upstream / Источник: https://www.gnupg.org
+License/notice text / Текст: legal/third-party/system/libgcrypt/COPYING.LIB
+License/notice text / Текст: legal/third-party/system/libgcrypt/LICENSES
+License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+libglvnd 1.7.0-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: custom:BSD-like
+Upstream / Источник: https://gitlab.freedesktop.org/glvnd/libglvnd
+License/notice text / Текст: legal/third-party/system/libglvnd/LICENSE
+
+libgomp 16.2.1+r23+gd564253eb6c8-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-3.0-or-later WITH GCC-exception-3.1  GFDL-1.3-or-later
+Upstream / Источник: https://gcc.gnu.org
+License/notice text / Текст: legal/third-party/system/libgomp/RUNTIME.LIBRARY.EXCEPTION
+License/notice text / Текст: legal/third-party/common/GPL-3.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/GFDL-1.3-or-later.txt
+
+libgpg-error 1.61-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later  BSD-3-Clause OR LGPL-2.1-or-later  FSFULLR  GPL-2.0-or-later
+Upstream / Источник: https://www.gnupg.org
+License/notice text / Текст: legal/third-party/system/libgpg-error/COPYING
+License/notice text / Текст: legal/third-party/system/libgpg-error/COPYING.LIB
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+libgudev 238-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://gitlab.gnome.org/GNOME/libgudev
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+libidn2 2.3.8-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL2  LGPL3
+Upstream / Источник: https://www.gnu.org/software/libidn/#libidn2
+License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
+License/notice text / Текст: legal/third-party/common/LGPL-3.0-only.txt
+
+libjpeg-turbo 3.2.0-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause  IJG
+Upstream / Источник: https://libjpeg-turbo.org/
+License/notice text / Текст: legal/third-party/system/libjpeg-turbo/LICENSE.md
+License/notice text / Текст: legal/third-party/system/libjpeg-turbo/README.ijg
+
+libjxl 0.12.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause
+Upstream / Источник: https://jpeg.org/jpegxl/
+License/notice text / Текст: legal/third-party/system/libjxl/LICENSE
+License/notice text / Текст: legal/third-party/system/libjxl/PATENTS
+
+libmd 1.3.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause AND BSD-2-Clause AND ISC AND Beerware AND CC-PDM-1.0
+Upstream / Источник: https://www.hadrons.org/software/libmd/
+License/notice text / Текст: legal/third-party/system/libmd/COPYING
+
+libnghttp2 1.70.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://nghttp2.org/
+License/notice text / Текст: legal/third-party/system/libnghttp2/COPYING
+
+libogg 1.3.6-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD
+Upstream / Источник: https://www.xiph.org/ogg/
+License/notice text / Текст: legal/third-party/system/libogg/COPYING
+
+libp11-kit 0.26.5-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause
+Upstream / Источник: https://p11-glue.freedesktop.org
+License/notice text / Текст: legal/third-party/system/libp11-kit/COPYING
+
+libpng 1.6.59-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: libpng-2.0
+Upstream / Источник: http://www.libpng.org/pub/png/libpng.html
+License/notice text / Текст: legal/third-party/system/libpng/LICENSE
+
+libpsl 0.21.5-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://github.com/rockdaboot/libpsl
+License/notice text / Текст: legal/third-party/system/libpsl/COPYING
+
+librsvg 2:2.63.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://gitlab.gnome.org/GNOME/librsvg
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+libseccomp 2.6.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-only
+Upstream / Источник: https://github.com/seccomp/libseccomp
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-only.txt
+
+libsecret 0.21.8.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://gnome.pages.gitlab.gnome.org/libsecret/
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+libsoup3 3.8.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.0-or-later
+Upstream / Источник: https://libsoup.gnome.org/
+License/notice text / Текст: legal/third-party/common/LGPL-2.0-or-later.txt
+
+libsoxr 0.1.3-5
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-only  LicenseRef-soxr
+Upstream / Источник: https://sourceforge.net/p/soxr/wiki/Home/
+License/notice text / Текст: legal/third-party/system/libsoxr/LICENCE
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-only.txt
+
+libstdc++ 16.2.1+r23+gd564253eb6c8-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-3.0-or-later WITH GCC-exception-3.1  GFDL-1.3-or-later
+Upstream / Источник: https://gcc.gnu.org
+License/notice text / Текст: legal/third-party/system/libstdc++/RUNTIME.LIBRARY.EXCEPTION
+License/notice text / Текст: legal/third-party/common/GPL-3.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/GFDL-1.3-or-later.txt
+
+libtasn1 4.21.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-3.0-or-later  LGPL-2.1-or-later  GFDL-1.3-or-later
+Upstream / Источник: https://www.gnu.org/software/libtasn1/
+License/notice text / Текст: legal/third-party/system/libtasn1/COPYING
+License/notice text / Текст: legal/third-party/common/GPL-3.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+License/notice text / Текст: legal/third-party/common/GFDL-1.3-or-later.txt
+
+libthai 0.1.30-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://linux.thai.net/projects/libthai
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+libtheora 1.2.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause
+Upstream / Источник: https://www.theora.org/
+License/notice text / Текст: legal/third-party/system/libtheora/COPYING
+License/notice text / Текст: legal/third-party/system/libtheora/LICENSE
+
+libtiff 4.7.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: libtiff
+Upstream / Источник: http://www.simplesystems.org/libtiff/
+License/notice text / Текст: legal/third-party/system/libtiff/LICENSE.md
+
+libunistring 1.4.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later  LGPL-3.0-or-later
+Upstream / Источник: https://www.gnu.org/software/libunistring/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-3.0-or-later.txt
+
+libunwind 1.8.3-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://www.nongnu.org/libunwind/
+License/notice text / Текст: legal/third-party/system/libunwind/COPYING
+
+libva 2.24.1-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://intel.github.io/libva/
+License/notice text / Текст: legal/third-party/system/libva/COPYING
+
+libvdpau 1.5-4
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://www.freedesktop.org/wiki/Software/VDPAU/
+License/notice text / Текст: legal/third-party/system/libvdpau/COPYING
+
+libvorbis 1.3.7-4
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause
+Upstream / Источник: https://www.xiph.org/vorbis/
+License/notice text / Текст: legal/third-party/system/libvorbis/COPYING
+
+libvpl 2.17.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://intel.github.io/libvpl/
+License/notice text / Текст: legal/third-party/system/libvpl/license.txt
+License/notice text / Текст: legal/third-party/system/libvpl/third-party-programs.txt
+
+libvpx 1.17.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: custom:BSD
+Upstream / Источник: https://www.webmproject.org/
+License/notice text / Текст: legal/third-party/system/libvpx/LICENSE
+
+libwebp 1.6.0-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause
+Upstream / Источник: https://developers.google.com/speed/webp/
+License/notice text / Текст: legal/third-party/system/libwebp/COPYING
+
+libx11 1.8.13-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT AND X11
+Upstream / Источник: https://gitlab.freedesktop.org/xorg/lib/libx11
+License/notice text / Текст: legal/third-party/system/libx11/COPYING
+
+libxau 1.0.12-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT-open-group
+Upstream / Источник: https://xorg.freedesktop.org/
+License/notice text / Текст: legal/third-party/system/libxau/COPYING
+
+libxcb 1.17.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: X11
+Upstream / Источник: https://gitlab.freedesktop.org/xorg/lib/libxcb
+License/notice text / Текст: legal/third-party/system/libxcb/COPYING
+
+libxcursor 1.2.3-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: HPND-sell-variant
+Upstream / Источник: https://gitlab.freedesktop.org/xorg/lib/libxcursor
+License/notice text / Текст: legal/third-party/system/libxcursor/COPYING
+
+libxdamage 1.1.7-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: HPND-sell-variant
+Upstream / Источник: https://xorg.freedesktop.org/
+License/notice text / Текст: legal/third-party/system/libxdamage/COPYING
+
+libxdmcp 1.1.5-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT-open-group
+Upstream / Источник: https://gitlab.freedesktop.org/xorg/lib/libxdmcp
+License/notice text / Текст: legal/third-party/system/libxdmcp/COPYING
+
+libxext 1.3.7-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LicenseRef-libxext
+Upstream / Источник: https://gitlab.freedesktop.org/xorg/lib/libxext
+License/notice text / Текст: legal/third-party/system/libxext/COPYING
+
+libxfixes 6.0.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT  HPND-sell-variant
+Upstream / Источник: https://xorg.freedesktop.org/
+License/notice text / Текст: legal/third-party/system/libxfixes/COPYING
+
+libxi 1.8.3-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT-open-group  SMLNJ  MIT
+Upstream / Источник: https://xorg.freedesktop.org
+License/notice text / Текст: legal/third-party/system/libxi/COPYING
+
+libxinerama 1.1.6-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT  MIT-open-group  X11
+Upstream / Источник: https://xorg.freedesktop.org/
+License/notice text / Текст: legal/third-party/system/libxinerama/COPYING
+
+libxkbcommon 1.13.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://xkbcommon.org/
+License/notice text / Текст: legal/third-party/system/libxkbcommon/LICENSE
+
+libxml2 2.15.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://gitlab.gnome.org/GNOME/libxml2/-/wikis/home
+License/notice text / Текст: legal/third-party/system/libxml2/Copyright
+
+libxrandr 1.5.5-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: HPND-sell-variant
+Upstream / Источник: https://xorg.freedesktop.org/
+License/notice text / Текст: legal/third-party/system/libxrandr/COPYING
+
+libxrender 0.9.12-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: HPND-sell-variant
+Upstream / Источник: https://xorg.freedesktop.org/
+License/notice text / Текст: legal/third-party/system/libxrender/COPYING
+
+libxslt 1.1.45-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://gitlab.gnome.org/GNOME/libxslt/-/wikis/home
+License/notice text / Текст: legal/third-party/system/libxslt/Copyright
+
+libyuv r2921+644251f25-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: custom
+Upstream / Источник: https://chromium.googlesource.com/libyuv/libyuv/
+License/notice text / Текст: legal/third-party/system/libyuv/LICENSE
+
+lz4 1:1.10.0-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later
+Upstream / Источник: https://lz4.github.io/lz4/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+lzo 2.10-5
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL
+Upstream / Источник: https://www.oberhumer.com/opensource/lzo
+License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
+
+mesa 1:26.2.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT AND BSD-3-Clause AND SGI-B-2.0
+Upstream / Источник: https://www.mesa3d.org/
+License/notice text / Текст: legal/third-party/system/mesa/license.rst
+
+mpg123 1.33.7-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-only
+Upstream / Источник: https://mpg123.de/
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-only.txt
+
+nettle 4.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-3.0-or-later OR GPL-2.0-or-later
+Upstream / Источник: https://www.lysator.liu.se/~nisse/nettle
+License/notice text / Текст: legal/third-party/common/LGPL-3.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+ocl-icd 2.3.5-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-2-Clause
+Upstream / Источник: https://github.com/OCL-dev/ocl-icd
+License/notice text / Текст: legal/third-party/system/ocl-icd/COPYING
+
+opencore-amr 0.1.6-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: Apache
+Upstream / Источник: https://sourceforge.net/projects/opencore-amr/
+
+openjpeg2 2.5.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-2-Clause  MIT
+Upstream / Источник: https://github.com/uclouvain/openjpeg
+License/notice text / Текст: legal/third-party/system/openjpeg2/LICENSE
+
+openssl 3.6.5-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: Apache-2.0
+Upstream / Источник: https://www.openssl.org
+License/notice text / Текст: legal/third-party/system/openssl/LICENSE.txt
+License/notice text / Текст: legal/third-party/common/Apache-2.0.txt
+
+opus 1.6.1-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause
+Upstream / Источник: https://www.opus-codec.org/
+License/notice text / Текст: legal/third-party/system/opus/COPYING
+
+orc 0.4.44-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause
+Upstream / Источник: https://gstreamer.freedesktop.org/modules/orc.html
+License/notice text / Текст: legal/third-party/system/orc/COPYING
+
+pango 1:1.58.2-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.0-or-later
+Upstream / Источник: https://www.pango.org/
+License/notice text / Текст: legal/third-party/common/LGPL-2.0-or-later.txt
+
+pcre2 10.49-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-2-Clause  BSD-3-Clause WITH PCRE2-exception
+Upstream / Источник: https://github.com/PCRE2Project/pcre2
+License/notice text / Текст: legal/third-party/system/pcre2/BSD-2-Clause.txt
+License/notice text / Текст: legal/third-party/system/pcre2/BSD-3-Clause.txt
+License/notice text / Текст: legal/third-party/system/pcre2/PCRE2-exception.txt
+
+pixman 0.46.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://gitlab.freedesktop.org/pixman/pixman
+License/notice text / Текст: legal/third-party/system/pixman/COPYING
+
+rav1e 0.8.1-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-2-Clause
+Upstream / Источник: https://github.com/xiph/rav1e/
+License/notice text / Текст: legal/third-party/system/rav1e/LICENSE
+License/notice text / Текст: legal/third-party/system/rav1e/PATENTS
+
+snappy 1.2.2-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause
+Upstream / Источник: https://github.com/google/snappy
+License/notice text / Текст: legal/third-party/system/snappy/COPYING
+
+speex 1.2.1-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD
+Upstream / Источник: https://www.speex.org/
+License/notice text / Текст: legal/third-party/system/speex/COPYING
+
+sqlite 3.53.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LicenseRef-Sqlite
+Upstream / Источник: https://www.sqlite.org/
+License/notice text / Текст: legal/third-party/system/sqlite/license.txt
+
+svt-av1 4.2.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause  LicenseRef-AOMPL-1.0
+Upstream / Источник: https://gitlab.com/AOMediaCodec/SVT-AV1
+License/notice text / Текст: legal/third-party/system/svt-av1/LICENSE.md
+License/notice text / Текст: legal/third-party/system/svt-av1/PATENTS.md
+
+systemd-libs 262-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later  CC0-1.0  GPL-2.0-or-later WITH Linux-syscall-note
+Upstream / Источник: https://www.github.com/systemd/systemd
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+License/notice text / Текст: legal/third-party/common/CC0-1.0.txt
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+tinysparql 3.12.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later
+Upstream / Источник: https://tinysparql.org/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+tpm2-tss 4.2.0-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-2-Clause
+Upstream / Источник: https://github.com/tpm2-software/tpm2-tss
+License/notice text / Текст: legal/third-party/system/tpm2-tss/LICENSE
+
+util-linux-libs 2.42.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-2-Clause  BSD-3-Clause  BSD-4-Clause-UC  GPL-2.0-only  GPL-2.0-or-later  GPL-3.0-or-later  ISC  LGPL-2.1-or-later  LicenseRef-PublicDomain
+Upstream / Источник: https://github.com/util-linux/util-linux
+License/notice text / Текст: legal/third-party/system/util-linux-libs/COPYING.BSD-2-Clause
+License/notice text / Текст: legal/third-party/system/util-linux-libs/COPYING.BSD-3-Clause
+License/notice text / Текст: legal/third-party/system/util-linux-libs/COPYING.BSD-4-Clause-UC
+License/notice text / Текст: legal/third-party/system/util-linux-libs/COPYING.ISC
+License/notice text / Текст: legal/third-party/system/util-linux-libs/util-linux-BSD-2-Clause.txt
+License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/GPL-3.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+vulkan-icd-loader 1.4.363.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: Apache-2.0
+Upstream / Источник: https://www.vulkan.org/
+License/notice text / Текст: legal/third-party/common/Apache-2.0.txt
+
+wayland 1.26.0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: MIT
+Upstream / Источник: https://wayland.freedesktop.org/
+License/notice text / Текст: legal/third-party/system/wayland/COPYING
+
+x264 3:0.165.r3222.b35605a-2
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-only
+Upstream / Источник: https://www.videolan.org/developers/x264.html
+License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
+
+x265 4.3-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later
+Upstream / Источник: https://www.x265.org/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+
+xvidcore 1.3.7-4
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-only
+Upstream / Источник: https://www.xvid.com/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
+
+xz 5.8.4-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: GPL-2.0-or-later AND 0BSD AND LicenseRef-Public-Domain AND LGPL-2.1-or-later
+Upstream / Источник: https://tukaani.org/xz/
+License/notice text / Текст: legal/third-party/common/GPL-2.0-or-later.txt
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt
+
+zlib 1:1.3.2-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: Zlib
+Upstream / Источник: https://www.zlib.net/
+License/notice text / Текст: legal/third-party/system/zlib/LICENSE
+
+zstd 1.5.7-3
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: BSD-3-Clause  GPL-2.0-only
+Upstream / Источник: https://facebook.github.io/zstd/
+License/notice text / Текст: legal/third-party/system/zstd/LICENSE
+License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
+
+НЕЗАКРЫТЫЕ ПУНКТЫ РЕЛИЗА / REMAINING RELEASE REVIEW
+- libopensles-standalone: source-header notices collected; review per-file terms and required full license texts
+- Owned runtime is not running; live optional-library observation was skipped without starting the game.
+- System e2fsprogs: legacy declaration GPL; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.
+- System libidn2: legacy declaration GPL2; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.
+- System libidn2: legacy declaration LGPL3; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.
+- System lzo: legacy declaration GPL; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.
+- System opencore-amr: license text not collected automatically
+- Project default is GPL-3.0-or-later; preserve every explicit existing file-level and upstream license (see LICENSE_POLICY.md).
+- Review license compatibility and source headers, including mixed-license upstream subcomponents.
+- Create corresponding source archives for each distributed binary, with CLBB patches and build instructions; links alone are not the completed source-delivery plan.
+- Define final installer payload and audit optional plugins/fonts/codecs and private-prefix package versions; live mapped libraries are not a complete dependency closure.
+- Game APK/resources are proprietary and excluded. This inventory grants no MOONTON redistribution or service permission.

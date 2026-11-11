@@ -1,0 +1,42 @@
+{
+  "nb-qemu": {
+    "commit": "973514eccba7271df890ec7e1910a53725bf4ff5",
+    "remote": "https://gitlab.com/android_translation_layer/qemu-based-native-bridge/nb-qemu.git"
+  },
+  "atl": {
+    "commit": "bbb4d469405cdaea585475b17daef13202bc7e23",
+    "remote": "https://gitlab.com/android_translation_layer/android_translation_layer.git"
+  },
+  "zlib": {
+    "commit": "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf",
+    "remote": "https://github.com/madler/zlib.git"
+  },
+  "libglvnd": {
+    "commit": "faa23f21fc677af5792825dc30cb1ccef4bf33a6",
+    "remote": "https://github.com/NVIDIA/libglvnd.git"
+  },
+  "wolfssl": {
+    "commit": "decea12e223869c8f8f3ab5a53dc90b69f436eb2",
+    "remote": "https://github.com/wolfSSL/wolfssl.git"
+  },
+  "libopensles-standalone": {
+    "commit": "c6982620c7dadeb90220b23c575b25eeffda765f",
+    "remote": "https://gitlab.com/android_translation_layer/libopensles-standalone.git"
+  },
+  "art_standalone": {
+    "commit": "7ead96be8423b3789457b920336149f3f35a61d0",
+    "remote": "https://gitlab.com/android_translation_layer/art_standalone.git"
+  },
+  "bionic_translation": {
+    "commit": "6253dec7f24a57a94039a088cb436d880e92e3be",
+    "remote": "https://gitlab.com/android_translation_layer/bionic_translation.git"
+  },
+  "qemu": {
+    "commit": "a590cb154d1703b80265a75df4fca4d51b0dc0ba",
+    "remote": "https://gitlab.com/android_translation_layer/qemu-based-native-bridge/qemu.git"
+  },
+  "nb-qemu-bionic": {
+    "commit": "03d71fef83fa9746e15e4c8b386114a22b2c215f",
+    "remote": "https://gitlab.com/android_translation_layer/qemu-based-native-bridge/nb-qemu-bionic.git"
+  }
+}

@@ -1,0 +1,22 @@
+name: Source checks / Проверки исходников
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  source-checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust controller
+        run: cargo test --manifest-path mapper/core/Cargo.toml --lib --locked --offline
+      - name: Rust runtime and updater
+        run: cargo test --manifest-path mapper/runtime/Cargo.toml --lib --locked --offline
+      - name: Installer manager
+        run: cargo test --manifest-path distribution/manager/Cargo.toml --locked --offline
+      - name: Distribution checks
+        run: python3 -m unittest discover -s distribution/tests -v
+      - name: Shell syntax
+        run: |
+          sh -n install.sh
+          bash -n env.sh run-mlbb.sh distribution/build-from-source.sh

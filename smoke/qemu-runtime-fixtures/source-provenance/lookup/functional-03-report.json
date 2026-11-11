@@ -1,0 +1,229 @@
+{
+  "schema": 1,
+  "commands": [
+    {
+      "name": "prepare",
+      "command": [
+        "python3",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/prepare.py",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/prepared"
+      ],
+      "pid": 3254769,
+      "start_utc": "2026-11-09T12:24:22.398481+00:00",
+      "end_utc": "2026-11-09T12:24:22.430032+00:00",
+      "exit": 0
+    },
+    {
+      "name": "normal-compile",
+      "command": [
+        "cc",
+        "-O2",
+        "-g",
+        "-fPIC",
+        "-fno-strict-aliasing",
+        "-fstack-protector-strong",
+        "-D_GNU_SOURCE",
+        "-DNEED_CPU_H",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build/aarch64-linux-user",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/target/arm",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/include",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/tcg/i386",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/accel/tcg",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/prepared",
+        "-I/usr/include/glib-2.0",
+        "-I/usr/lib/glib-2.0/include",
+        "-I/usr/include/sysprof-6",
+        "-pthread",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/fixture.c",
+        "-o",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal",
+        "-lglib-2.0"
+      ],
+      "pid": 3254773,
+      "start_utc": "2026-11-09T12:24:22.431459+00:00",
+      "end_utc": "2026-11-09T12:24:22.595165+00:00",
+      "exit": 0
+    },
+    {
+      "name": "normal-functional",
+      "command": [
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal"
+      ],
+      "pid": 3254778,
+      "start_utc": "2026-11-09T12:24:22.595287+00:00",
+      "end_utc": "2026-11-09T12:24:22.809054+00:00",
+      "exit": 0
+    },
+    {
+      "name": "sanitized-compile",
+      "command": [
+        "cc",
+        "-O2",
+        "-g",
+        "-fPIC",
+        "-fno-strict-aliasing",
+        "-fstack-protector-strong",
+        "-D_GNU_SOURCE",
+        "-DNEED_CPU_H",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build/aarch64-linux-user",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/target/arm",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/include",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/tcg/i386",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/accel/tcg",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/prepared",
+        "-I/usr/include/glib-2.0",
+        "-I/usr/lib/glib-2.0/include",
+        "-I/usr/include/sysprof-6",
+        "-pthread",
+        "-fsanitize=address,undefined",
+        "-fno-sanitize-recover=all",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/fixture.c",
+        "-o",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/sanitized",
+        "-lglib-2.0"
+      ],
+      "pid": 3254783,
+      "start_utc": "2026-11-09T12:24:22.809255+00:00",
+      "end_utc": "2026-11-09T12:24:23.073255+00:00",
+      "exit": 0
+    },
+    {
+      "name": "sanitized-functional",
+      "command": [
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/sanitized"
+      ],
+      "pid": 3254788,
+      "start_utc": "2026-11-09T12:24:23.073361+00:00",
+      "end_utc": "2026-11-09T12:24:23.437258+00:00",
+      "exit": 0
+    },
+    {
+      "name": "whole-source-compile",
+      "command": [
+        "cc",
+        "-O2",
+        "-g",
+        "-fPIC",
+        "-fno-strict-aliasing",
+        "-fstack-protector-strong",
+        "-D_GNU_SOURCE",
+        "-DNEED_CPU_H",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build/aarch64-linux-user",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/_build",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/target/arm",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/include",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/tcg/i386",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/accel/tcg",
+        "-I/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/prepared",
+        "-I/usr/include/glib-2.0",
+        "-I/usr/lib/glib-2.0/include",
+        "-I/usr/include/sysprof-6",
+        "-pthread",
+        "-c",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/prepared/tcg-runtime.c",
+        "-o",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/tcg-runtime.o"
+      ],
+      "pid": 3254793,
+      "start_utc": "2026-11-09T12:24:23.437387+00:00",
+      "end_utc": "2026-11-09T12:24:23.551105+00:00",
+      "exit": 0
+    },
+    {
+      "name": "baseline_lookup-disassembly",
+      "command": [
+        "objdump",
+        "-d",
+        "--no-show-raw-insn",
+        "--disassemble=baseline_lookup",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal"
+      ],
+      "pid": 3254796,
+      "start_utc": "2026-11-09T12:24:23.551222+00:00",
+      "end_utc": "2026-11-09T12:24:23.554568+00:00",
+      "exit": 0
+    },
+    {
+      "name": "candidate_lookup-disassembly",
+      "command": [
+        "objdump",
+        "-d",
+        "--no-show-raw-insn",
+        "--disassemble=candidate_lookup",
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal"
+      ],
+      "pid": 3254797,
+      "start_utc": "2026-11-09T12:24:23.554633+00:00",
+      "end_utc": "2026-11-09T12:24:23.557911+00:00",
+      "exit": 0
+    },
+    {
+      "name": "ABBA",
+      "command": [
+        "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal",
+        "2000000"
+      ],
+      "pid": 3254798,
+      "start_utc": "2026-11-09T12:24:23.557963+00:00",
+      "end_utc": "2026-11-09T12:24:23.671505+00:00",
+      "exit": 0
+    }
+  ],
+  "before": {
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/accel/tcg/tcg-runtime.c": "89cc9db06ca3bc81474195365969e7e50313c4232b197640940ca259fe96331c",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/include/exec/tb-lookup.h": "fdf95ce10d41d5851deed1e51831a8f4ad6f31c3964476c19322c63a2bc6af73",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/target/arm/cpu.h": "24917f15425d16183467a325ef448282bc821a29a07cb58366bfbb8a560c6014",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/prefix/lib/libnb-qemu.so": "66801fcd670f82c7649ab22041dd9a6d7f4a87197a26e71e132bd66e4ed3bab5",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/fixture.c": "34bfd6caf3dc578f5fa670104a0aa43737ee22ae57a56c8bc71fe72f73a42a8d",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/wrapper.inc": "aff04dfea875b178450b6dcd02b324f297bc3caa709a62fb51f72d99a1ac54ae",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/prepare.py": "fb70848e0f44531d58807e58a1da6a8e99564ce6818ca1932b9459b6743c3069"
+  },
+  "no_guest_execution": true,
+  "game_launched": false,
+  "benchmark_stdout": "bench mode=0 round=0 variant=0 count=2000000 cpu_ns=5022782 checksum=16384000000\nbench mode=0 round=1 variant=1 count=2000000 cpu_ns=3858672 checksum=16384000000\nbench mode=0 round=2 variant=1 count=2000000 cpu_ns=3833492 checksum=16384000000\nbench mode=0 round=3 variant=0 count=2000000 cpu_ns=5286812 checksum=16384000000\nbench mode=1 round=0 variant=0 count=2000000 cpu_ns=5753602 checksum=16256000000\nbench mode=1 round=1 variant=1 count=2000000 cpu_ns=4398122 checksum=16256000000\nbench mode=1 round=2 variant=1 count=2000000 cpu_ns=4964872 checksum=16256000000\nbench mode=1 round=3 variant=0 count=2000000 cpu_ns=5780173 checksum=16256000000\nbench mode=2 round=0 variant=0 count=2000000 cpu_ns=5534432 checksum=16384000000\nbench mode=2 round=1 variant=1 count=2000000 cpu_ns=5922563 checksum=16384000000\nbench mode=2 round=2 variant=1 count=2000000 cpu_ns=6128472 checksum=16384000000\nbench mode=2 round=3 variant=0 count=2000000 cpu_ns=5703093 checksum=16384000000\nbench mode=3 round=0 variant=0 count=2000000 cpu_ns=8110793 checksum=16384000000\nbench mode=3 round=1 variant=1 count=2000000 cpu_ns=8436354 checksum=16384000000\nbench mode=3 round=2 variant=1 count=2000000 cpu_ns=8510953 checksum=16384000000\nbench mode=3 round=3 variant=0 count=2000000 cpu_ns=8880024 checksum=16384000000\n",
+  "benchmark_scope": "Synthetic real QEMU types/full helper, stub QHT/A32/log output, thread CPU; no full startup speed claim; concurrent runtime/process activity uncontrolled.",
+  "after": {
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/accel/tcg/tcg-runtime.c": "89cc9db06ca3bc81474195365969e7e50313c4232b197640940ca259fe96331c",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/include/exec/tb-lookup.h": "fdf95ce10d41d5851deed1e51831a8f4ad6f31c3964476c19322c63a2bc6af73",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/src/nb-qemu/qemu/target/arm/cpu.h": "24917f15425d16183467a325ef448282bc821a29a07cb58366bfbb8a560c6014",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/prefix/lib/libnb-qemu.so": "66801fcd670f82c7649ab22041dd9a6d7f4a87197a26e71e132bd66e4ed3bab5",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/fixture.c": "34bfd6caf3dc578f5fa670104a0aa43737ee22ae57a56c8bc71fe72f73a42a8d",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/wrapper.inc": "aff04dfea875b178450b6dcd02b324f297bc3caa709a62fb51f72d99a1ac54ae",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/prepare.py": "fb70848e0f44531d58807e58a1da6a8e99564ce6818ca1932b9459b6743c3069"
+  },
+  "sources": {
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/fixture.c": "34bfd6caf3dc578f5fa670104a0aa43737ee22ae57a56c8bc71fe72f73a42a8d",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/check.py": "25da47024c735700292ac49f26c19925f70185087697549a3f61df382212ab61",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/prepare.py": "fb70848e0f44531d58807e58a1da6a8e99564ce6818ca1932b9459b6743c3069",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/tools/eta-qemu-a64-lookup-candidate/wrapper.inc": "aff04dfea875b178450b6dcd02b324f297bc3caa709a62fb51f72d99a1ac54ae"
+  },
+  "artifacts": {
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/whole-source-compile.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/ABBA.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/baseline_lookup-disassembly.stdout": "f90b51c149021aa103b687e04342c42c467b05bb96e534448b277aadcc8e4add",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/prepare.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal-functional.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/whole-source-compile.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal-compile.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/sanitized-functional.stdout": "b9ff5d46bf957d54774b80884cca80459f1e696c81472773d0632910ec87125b",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/sanitized-compile.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/tcg-runtime.o": "5d7f70da8f5c6d8f3a5fc8dbed20719a4e8be58f211c85b9bd02454e27f6a9d8",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/candidate_lookup-disassembly.stdout": "c893189561a319f0a4846480dba157cf0e6467b33339a872c077bb3baa900d9b",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal-compile.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/sanitized": "87b2cfa638aedc6077c2cea9724ddeacf4806fb74ac71868a63effe4685c96b5",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/candidate_lookup-disassembly.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/sanitized-functional.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/baseline_lookup-disassembly.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/sanitized-compile.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/ABBA.stdout": "bdd876d38587cb26228610af1301a75f90b876c79ef48770c64556abe3e8c14c",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal": "f8fcf81b6efa9338c8bcf3938abea4fd14017cd83913e8771e534a51fd591889",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/normal-functional.stdout": "b9ff5d46bf957d54774b80884cca80459f1e696c81472773d0632910ec87125b",
+    "/home/Evgenius/Documents/Codex/2026-10-10/new-chat-2/work/atl-mlbb/logs/eta-qemu-a64-lookup-candidate/functional-03/prepare.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "pass": true
+}

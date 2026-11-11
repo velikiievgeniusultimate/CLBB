@@ -1,0 +1,88 @@
+{
+  "recorded_utc": "2026-11-07T01:25:14.176173+00:00",
+  "origin": "Existing project-authored Rust controller and mathematics from EWM, no Qt or Waydroid runtime code",
+  "scope": [
+    "Rust controller and aim mathematics",
+    "read-only IL2CPP/Unity source",
+    "navigation",
+    "settings and typed snapshots",
+    "native GTK/X11 and JNI transport adapters"
+  ],
+  "public_license": "GPL-3.0-or-later for new original code; explicit existing file-level and upstream licenses retained (see LICENSE_POLICY.md)",
+  "third_party_dependencies": [
+    {
+      "name": "itoa",
+      "version": "1.0.15",
+      "license_expression": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "memchr",
+      "version": "2.7.5",
+      "license_expression": "Unlicense OR MIT"
+    },
+    {
+      "name": "memchr",
+      "version": "2.8.3",
+      "license_expression": "Unlicense OR MIT"
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.95",
+      "license_expression": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "quote",
+      "version": "1.0.40",
+      "license_expression": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "ryu",
+      "version": "1.0.20",
+      "license_expression": "Apache-2.0 OR BSL-1.0"
+    },
+    {
+      "name": "serde",
+      "version": "1.0.219",
+      "license_expression": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "serde_derive",
+      "version": "1.0.219",
+      "license_expression": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.140",
+      "license_expression": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "syn",
+      "version": "2.0.104",
+      "license_expression": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.18",
+      "license_expression": "(MIT OR Apache-2.0) AND Unicode-3.0"
+    }
+  ],
+  "os_boundary": "CLBB ATL adapter; no operating-system APIs inside controller",
+  "ui": "Original GTK/CSS presentation inspired by the supplied screenshots; no game UI graphics/assets copied",
+  "legacy_application_dependency": false,
+  "native_dependencies": [
+    {
+      "name": "GTK4",
+      "existing_runtime_dependency": true
+    },
+    {
+      "name": "Xlib/X11",
+      "scope": "Linux cursor confinement only"
+    },
+    {
+      "name": "ATL/ART/nb-qemu/OpenSLES",
+      "existing_runtime_dependency": true,
+      "license_obligations": "Retained upstream licenses; mapper rewrite does not replace them."
+    }
+  ],
+  "legacy_import": "One-time reading of the old F7 INI; subsequent runtime has no EWM/Waydroid/Qt/helper-process dependency."
+}

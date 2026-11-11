@@ -1,0 +1,24 @@
+[submodule "nb-qemu"]
+	path = src/nb-qemu
+	url = https://gitlab.com/android_translation_layer/qemu-based-native-bridge/nb-qemu.git
+[submodule "atl"]
+	path = src/atl
+	url = https://gitlab.com/android_translation_layer/android_translation_layer.git
+[submodule "zlib"]
+	path = src/zlib
+	url = https://github.com/madler/zlib.git
+[submodule "libglvnd"]
+	path = src/libglvnd
+	url = https://github.com/NVIDIA/libglvnd.git
+[submodule "wolfssl"]
+	path = src/wolfssl
+	url = https://github.com/wolfSSL/wolfssl.git
+[submodule "libopensles-standalone"]
+	path = src/libopensles-standalone
+	url = https://gitlab.com/android_translation_layer/libopensles-standalone.git
+[submodule "art_standalone"]
+	path = src/art_standalone
+	url = https://gitlab.com/android_translation_layer/art_standalone.git
+[submodule "bionic_translation"]
+	path = src/bionic_translation
+	url = https://gitlab.com/android_translation_layer/bionic_translation.git
