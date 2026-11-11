@@ -5,6 +5,12 @@ set -eu
 [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] || { echo 'CLBB: Linux x86_64 required / требуется Linux x86_64' >&2; exit 1; }
 command -v pacman >/dev/null || { echo 'CLBB: this installer currently supports Arch, Manjaro and EndeavourOS.' >&2; exit 1; }
 [ "$(id -u)" != 0 ] || { echo 'CLBB: run as your normal desktop user, without sudo / запускайте без sudo.' >&2; exit 1; }
+# A path on the developer's PC is not available on another tester's PC.
+if [ -n "${CLBB_APK_FILE:-}" ] && [ ! -f "$CLBB_APK_FILE" ]; then
+    printf '%s\n' "CLBB: APK file not found / APK не найден: $CLBB_APK_FILE" >&2
+    printf '%s\n' 'Use an APK path on this computer, or omit CLBB_APK_FILE and select an APK on first launch / Укажите файл на этом ПК либо уберите CLBB_APK_FILE и выберите APK при первом запуске.' >&2
+    exit 1
+fi
 for tool in python3 curl tar sha256sum; do
     if ! command -v "$tool" >/dev/null; then
         sudo pacman -S --needed -- python curl tar coreutils < /dev/tty
