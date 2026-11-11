@@ -53,3 +53,20 @@ touch commands and Android packets are not thinned. Disabled recording skips the
 extra audits and MotionEvent getter callbacks. The analyzer lists absent channels
 and separates transport, dispatch, reader and controller failures. A Java getter
 read is evidence of event access, not proof of completed game simulation.
+
+## Направленные навыки и отложенное применение / Direction gestures and buffered casts
+
+Обычный направленный навык завершает палец по физическому отпусканию: свежая
+геометрия → конечный MOVE → UP в том же порядке. Обновление игрового индикатора
+может прекращаться во время отложенного применения другого навыка. Его отсутствие
+не должно удерживать уже отпущенную клавишу и блокировать следующие нажатия.
+До отпускания направление продолжает следовать курсору. Отмена остаётся отдельным
+действием; навыки с дальностью и моментальный режим сохраняют свои проверки.
+Событие диагностики: `physical_up_after_final_direction_move`.
+
+An ordinary direction gesture commits its final MOVE then UP on physical release,
+using fresh geometry and successful transport. Buffered game actions may stop
+indicator updates; such missing visual feedback must not hold a released key or
+block subsequent presses. Held aiming, explicit cancellation, range gestures and
+instant-mode receipt checks remain separate. Diagnostic reason:
+`physical_up_after_final_direction_move`.

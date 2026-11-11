@@ -112,6 +112,17 @@ impl Controller {
                     self.finish_skill(host, true);
                     return;
                 }
+                // A physical UP commits an ordinary direction gesture. The
+                // game's buffered cast may clear/stop updating its indicator
+                // while the next finger is already held (e.g. Ling R -> W -> W).
+                // Geometry computes the final command; successful ordered MOVE
+                // delivery is followed by UP, without awaiting another visual
+                // receipt that the game may only produce after that UP.
+                if self.pendingRelease_ && self.skillCastMode_ == 0 && !self.skillKeyHeld_ {
+                    self.trace(host, "direction_goal", "physical_up_after_final_direction_move");
+                    self.finish_skill(host, false);
+                    return;
+                }
                 if self.direction_acknowledged() {
                     self.trace(host, "direction_goal", "native_direction_ack_release");
                     self.finish_skill(host, false);

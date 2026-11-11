@@ -1016,6 +1016,9 @@ mod tests {
     #[derive(Default)]
     struct TestHost {
         moves: Vec<(i32, Point)>,
+        edges: Vec<(&'static str,i32,Point)>,
+        fail_move: bool,
+        traces: Vec<(String,String)>,
         world: Option<Point>,
         plane_world: Option<Point>,
         skill_world: Option<Point>,
@@ -1027,9 +1030,10 @@ mod tests {
         }
         fn move_touch(&mut self, id: i32, p: Point) -> bool {
             self.moves.push((id, p));
-            true
+            self.edges.push(("move",id,p));
+            !self.fail_move
         }
-        fn end(&mut self, _: i32, _: Point) {}
+        fn end(&mut self, id: i32, p: Point) {self.edges.push(("up",id,p));}
         fn pointer_world(&mut self, _: Point) -> Option<Point> {
             self.world
         }
@@ -1065,7 +1069,7 @@ mod tests {
             84
         }
         fn timer(&mut self, _: Timer, _: Option<i64>) {}
-        fn trace(&mut self, _: &Controller, _: &str, _: &str) {}
+        fn trace(&mut self, _: &Controller, event: &str, reason: &str) {self.traces.push((event.into(),reason.into()));}
     }
     fn n(value: f64) -> Number {
         Number { value, kind: 1 }
@@ -1436,6 +1440,53 @@ mod tests {
         assert_eq!(c.direct_.ready, 0);
     }
 
+    fn buffered_direction_fixture() -> (Controller,TestHost) {
+        let (mut c,_,h)=setup();
+        c.enabled_=true;c.ready_=true;c.heroId_=84;
+        c.activeSlot_="skill:1".into();c.frameActiveSlot_=c.activeSlot_.clone();
+        c.coreSkill_=8420;c.skillKey_=87;c.skillKeyHeld_=false;c.skillBehavior_=SkillBehavior::Direction;
+        c.buttons_[0].slot=c.activeSlot_.clone();c.buttons_[0].skillId=8420;c.buttons_[0].aimType=2;
+        c.frameCameraReady_=true;c.frameCamera_=[1.,0.,0.,1.];
+        c.directionGeometryFresh_=true;c.directionCenter_=Point::new(0.8,0.8);c.directionRadius_=Point::new(0.1,0.1);
+        c.pendingRelease_=true;c.pendingDirectionValid_=true;c.pendingDirection_=Point::new(1.,0.);
+        c.releaseRequested_.restart(c.now_);c.directionAccepted_=false;c.directionMatchedSequence_=0;
+        (c,h)
+    }
+    #[test]
+    fn buffered_direction_physical_up_sends_final_move_then_up_without_native_echo() {
+        let (mut c,mut h)=buffered_direction_fixture();
+        let contact=c.skillTouch_;c.movementTouch_=9;c.movementHeld_=false;
+        c.queuedSkills_.push(QueuedSkill {slot:"skill:1".into(),key:87,held:true,requestedNs:c.now_,..QueuedSkill::default()});
+        c.tick(&mut h);
+        assert_eq!(c.queuedSkills_.len(),1,"release must retain the next physical press");
+        assert!(c.queuedSkills_[0].held);
+        assert_eq!(c.skillTouch_,-1,"physical UP must not wait for the buffered indicator");
+        assert_eq!(c.movementTouch_,9,"independent movement contact survives");
+        assert_eq!(h.edges.last().unwrap().0,"up");
+        assert_eq!(h.edges.last().unwrap().1,contact);
+        assert!(h.edges.iter().any(|e|e.0=="move"&&e.1==contact));
+        let up=h.edges.last().unwrap().2;
+        assert_eq!(h.moves.last().unwrap().1,up,"UP carries the delivered final direction");
+    }
+    #[test]
+    fn buffered_direction_keeps_hold_and_requires_fresh_geometry() {
+        let (mut c,mut h)=buffered_direction_fixture();c.skillKeyHeld_=true;c.pendingRelease_=false;
+        c.tick(&mut h);assert!(h.edges.iter().all(|e|e.0!="up"));
+        c.skillKeyHeld_=false;c.pendingRelease_=true;c.directionGeometryFresh_=false;
+        c.tick(&mut h);assert!(h.edges.iter().all(|e|e.0!="up"));
+    }
+    #[test]
+    fn direction_transport_failure_does_not_commit_a_cast() {
+        let (mut c,mut h)=buffered_direction_fixture();h.fail_move=true;
+        c.tick(&mut h);
+        assert!(!h.traces.iter().any(|(event,reason)|event=="release"&&reason=="cast"));
+        assert!(!h.traces.iter().any(|(_,reason)|reason=="physical_up_after_final_direction_move"));
+    }
+    #[test]
+    fn instant_direction_still_requires_a_game_receipt() {
+        let (mut c,mut h)=buffered_direction_fixture();c.skillCastMode_=1;
+        c.tick(&mut h);assert!(h.edges.iter().all(|e|e.0!="up"));
+    }
     #[test]
     fn direction_ack_requires_current_raw_provenance_and_post_goal_snapshot() {
         let (mut c, mut f, mut h) = setup();
