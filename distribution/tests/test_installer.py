@@ -9,7 +9,7 @@ class InstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='clbb-installer-test-')as temp:
             p=Path(temp);bin=p/'bin';bin.mkdir();home=p/'home';home.mkdir();install=p/'installation'
             if existing:
-                (install/'state/game').mkdir(parents=True);(install/'state/game/base.apk').write_bytes(b'preserved')
+                (install/'state/game').mkdir(parents=True);(install/'state/game/base.apk').write_bytes(b'preserved');(install/'current/distribution').mkdir(parents=True);(install/'current/distribution/native_libs.py').write_text('print(\"native preparation fixture\")\n')
             helper=p/'manager'
             helper.write_text('#!'+sys.executable+'\nimport json,os,sys\nfrom pathlib import Path\np=Path(os.environ["CLBB_FIXTURE"])\nwith (p/"calls").open("a")as f:f.write(json.dumps(sys.argv[1:])+"\\n")\nprint("{}")\n')
             digest=hashlib.sha256(helper.read_bytes()).hexdigest()

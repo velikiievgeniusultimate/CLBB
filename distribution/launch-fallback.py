@@ -9,7 +9,7 @@ def clean(text):
     home=str(Path.home());out=[]
     for line in text.splitlines():
         if any(word in line.lower()for word in ['password','passwd','cookie','token','authorization','session','email','moonton'])or '@'in line or 'http://'in line or 'https://'in line:continue
-        out.append(line.replace(home,'~')[:1000])
+        out.append(line.replace('\0','').replace(home,'~')[:1000])
     return '\n'.join(out)[:24000]
 def tail(path):
     try:
@@ -23,15 +23,20 @@ def collect(root,state,reason):
     logs=state/'logs';logs.mkdir(parents=True,exist_ok=True)
     latest=sorted(logs.glob('qemu-launch-*'));errors=tail(logs/'launcher-stderr.log')
     if latest:
-        errors+='\n'+'\n'.join(line for line in tail(latest[-1]/'runtime.log').splitlines()if any(key in line.lower()for key in ['error','fatal','failed','not found','exception','signal','assert','traceback']))
+        errors+='\n'+'\n'.join(line for line in tail(latest[-1]/'runtime.log').splitlines()if 'getSignalHandler'not in line and any(key in line.lower()for key in ['error','fatal','failed','not found','exception','signal','assert','traceback']))
     env=os.environ.copy();env.pop('LD_PRELOAD',None);env['LC_ALL']='C';env['LD_LIBRARY_PATH']=':'.join(str(root/p)for p in ['prefix/lib','prefix/lib/art','prefix/lib/java/dex/art/natives'])
     checks=[{'file':p,'result':run(['ldd',str(root/p)],env)}for p in ['prefix/bin/android-translation-layer','prefix/bin/dalvikvm','prefix/lib/libnb-qemu.so','bin/clbb-launcher']]
     text=errors+'\n'+str(checks);summary=reason
-    if 'not found'in text and any(key in text for key in ['GLIBC_','GLIBCXX_']):summary='Несовместимая версия glibc/libstdc++. Обновите дистрибутив; точные версии есть в отчёте.'
+    if any(key in text for key in ['couldn\'t find \"libmain.so\"','Failed to load \'libmain.so\'']):summary='Не подготовлены ARM64-библиотеки APK. Требуется установка CLBB с подготовкой библиотек игры.'
+    elif 'not found'in text and any(key in text for key in ['GLIBC_','GLIBCXX_']):summary='Несовместимая версия glibc/libstdc++. Обновите дистрибутив; точные версии есть в отчёте.'
     elif 'not found'in text:summary='Возможна отсутствующая системная библиотека или файл. Смотрите проверки в отчёте.'
     elif 'Illegal instruction'in text:summary='Неподдерживаемая инструкция CPU (SIGILL). Нужна проверка совместимости сборки.'
     cpu=Path('/proc/cpuinfo').read_text(errors='replace')if Path('/proc/cpuinfo').exists()else ''
-    return {'schema':'clbb-diagnostic-v1','app_version':(root/'VERSION').read_text().strip()if(root/'VERSION').is_file()else 'unknown','kind':'launcher_fallback','reason':clean(reason),'summary':summary,'host':{'kernel':platform.platform(),'glibc':platform.libc_ver(),'display_available':bool(os.environ.get('DISPLAY')or os.environ.get('WAYLAND_DISPLAY')),'cpu':[line for line in cpu.splitlines()if line.startswith(('model name','flags'))][:2]},'checks':checks,'startup_errors':clean(errors)}
+    last_exit={}
+    if latest:
+        try:last_exit=json.loads((latest[-1]/'exit.json').read_text())
+        except (OSError,ValueError):pass
+    return {'last_exit':last_exit,'game_native':{name:(state/'data/base.apk_/lib'/name).is_file()for name in ['libmain.so','libEncryptorP.so','libunity.so','libil2cpp.so']},'schema':'clbb-diagnostic-v1','app_version':(root/'VERSION').read_text().strip()if(root/'VERSION').is_file()else 'unknown','kind':'launcher_fallback','reason':clean(reason),'summary':summary,'host':{'kernel':platform.platform(),'glibc':platform.libc_ver(),'display_available':bool(os.environ.get('DISPLAY')or os.environ.get('WAYLAND_DISPLAY')),'cpu':[line for line in cpu.splitlines()if line.startswith(('model name','flags'))][:2]},'checks':checks,'startup_errors':clean(errors)}
 def main():
     root=Path(sys.argv[1]);state=Path(sys.argv[2]);reason=sys.argv[3]if len(sys.argv)>3 else 'Проверка запуска CLBB по запросу'
     value=collect(root,state,reason);directory=state/'logs/reports';directory.mkdir(parents=True,exist_ok=True);directory.chmod(0o700)

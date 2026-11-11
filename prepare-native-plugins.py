@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Expose already extracted native assets to the experimental loader unchanged."""
 import os
+import sys
 from pathlib import Path
 
 
 def prepare(root: Path) -> None:
+    sys.path.insert(0,str(Path(__file__).resolve().parent / "distribution"))
+    from native_libs import prepare as prepare_libraries
+    print("CLBB_NATIVE_LIBRARIES=" + str(prepare_libraries(root,locked=os.environ.get("CLBB_NATIVE_LOCK_HELD")=="1")),flush=True)
     payload_dir = root / "data/base.apk_/files/dragon2017/assets/comlibs/arm64-v8a"
     alias_dir = root / "data/native-plugin-aliases"
     alias_dir.mkdir(parents=True, exist_ok=True)

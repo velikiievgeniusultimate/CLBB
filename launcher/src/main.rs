@@ -40,12 +40,14 @@ fn launch() -> io::Result<()> {
     // Imported compiled artifacts stay on disk; launch clock already started.
     use std::io::Write;
     let migration = std::time::Instant::now();
+    if env::var("CLBB_MANAGED_INSTALL").as_deref()!=Ok("1") {
     match shader_cache::import(std::path::Path::new("/tmp/atl_cache/com.mobile.legends/UnityShaderCache"), &state.join("data/base.apk_/cache/com.mobile.legends")) {
         Ok(value) => { let _ = writeln!(output,"[CLBB shader cache migration] files={} bytes={} elapsed_us={}",value.files,value.bytes,migration.elapsed().as_micros()); }
         Err(error) => { let _ = writeln!(output,"[CLBB shader cache migration] skipped: {error}"); }
     }
+    }
     let mut command = Command::new(root.join("run-mlbb.sh"));
-    command.current_dir(&root).args(env::args_os().skip(1)).env("GDK_BACKEND", "x11");
+    command.current_dir(&root).args(env::args_os().skip(1)).env("GDK_BACKEND", "x11").env("CLBB_NATIVE_LOCK_HELD","1");
     if env::var_os("DISPLAY").is_none() { return Err(io::Error::other("X11 or XWayland DISPLAY is required")); }
     for (name, _) in env::vars_os() {
         let text = name.to_string_lossy();

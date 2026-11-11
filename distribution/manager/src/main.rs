@@ -14,17 +14,26 @@ fn base() -> PathBuf {
         env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".local/share")).join("clbb"))
 }
 fn fetch(url: &str, output: Option<&Path>) -> Result<Vec<u8>> {
-    let mut command=Command::new("curl");
-    command.args(["--fail", "--location", "--show-error", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "15", "--max-time", if output.is_some(){"1800"}else{"60"}, "--retry", "2", "--user-agent", "CLBB-Manager/0.1"]);
-    if let Some(path)=output {
-        eprintln!("[CLBB ↓] Download / Загрузка: {}",path.file_name().unwrap_or_default().to_string_lossy());
-        command.args(["--progress-bar","--write-out","\n[CLBB download] %{size_download} bytes · %{speed_download} B/s · %{time_total}s\n"]).stderr(Stdio::inherit()).arg("--output").arg(path);
-    } else {command.arg("--silent");}
-    command.arg(url);
-    let result=if output.is_some(){command.output()?}else{progress::run("Получение метаданных / Fetching metadata",||command.output())?};
-    if !result.status.success(){return Err(fail(&format!("Download failed ({}): {}",result.status,String::from_utf8_lossy(&result.stderr))));}
-    if output.is_some(){eprint!("{}",String::from_utf8_lossy(&result.stdout));return Ok(Vec::new());}
-    Ok(result.stdout)
+    let mut last_error=String::new();
+    for attempt in 0..4 {
+        if attempt>0 {eprintln!("[CLBB …] Повтор / Retry {}/4; продолжение с сохранённого места / resuming partial download",attempt+1);std::thread::sleep(std::time::Duration::from_secs(attempt));}
+        let mut command=Command::new("curl");
+        command.args(["--fail","--location","--show-error","--proto","=https","--proto-redir","=https","--connect-timeout","15","--max-time",if output.is_some(){"1800"}else{"60"},"--retry","0","--user-agent","CLBB-Manager/0.1"]);
+        if let Some(path)=output {
+            let offset=fs::metadata(path).map(|v|v.len()).unwrap_or(0);
+            eprintln!("[CLBB ↓] Download / Загрузка: {} · сохранено / saved: {} bytes",path.file_name().unwrap_or_default().to_string_lossy(),offset);
+            command.args(["--progress-bar","--continue-at","-","--write-out","\n[CLBB download] %{size_download} bytes · %{speed_download} B/s · %{time_total}s\n"]).stderr(Stdio::inherit()).arg("--output").arg(path);
+        }else{command.arg("--silent");}
+        command.arg(url);
+        let result=if output.is_some(){command.output()?}else{progress::run("Получение метаданных / Fetching metadata",||command.output())?};
+        if result.status.success(){
+            if output.is_some(){eprint!("{}",String::from_utf8_lossy(&result.stdout));return Ok(Vec::new());}
+            return Ok(result.stdout);
+        }
+        last_error=format!("Download failed ({}): {}",result.status,String::from_utf8_lossy(&result.stderr));
+        if result.status.code()==Some(33){if let Some(path)=output{let _=fs::remove_file(path);eprintln!("[CLBB …] Сервер не поддержал Range; повтор с начала / Range unsupported, restarting");}}
+    }
+    Err(fail(&last_error))
 }
 fn version(tag:&str)->Option<(u32,u32,u32,bool,u32)> {
     let tag=tag.strip_prefix('v')?;let (number,pre)=tag.split_once('-').unwrap_or((tag,""));

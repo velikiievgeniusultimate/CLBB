@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Arch Linux / Manjaro / EndeavourOS, x86_64. Game APK is downloaded separately.
 set -eu
-printf '%s\n' '[1/7] Проверка системы / Checking system'
+printf '%s\n' '[1/8] Проверка системы / Checking system'
 [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] || { echo 'CLBB: Linux x86_64 required / требуется Linux x86_64' >&2; exit 1; }
 command -v pacman >/dev/null || { echo 'CLBB: this installer currently supports Arch, Manjaro and EndeavourOS.' >&2; exit 1; }
 [ "$(id -u)" != 0 ] || { echo 'CLBB: run as your normal desktop user, without sudo / запускайте без sudo.' >&2; exit 1; }
@@ -48,7 +48,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 clbb_stage() { CLBB_STAGE=$1; printf '\n%s\n' "$CLBB_STAGE"; }
-clbb_stage '[2/7] Поиск версии CLBB / Finding release'
+clbb_stage '[2/8] Поиск версии CLBB / Finding release'
 CLBB_REPO=velikiievgeniusultimate/CLBB
 curl --fail --location --progress-bar --show-error --proto '=https' --proto-redir '=https' \
     "https://api.github.com/repos/$CLBB_REPO/releases?per_page=20" -o "$CLBB_TMP/releases.json"
@@ -64,12 +64,12 @@ print(max(found)[1])
 PY
 CLBB_TAG=$(cat "$CLBB_TMP/tag")
 CLBB_URL="https://github.com/$CLBB_REPO/releases/download/$CLBB_TAG"
-clbb_stage '[3/7] Загрузка установщика / Downloading installer'
+clbb_stage '[3/8] Загрузка установщика / Downloading installer'
 for file in clbb-manager-linux-x86_64 SHA256SUMS; do
     curl --fail --location --progress-bar --show-error --proto '=https' --proto-redir '=https' \
         "$CLBB_URL/$file" -o "$CLBB_TMP/$file"
 done
-clbb_stage '[4/7] Проверка установщика / Verifying installer'
+clbb_stage '[4/8] Проверка установщика / Verifying installer'
 python3 - "$CLBB_TMP" <<'PY'
 import hashlib,pathlib,sys
 root=pathlib.Path(sys.argv[1]);name='clbb-manager-linux-x86_64'
@@ -77,9 +77,9 @@ entries=[line.split()[0] for line in (root/'SHA256SUMS').read_text().splitlines(
 if len(entries)!=1 or hashlib.sha256((root/name).read_bytes()).hexdigest()!=entries[0]:raise SystemExit('CLBB: SHA256 mismatch')
 PY
 chmod 700 "$CLBB_TMP/clbb-manager-linux-x86_64"
-clbb_stage '[5/7] Установка CLBB / Installing CLBB'
+clbb_stage '[5/8] Установка CLBB / Installing CLBB'
 "$CLBB_TMP/clbb-manager-linux-x86_64" --install
-clbb_stage '[6/7] Установка игры / Installing game'
+clbb_stage '[6/8] Установка игры / Installing game'
 if [ -n "${CLBB_APK_FILE:-}" ]; then
     "$CLBB_TMP/clbb-manager-linux-x86_64" --import-game "$CLBB_APK_FILE"
 elif [ -n "${CLBB_APK_URL:-}" ]; then
@@ -111,6 +111,17 @@ PYAPK
         "$CLBB_TMP/clbb-manager-linux-x86_64" --import-game-url "$CLBB_GAME_URL" "$CLBB_GAME_SHA256"
     fi
 fi
-clbb_stage '[7/7] Готово / Complete'
+clbb_stage '[7/8] Подготовка ARM64-библиотек игры / Preparing ARM64 game libraries'
+CLBB_GAME_STATE="${CLBB_STATE_ROOT:-${CLBB_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/clbb}/state}"
+if [ -f "$CLBB_GAME_STATE/game/base.apk" ]; then
+    CLBB_NATIVE_HELPER="${CLBB_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/clbb}/current/distribution/native_libs.py"
+    if [ ! -f "$CLBB_NATIVE_HELPER" ]; then
+        curl --fail --location --progress-bar --show-error --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 60 \
+            "https://raw.githubusercontent.com/$CLBB_REPO/main/distribution/native_libs.py" -o "$CLBB_TMP/native_libs.py"
+        CLBB_NATIVE_HELPER="$CLBB_TMP/native_libs.py"
+    fi
+    python3 "$CLBB_NATIVE_HELPER" "$CLBB_GAME_STATE"
+fi
+clbb_stage '[8/8] Готово / Complete' 
 printf 'Журнал установки / Installation log: %s\n' "$CLBB_LOG"
 printf '%s\n' 'CLBB установлен / installed. Запустите CLBB из меню приложений / Launch CLBB from your application menu.'

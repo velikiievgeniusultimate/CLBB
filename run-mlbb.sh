@@ -26,6 +26,7 @@ export PULSE_PROP="${PULSE_PROP:+$PULSE_PROP }application.name=CLBB application.
 if [[ -z "${PIPEWIRE_ALSA:-}" ]]; then
     export PIPEWIRE_ALSA='{ application.name = "CLBB" application.id = "org.clbb.CLBB" node.description = "CLBB" media.name = "Mobile Legends" }'
 fi
+export ATL_SKIP_NATIVES_EXTRACTION=1
 export ATL_START_WINDOWED=1
 export CLBB_FAST_WINDOW_CLOSE=1
 unset ATL_FORCE_FULLSCREEN

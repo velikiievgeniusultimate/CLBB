@@ -24,7 +24,8 @@ The installer selects the latest published testing or stable version, verifies
 SHA256 downloads and preserves previous application releases.
 
 **A clean installation automatically downloads the Mobile Legends APK from StarFive**
-and verifies its SHA256 before importing it. No manual APK selection or copying is needed.
+and verifies its SHA256 before importing it. Interrupted transfers are retried
+with the partial download resumed. No manual APK selection or copying is needed.
 Re-running the installer preserves existing APKs and account data.
 The APK is not included in the Git repository or GitHub releases; it is a separate
 proprietary game download and is not covered by the CLBB license.
@@ -153,3 +154,11 @@ Distribution-managed system packages and source checkouts are preserved.
 ```sh
 curl -fL --progress-bar https://raw.githubusercontent.com/velikiievgeniusultimate/CLBB/main/uninstall.sh | sh
 ```
+
+### Clean installs and ARM64
+
+Installation and startup explicitly prepare ARM64 libraries from base/split APKs,
+independent of the host CPU architecture. A separate installation stage is shown;
+subsequent launches use the APK-matched preparation cache. This fixes initial
+alpha builds where a clean state could lack `libmain.so`/`libEncryptorP.so` despite
+a successful APK download.
