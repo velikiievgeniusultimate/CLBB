@@ -15,6 +15,8 @@
 !/env.sh
 !/run-mlbb.sh
 !/install.sh
+!/diagnose.sh
+!/uninstall.sh
 !/build-runtime.sh
 !/build-arm-zlib.sh
 !/prepare-runtime.py

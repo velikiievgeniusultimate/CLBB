@@ -125,3 +125,31 @@ Free distribution and future voluntary donations do not remove license obligatio
 CLBB licensing grants no rights to Mobile Legends or MOONTON services. Publisher rules
 must be considered separately for third-party clients and game-state reading; open-source
 availability does not guarantee game approval or protection against account restrictions.
+
+## Progress, failures and clean reinstallation
+
+The installer shows stages and real download progress. Verification and extraction
+show activity and elapsed time when their percentage is unknown. Installation logs
+are stored in `~/.local/state/clbb/install/` (or the corresponding XDG_STATE_HOME).
+
+A failed launch creates a technical JSON report and opens a dialog with a reason,
+local file path and **Send report to server** button. Reports are sent only after
+the button is pressed; StarFive returns a report identifier. Reports exclude
+passwords, cookies, account files, memory dumps and gameplay recordings.
+Local reports: `~/.local/share/clbb/state/logs/reports/`.
+
+Run `~/.local/bin/clbb --diagnose` for a manual check. The independent diagnostic
+command above also works with old installations or an unloadable Rust launcher;
+it does not launch the game. Run the following independent diagnostic tool with old or unloadable installations:
+
+```sh
+curl -fL --progress-bar https://raw.githubusercontent.com/velikiievgeniusultimate/CLBB/main/diagnose.sh | sh
+```
+
+The reset command below removes CLBB, the APK, local account state, settings,
+caches, reports and shortcut. Close CLBB and the installer first.
+Distribution-managed system packages and source checkouts are preserved.
+
+```sh
+curl -fL --progress-bar https://raw.githubusercontent.com/velikiievgeniusultimate/CLBB/main/uninstall.sh | sh
+```

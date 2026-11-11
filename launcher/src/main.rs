@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! Normal CLBB entry point. Never starts or resumes a runtime before invocation.
 mod shader_cache;
+mod diagnostics;
 use std::{env, fs::{self, File, OpenOptions}, io, path::PathBuf};
 #[cfg(target_os = "linux")]
 use std::{os::{fd::AsRawFd, unix::process::CommandExt}, process::Command};
@@ -64,6 +65,7 @@ fn launch() -> io::Result<()> {
         if prctl(0x59616d61, usize::MAX, 0, 0, 0) != 0 { return Err(io::Error::last_os_error()); }
         Ok(())
     }); }
+    let lifetime=std::time::Instant::now();
     let mut child = command.spawn()?;
     let pid = child.id();
     let metadata = format!("{{\"backend\":\"qemu\",\"launcher_pid\":{},\"pid\":{},\"start_monotonic_ns\":{},\"fresh_process\":true}}\n", std::process::id(), pid, start_ns);
@@ -83,7 +85,9 @@ fn launch() -> io::Result<()> {
     let status = child.wait()?;
     fs::write(run.join("exit.json"), format!("{{\"success\":{},\"code\":{}}}\n", status.success(), status.code().map_or("null".to_owned(), |x| x.to_string())))?;
     drop(lock);
-    if status.success() { Ok(()) } else { Err(io::Error::other(format!("CLBB runtime exited: {status}"))) }
+    let desktop_close=fs::read_to_string(run.join("runtime.log")).unwrap_or_default().contains("[CLBB_EXIT] desktop_close");
+    if status.success() && (lifetime.elapsed().as_secs()>=3||desktop_close){Ok(())}
+    else {Err(io::Error::other(format!("CLBB runtime exited: {status}; elapsed={:.2}s",lifetime.elapsed().as_secs_f64())))}
 }
 
 fn runtime_root() -> io::Result<PathBuf> {
@@ -98,6 +102,17 @@ fn runtime_root() -> io::Result<PathBuf> {
 }
 fn main() {
     let args:Vec<_>=env::args().skip(1).collect();
+    if matches!(args.first().map(String::as_str),Some("--diagnose"|"--show-last-error"|"--send-report")) {
+        let result=(||->io::Result<()>{
+            let root=runtime_root()?;let state=env::var_os("CLBB_STATE_ROOT").map(PathBuf::from).unwrap_or_else(||root.clone());
+            let path=if args[0]=="--diagnose" {
+                let run=fs::read_dir(state.join("logs")).ok().into_iter().flatten().filter_map(Result::ok).map(|e|e.path()).filter(|p|p.is_dir()&&p.file_name().unwrap_or_default().to_string_lossy().starts_with("qemu-launch-")).max();
+                diagnostics::report(&root,&state,"Проверка запуска по запросу / Manual startup check","manual",run.as_deref())?
+            }else{args.get(1).map(PathBuf::from).unwrap_or_else(||state.join("logs/last-diagnostic.json"))};
+            if args[0]=="--send-report" {println!("Report sent: {}",diagnostics::send(&path)?);Ok(())}else{diagnostics::show(&path)}
+        })();
+        if let Err(e)=result{eprintln!("CLBB diagnostics: {e}");std::process::exit(1);}return;
+    }
     if args.first().map(String::as_str)==Some("--version") {
         match runtime_root().and_then(|r|fs::read_to_string(r.join("VERSION"))) {Ok(v)=>print!("CLBB {}",v),Err(_)=>println!("CLBB dev")};return;
     }
@@ -110,5 +125,15 @@ fn main() {
     let result = launch();
     #[cfg(not(target_os = "linux"))]
     let result: io::Result<()> = Err(io::Error::new(io::ErrorKind::Unsupported, "This runtime is currently available for Linux"));
-    if let Err(error) = result { eprintln!("CLBB: {error}"); std::process::exit(1); }
+    if let Err(error) = result {
+        eprintln!("CLBB: {error}");
+        if let Ok(root)=runtime_root(){
+            let state=env::var_os("CLBB_STATE_ROOT").map(PathBuf::from).unwrap_or_else(||root.clone());
+            let run=fs::read_dir(state.join("logs")).ok().into_iter().flatten().filter_map(Result::ok).map(|e|e.path()).filter(|p|p.is_dir()&&p.file_name().unwrap_or_default().to_string_lossy().starts_with("qemu-launch-")).max();
+            if let Ok(path)=diagnostics::report(&root,&state,&error.to_string(),"launch_failure",run.as_deref()){
+                if env::var("CLBB_WRAPPED").as_deref()!=Ok("1"){let _=diagnostics::show(&path);}
+            }
+        }
+        std::process::exit(1);
+    }
 }

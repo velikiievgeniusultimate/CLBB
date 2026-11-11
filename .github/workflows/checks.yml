@@ -14,6 +14,10 @@ jobs:
         run: cargo test --manifest-path mapper/runtime/Cargo.toml --lib --locked --offline
       - name: Installer manager
         run: cargo test --manifest-path distribution/manager/Cargo.toml --locked --offline
+      - name: Launcher diagnostics
+        run: cargo test --manifest-path launcher/Cargo.toml --locked --offline
+      - name: Report receiver
+        run: cargo test --manifest-path distribution/report-server/Cargo.toml --locked --offline
       - name: Distribution checks
         run: python3 -m unittest discover -s distribution/tests -v
       - name: Shell syntax

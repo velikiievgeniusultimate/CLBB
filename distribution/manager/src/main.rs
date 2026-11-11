@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Versioned user installation. Platform-specific activation is kept separate
 //! from the GitHub release protocol so future Windows support can replace it.
+mod progress;
 use serde_json::{json, Value};
 use std::{env, fs, io, path::{Path, PathBuf}, process::{Command, Stdio}};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -14,10 +15,15 @@ fn base() -> PathBuf {
 }
 fn fetch(url: &str, output: Option<&Path>) -> Result<Vec<u8>> {
     let mut command=Command::new("curl");
-    command.args(["--fail", "--location", "--silent", "--show-error", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "15", "--max-time", if output.is_some(){"1800"}else{"60"}, "--retry", "2", "--user-agent", "CLBB-Manager/0.1"]);
-    if let Some(path)=output {command.arg("--output").arg(path);}
-    let result=command.arg(url).output()?;
-    if !result.status.success(){return Err(fail(&format!("Download failed: {}",String::from_utf8_lossy(&result.stderr))));}
+    command.args(["--fail", "--location", "--show-error", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "15", "--max-time", if output.is_some(){"1800"}else{"60"}, "--retry", "2", "--user-agent", "CLBB-Manager/0.1"]);
+    if let Some(path)=output {
+        eprintln!("[CLBB ↓] Download / Загрузка: {}",path.file_name().unwrap_or_default().to_string_lossy());
+        command.args(["--progress-bar","--write-out","\n[CLBB download] %{size_download} bytes · %{speed_download} B/s · %{time_total}s\n"]).stderr(Stdio::inherit()).arg("--output").arg(path);
+    } else {command.arg("--silent");}
+    command.arg(url);
+    let result=if output.is_some(){command.output()?}else{progress::run("Получение метаданных / Fetching metadata",||command.output())?};
+    if !result.status.success(){return Err(fail(&format!("Download failed ({}): {}",result.status,String::from_utf8_lossy(&result.stderr))));}
+    if output.is_some(){eprint!("{}",String::from_utf8_lossy(&result.stdout));return Ok(Vec::new());}
     Ok(result.stdout)
 }
 fn version(tag:&str)->Option<(u32,u32,u32,bool,u32)> {
@@ -44,10 +50,13 @@ fn checksum(sums:&str,name:&str)->Result<String> {
     if found.len()!=1||found[0].len()!=64||!found[0].bytes().all(|c|c.is_ascii_hexdigit()){return Err(fail("Missing or ambiguous SHA256"));}
     Ok(found[0].to_lowercase())
 }
-fn verify(path:&Path,expected:&str)->Result<()> {
+fn verify_inner(path:&Path,expected:&str)->Result<()> {
     let output=Command::new("sha256sum").arg("--").arg(path).output()?;
     let actual=String::from_utf8(output.stdout)?.split_whitespace().next().unwrap_or("").to_owned();
     if !output.status.success()||actual!=expected{return Err(fail("SHA256 mismatch / Контрольная сумма не совпадает"));}Ok(())
+}
+fn verify(path:&Path,expected:&str)->Result<()> {
+    progress::run("Проверка SHA256 / Verifying SHA256",||verify_inner(path,expected))
 }
 fn installed(root:&Path)->String {fs::read_to_string(root.join("current/VERSION")).unwrap_or_default().trim().to_owned()}
 fn supported()->Result<()> {
@@ -94,7 +103,30 @@ fn entrypoints(root:&Path)->Result<()> {
     let bin=home.join(".local/bin");fs::create_dir_all(&bin)?;
     // Embed the selected installation root as a shell-quoted literal, never eval.
     let quoted=format!("'{}'",root.to_string_lossy().replace('\'',"'\\''"));
-    let script=format!("#!/bin/sh\nset -eu\nCLBB_BASE={quoted}\nexport CLBB_STATE_ROOT=\"$CLBB_BASE/state\"\nexport CLBB_INSTALL_ROOT=\"$CLBB_BASE\"\nexport CLBB_MANAGED_INSTALL=1\nCLBB_ROOT=$(readlink -f -- \"$CLBB_BASE/current\")\nexport CLBB_ROOT\nexec \"$CLBB_ROOT/bin/clbb-launcher\" \"$@\"\n");
+    let script=format!(r#"#!/bin/sh
+set -eu
+umask 077
+CLBB_BASE={quoted}
+export CLBB_STATE_ROOT="$CLBB_BASE/state"
+export CLBB_INSTALL_ROOT="$CLBB_BASE"
+export CLBB_MANAGED_INSTALL=1
+CLBB_ROOT=$(readlink -f -- "$CLBB_BASE/current")
+export CLBB_ROOT
+if [ "$#" -gt 0 ]; then exec "$CLBB_ROOT/bin/clbb-launcher" "$@"; fi
+mkdir -p "$CLBB_STATE_ROOT/logs"
+rm -f -- "$CLBB_STATE_ROOT/logs/last-diagnostic.json"
+export CLBB_WRAPPED=1
+set +e
+"$CLBB_ROOT/bin/clbb-launcher" 2>"$CLBB_STATE_ROOT/logs/launcher-stderr.log"
+CLBB_EXIT=$?
+set -e
+if [ "$CLBB_EXIT" -ne 0 ]; then
+    "$CLBB_ROOT/bin/clbb-launcher" --show-last-error 2>>"$CLBB_STATE_ROOT/logs/launcher-stderr.log" || \
+        python3 "$CLBB_ROOT/distribution/launch-fallback.py" "$CLBB_ROOT" "$CLBB_STATE_ROOT" "Ошибка запуска CLBB (код $CLBB_EXIT)"
+fi
+exit "$CLBB_EXIT"
+"#);
+
     write_atomic(&bin.join("clbb"),script.as_bytes())?;fs::set_permissions(bin.join("clbb"),fs::Permissions::from_mode(0o755))?;
     let data=env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(||home.join(".local/share"));
     let exe=bin.join("clbb").to_string_lossy().replace('\\',"\\\\").replace('"',"\\\"").replace('`',"\\`").replace('$',"\\$").replace('%',"%%");
@@ -127,13 +159,15 @@ fn install(rel:&Value,root:&Path,allow_deps:bool)->Result<Value> {
     let sums=String::from_utf8(fetch(&asset(rel,"SHA256SUMS")?,None)?)?;
     let name=format!("clbb-{tag}-linux-x86_64.tar.gz");let archive=work.join(&name);
     fetch(&asset(rel,&name)?,Some(&archive))?;verify(&archive,&checksum(&sums,&name)?)?;
-    let staged=work.join("runtime");fs::create_dir(&staged)?;extract(&archive,&staged)?;
+    let staged=work.join("runtime");fs::create_dir(&staged)?;progress::run("Распаковка CLBB / Extracting runtime",||extract(&archive,&staged))?;
     let info:Value=serde_json::from_slice(&fs::read(staged.join("release.json"))?)?;
     if info["schema"]!=1||info["version"]!=tag||info["platform"]!="linux-x86_64"||fs::read_to_string(staged.join("VERSION"))?.trim()!=tag{return Err(fail("Release payload metadata does not match"));}
     // The source companion is mandatory; a code-only release is not a runtime installer.
     asset(rel,&format!("clbb-{tag}-sources.tar.gz"))?;
-    verify_payload(&staged,&staged.join("release.json"))?;
+    progress::run("Проверка файлов CLBB / Verifying runtime files",||verify_payload(&staged,&staged.join("release.json")))?;
+    eprintln!("[CLBB …] Проверка и установка системных пакетов / System dependencies");
     dependencies(&info,allow_deps)?;
+    eprintln!("[CLBB OK] Системные пакеты / System dependencies");
     for required in ["bin/clbb-launcher","bin/clbb-manager","run-mlbb.sh","prefix/bin/android-translation-layer"]{if !staged.join(required).is_file(){return Err(fail("Incomplete runtime payload"));}}
     // Check that the declared minimum libc is satisfied before activation.
     let result=Command::new("getconf").arg("GNU_LIBC_VERSION").output()?;
@@ -141,13 +175,15 @@ fn install(rel:&Value,root:&Path,allow_deps:bool)->Result<Value> {
     let libc=|s:&str|->Option<(u32,u32)>{let mut v=s.split('.');Some((v.next()?.parse().ok()?,v.next()?.parse().ok()?))};
     let minimum=info["min_glibc"].as_str().and_then(libc).ok_or("Missing minimum libc")?;
     if text.split_whitespace().nth(1).and_then(libc).is_none_or(|v|v<minimum){return Err(fail("System glibc is too old for this release"));}
-    let libraries=Command::new("python3").arg("-c").arg(include_str!("../../check_libraries.py")).arg(&staged).output()?;
+    let libraries=progress::run("Проверка ABI и библиотек / Checking runtime libraries",||Command::new("python3").arg("-c").arg(include_str!("../../check_libraries.py")).arg(&staged).output())?;
     if !libraries.status.success(){return Err(fail(&String::from_utf8_lossy(&libraries.stderr)));}
     fs::create_dir_all(root.join("releases"))?;let destination=root.join("releases").join(tag);
     // Never overwrite an existing release directory, especially one in use.
     if destination.exists(){verify_payload(&destination,&staged.join("release.json"))?;}
     else{fs::rename(staged,&destination)?;}
+    eprintln!("[CLBB …] Создание ярлыка и активация версии / Activating installation");
     entrypoints(root)?;activate(root,tag)?;
+    eprintln!("[CLBB OK] Версия активирована / Installation activated");
     Ok(json!({"state":"installed","version":tag,"restart_required":true,"installation":root}))
 }
 fn import_game(root:&Path,paths:&[String],dialog:bool)->Result<Value> {
@@ -160,7 +196,7 @@ fn import_game(root:&Path,paths:&[String],dialog:bool)->Result<Value> {
         files=String::from_utf8(output.stdout)?.lines().map(str::to_owned).collect();
     }
     if files.is_empty(){return Err(fail("Select base APK and any split APKs"));}
-    let result=Command::new("python3").arg(script).arg(state).args(files).output()?;
+    let result=progress::run("Проверка и импорт APK / Validating and importing APK",||Command::new("python3").arg(script).arg(state).args(files).output())?;
     if !result.status.success(){return Err(fail(&String::from_utf8_lossy(&result.stderr)));}
     Ok(serde_json::from_slice(&result.stdout)?)
 }

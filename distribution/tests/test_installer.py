@@ -45,5 +45,5 @@ flag='--output'if '--output'in args else '-o';shutil.copyfile(p/name,args[args.i
     def test_missing_local_apk_fails_before_network_or_install(self):
         result,calls,requests,_=self.run_installer(override={'CLBB_APK_FILE':'/clbb/does-not-exist.apk'});self.assertNotEqual(result.returncode,0);self.assertEqual(calls,[]);self.assertEqual(requests,[]);self.assertIn('APK file not found',result.stderr)
     def test_non_https_default_source_is_rejected(self):
-        result,calls,_,_=self.run_installer(manifest_url='http://fixture.invalid/game.apk');self.assertNotEqual(result.returncode,0);self.assertEqual(calls,[['--install']]);self.assertIn('Invalid game download URL',result.stderr)
+        result,calls,_,_=self.run_installer(manifest_url='http://fixture.invalid/game.apk');self.assertNotEqual(result.returncode,0);self.assertEqual(calls,[['--install']]);self.assertIn('Invalid game download URL',result.stdout+result.stderr)
 if __name__=='__main__':unittest.main()

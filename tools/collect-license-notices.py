@@ -76,7 +76,7 @@ for name, pin in sorted(json.loads((ROOT / 'sources.json').read_text()).items())
 
 # Exact resolved Rust dependencies, not just the old provenance list.
 rust = {}
-for manifest in ['mapper/core', 'mapper/runtime', 'launcher', 'dns-adapter', 'webkit-launch-adapter', 'distribution/manager']:
+for manifest in ['mapper/core', 'mapper/runtime', 'launcher', 'dns-adapter', 'webkit-launch-adapter', 'distribution/manager', 'distribution/report-server']:
     result = run('cargo', 'metadata', '--offline', '--locked', '--format-version', '1',
                  '--manifest-path', str(ROOT / manifest / 'Cargo.toml'))
     if result.returncode:

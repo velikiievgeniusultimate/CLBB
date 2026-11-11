@@ -58,6 +58,7 @@ struct ClbbSettings {
   gboolean pacing_dirty;
   GtkWidget *update_version;
   GtkWidget *update_status;
+  GtkWidget *update_progress;
   GtkWidget *update_check;
   GtkWidget *update_install;
   GtkStack *stack;
@@ -123,6 +124,7 @@ static const char css[] =
     "solid #e65b7e; }"
     ".clbb-footer { border-top: 1px solid #392832; padding: 10px 24px; color: "
     "#baacb6; font-size: 12px; }"
+    ".clbb-progress progress { background: #d84b70; } .clbb-progress trough { background: #232735; min-height: 8px; } "
     ".clbb-accent { color: #ff6b91; } .clbb-info { color: #9dbad3; } "
     ".clbb-override { font-size: 11px; color: #c5b4c0; }";
 
@@ -1184,6 +1186,10 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_box_append(GTK_BOX(card), s->update_version);
   s->update_status = wrap_label("", "clbb-info");
   gtk_box_append(GTK_BOX(card), s->update_status);
+  s->update_progress = gtk_progress_bar_new();
+  gtk_widget_add_css_class(s->update_progress, "clbb-progress");
+  gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(s->update_progress), TRUE);
+  gtk_box_append(GTK_BOX(card), s->update_progress);
   GtkWidget *update_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
   s->update_check = gtk_button_new_with_label("Проверить обновления");
   s->update_install = gtk_button_new_with_label("Установить обновление");
@@ -1212,6 +1218,14 @@ void clbb_settings_refresh(ClbbSettings *s) {
   g_free(update_label); g_free(update_text);
   update_text = read_text(s, "updates.status", "Обновления доступны в установленной версии CLBB.");
   gtk_label_set_text(GTK_LABEL(s->update_status), update_text); g_free(update_text);
+  gboolean update_busy = read_bool(s, "updates.busy", FALSE);
+  char *progress_text = read_text(s, "updates.progress", "-1");
+  double percent = g_ascii_strtod(progress_text, NULL);g_free(progress_text);
+  gtk_widget_set_visible(s->update_progress, update_busy);
+  if (update_busy) {
+    if (percent >= 0) {gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(s->update_progress), CLAMP(percent / 100.0, 0.0, 1.0));char *text = g_strdup_printf("%.1f%%",percent);gtk_progress_bar_set_text(GTK_PROGRESS_BAR(s->update_progress),text);g_free(text);}
+    else {gtk_progress_bar_set_text(GTK_PROGRESS_BAR(s->update_progress),"Выполняется…");gtk_progress_bar_pulse(GTK_PROGRESS_BAR(s->update_progress));}
+  }
   gtk_widget_set_sensitive(s->update_check, !read_bool(s, "updates.busy", FALSE));
   gtk_widget_set_sensitive(s->update_install, read_bool(s, "updates.available", FALSE));
   }

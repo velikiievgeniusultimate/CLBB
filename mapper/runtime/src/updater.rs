@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! User-triggered updates run outside the GTK/input thread. Activation affects
 //! the next launch; running releases and persistent game data are untouched.
-use std::{path::PathBuf, process::Command, sync::{Arc,Mutex}};
+use std::{path::PathBuf, process::{Command,Stdio},io::Read, sync::{Arc,Mutex}};
 #[derive(Default)]
-struct State {busy:bool,available:bool,status:String}
+struct State {busy:bool,available:bool,status:String,progress:Option<f64>}
 pub struct Updates {state:Arc<Mutex<State>>,manager:PathBuf,managed:bool,version:String}
 impl Updates {
     pub fn new()->Self {
@@ -16,18 +16,35 @@ impl Updates {
     }
     pub fn read(&self,key:&str)->String {
         let state=self.state.lock().unwrap_or_else(|e|e.into_inner());
-        match key {"updates.version"=>self.version.clone(),"updates.status"=>state.status.clone(),"updates.busy"=>state.busy.to_string(),"updates.available"=>(self.managed&&state.available&&!state.busy).to_string(),_=>String::new()}
+        match key {"updates.progress"=>state.progress.unwrap_or(-1.0).to_string(),"updates.version"=>self.version.clone(),"updates.status"=>state.status.clone(),"updates.busy"=>state.busy.to_string(),"updates.available"=>(self.managed&&state.available&&!state.busy).to_string(),_=>String::new()}
     }
     pub fn request(&self,key:&str)->bool {
         if !matches!(key,"updates.check"|"updates.install"){return false;}
         let install=key=="updates.install";let mut state=self.state.lock().unwrap_or_else(|e|e.into_inner());
         if state.busy||install&&!self.managed{return false;}
         if !self.manager.is_file(){state.status="Менеджер обновлений не найден. Запустите установщик CLBB.".into();return false;}
-        state.busy=true;state.status=if install{"Загружается обновление. Игра продолжает работать."}else{"Проверяем новые версии…"}.into();drop(state);
+        state.busy=true;state.progress=None;state.status=if install{"Загружается обновление. Игра продолжает работать."}else{"Проверяем новые версии…"}.into();drop(state);
         let shared=self.state.clone();let manager=self.manager.clone();
         let spawn=std::thread::Builder::new().name("clbb-updater".into()).spawn(move||{
-            let result=Command::new(manager).arg(if install{"--update"}else{"--check"}).env_remove("LD_PRELOAD").env_remove("LD_LIBRARY_PATH").output();
-            let mut state=shared.lock().unwrap_or_else(|e|e.into_inner());state.busy=false;
+            let result=(||->std::io::Result<std::process::Output>{
+                let mut child=Command::new(manager).arg(if install{"--update"}else{"--check"}).env_remove("LD_PRELOAD").env_remove("LD_LIBRARY_PATH").stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+                let mut stream=child.stderr.take().unwrap();let progress=shared.clone();
+                let reader=std::thread::spawn(move||{
+                    let mut buffer=[0u8;1024];let mut line=Vec::new();
+                    while let Ok(count)=stream.read(&mut buffer){if count==0{break;}for byte in &buffer[..count]{
+                        if *byte==b'\r'||*byte==b'\n'{
+                            let text=String::from_utf8_lossy(&line);let text=text.trim();
+                            if text.starts_with("[CLBB") {let mut state=progress.lock().unwrap_or_else(|e|e.into_inner());state.status=text.chars().take(400).collect();state.progress=None;}
+                            else if let Some(number)=text.split_whitespace().last().and_then(|s|s.strip_suffix('%')).and_then(|s|s.parse::<f64>().ok()){
+                                let mut state=progress.lock().unwrap_or_else(|e|e.into_inner());state.progress=Some(number.clamp(0.0,100.0));
+                            }
+                            line.clear();
+                        }else if line.len()<2048{line.push(*byte);}
+                    }}
+                });
+                let result=child.wait_with_output();let _=reader.join();result
+            })();
+            let mut state=shared.lock().unwrap_or_else(|e|e.into_inner());state.busy=false;state.progress=None;
             match result {
                 Ok(output)=>{
                     let value=serde_json::from_slice::<serde_json::Value>(&output.stdout);
@@ -56,10 +73,12 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir=std::env::temp_dir().join(format!("clbb-updater-test-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();
         let helper=dir.join("helper");let gate=dir.join("gate");let _=std::fs::remove_file(&gate);
-        let script=format!("#!/bin/sh\ni=0\nwhile [ ! -f '{}' ] && [ \"$i\" -lt 100 ]; do i=$((i+1)); sleep .01; done\nprintf '%s' '{{\"available\":true,\"latest\":\"v0.1.0\"}}'\n",gate.display());
+        let script=format!("#!/bin/sh\nprintf '%s\\r' '######### 42.0%' >&2\ni=0\nwhile [ ! -f '{}' ] && [ \"$i\" -lt 100 ]; do i=$((i+1)); sleep .01; done\nprintf '%s' '{{\"available\":true,\"latest\":\"v0.1.0\"}}'\n",gate.display());
         std::fs::write(&helper,script).unwrap();std::fs::set_permissions(&helper,std::fs::Permissions::from_mode(0o700)).unwrap();
         let updates=Updates{state:Default::default(),manager:helper,managed:true,version:"v0.0.1".into()};
         assert!(updates.request("updates.check"));assert_eq!(updates.read("updates.busy"),"true");assert!(!updates.request("updates.check"));
+        for _ in 0..200 {if updates.read("updates.progress")=="42"{break;}std::thread::sleep(std::time::Duration::from_millis(5));}
+        assert_eq!(updates.read("updates.progress"),"42");assert_eq!(updates.read("updates.busy"),"true");
         std::fs::write(gate,b"go").unwrap();
         for _ in 0..200 {if updates.read("updates.busy")=="false"{break;}std::thread::sleep(std::time::Duration::from_millis(5));}
         assert_eq!(updates.read("updates.available"),"true");assert!(updates.read("updates.status").contains("v0.1.0"));let _=std::fs::remove_dir_all(dir);

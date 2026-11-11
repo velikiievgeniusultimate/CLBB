@@ -1172,6 +1172,19 @@
       ]
     },
     {
+      "name": "capstone",
+      "version": "5.0.9-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.capstone-engine.org/index.html",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/capstone/LICENSE.TXT",
+          "sha256": "65e9ed46a59976eda8f5bd1ea79a680dea38dd299c760bc9a8d87a764ef5029b"
+        }
+      ]
+    },
+    {
       "name": "dav1d",
       "version": "1.5.4-1",
       "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
@@ -1241,6 +1254,23 @@
         {
           "path": "legal/third-party/common/GPL-3.0-only.txt",
           "sha256": "fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0"
+        }
+      ]
+    },
+    {
+      "name": "flac",
+      "version": "1.5.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xiph.org/flac/",
+      "license_expression": "BSD-3-Clause  GPL-2.0-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/flac/COPYING.Xiph",
+          "sha256": "7866ee98760fc1f0156b4fe6bf530257e02be487ab3fd94e2b63799dd32d6b2c"
+        },
+        {
+          "path": "legal/third-party/common/GPL-2.0-or-later.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
         }
       ]
     },
@@ -1831,6 +1861,19 @@
       ]
     },
     {
+      "name": "libedit",
+      "version": "20260512_3.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://thrysoee.dk/editline/",
+      "license_expression": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libedit/COPYING",
+          "sha256": "9da6c9c74987a36c84302982799d17d2f748ba1c1c0c471425716173c1d07649"
+        }
+      ]
+    },
+    {
       "name": "libelf",
       "version": "0.196-1",
       "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
@@ -2120,6 +2163,32 @@
       ]
     },
     {
+      "name": "libpciaccess",
+      "version": "0.19-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://gitlab.freedesktop.org/xorg/lib/libpciaccess",
+      "license_expression": "LicenseRef-libpciaccess",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libpciaccess/COPYING",
+          "sha256": "f33f360f8905940dac01aa21597fe8a6727ca6f4ffa43b380e2116fd0666aa8a"
+        }
+      ]
+    },
+    {
+      "name": "libpipewire",
+      "version": "1:1.6.9-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://pipewire.org",
+      "license_expression": "MIT",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libpipewire/COPYING",
+          "sha256": "8909c319a7e27dbb33a15b9035f89ab3b7b2f6a12f8bcddc755206a8db1ada44"
+        }
+      ]
+    },
+    {
       "name": "libpng",
       "version": "1.6.59-1",
       "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
@@ -2176,6 +2245,19 @@
       "version": "0.21.8.2-1",
       "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
       "url": "https://gnome.pages.gitlab.gnome.org/libsecret/",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "libsndfile",
+      "version": "1.2.2-4",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://libsndfile.github.io/libsndfile/",
       "license_expression": "LGPL-2.1-or-later",
       "license_files": [
         {
@@ -2598,6 +2680,19 @@
       ]
     },
     {
+      "name": "libxshmfence",
+      "version": "1.3.3-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://xorg.freedesktop.org/",
+      "license_expression": "HPND-sell-variant",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/libxshmfence/COPYING",
+          "sha256": "64a579d1a0b3347301d87c94698a58ea7933d0ae6ca7e8fdd702fde2ea376301"
+        }
+      ]
+    },
+    {
       "name": "libxslt",
       "version": "1.1.45-2",
       "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
@@ -2620,6 +2715,40 @@
         {
           "path": "legal/third-party/system/libyuv/LICENSE",
           "sha256": "2b2cc1180c7e6988328ad2033b04b80117419db9c4c584918bbb3cfec7e9364f"
+        }
+      ]
+    },
+    {
+      "name": "llvm-libs",
+      "version": "23.1.1-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://llvm.org/",
+      "license_expression": "Apache-2.0 WITH LLVM-exception",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/llvm-libs/LICENSE",
+          "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+        },
+        {
+          "path": "legal/third-party/common/Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+        }
+      ]
+    },
+    {
+      "name": "lm_sensors",
+      "version": "1:3.6.2-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://hwmon.wiki.kernel.org/lm_sensors",
+      "license_expression": "GPL-2.0-only OR LGPL-2.1-only",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/GPL-2.0-only.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+        },
+        {
+          "path": "legal/third-party/common/LGPL-2.1-only.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
         }
       ]
     },
@@ -2672,6 +2801,19 @@
         {
           "path": "legal/third-party/common/LGPL-2.1-only.txt",
           "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
+    },
+    {
+      "name": "ncurses",
+      "version": "6.6-2",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://invisible-island.net/ncurses/ncurses.html",
+      "license_expression": "MIT-open-group",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/ncurses/COPYING",
+          "sha256": "708999f95527e1ffa670c6fce288c6c600cb477dd04afcc1171422b3dd4ee226"
         }
       ]
     },
@@ -2834,6 +2976,36 @@
       ]
     },
     {
+      "name": "sdl2-compat",
+      "version": "2.32.74-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://github.com/libsdl-org/sdl2-compat",
+      "license_expression": "Zlib",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/sdl2-compat/LICENSE",
+          "sha256": "0164aec3168ca9606c1f6066e879b4e8c7f2e46a838391f284348ab0aa1eabf2"
+        },
+        {
+          "path": "legal/third-party/system/sdl2-compat/LICENSE.txt",
+          "sha256": "0164aec3168ca9606c1f6066e879b4e8c7f2e46a838391f284348ab0aa1eabf2"
+        }
+      ]
+    },
+    {
+      "name": "sdl3",
+      "version": "3.4.18-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.libsdl.org",
+      "license_expression": "Zlib",
+      "license_files": [
+        {
+          "path": "legal/third-party/system/sdl3/LICENSE",
+          "sha256": "1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd"
+        }
+      ]
+    },
+    {
       "name": "snappy",
       "version": "1.2.2-3",
       "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
@@ -2856,6 +3028,19 @@
         {
           "path": "legal/third-party/system/speex/COPYING",
           "sha256": "2654a4264b2bfe298dedc508748d140111840c315cc8eb646a3a68c13fa75b01"
+        }
+      ]
+    },
+    {
+      "name": "spirv-tools",
+      "version": "1:1.4.363.0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.khronos.org/spirv/",
+      "license_expression": "Apache-2.0",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/Apache-2.0.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
         }
       ]
     },
@@ -3126,7 +3311,6 @@
   ],
   "remaining_review": [
     "libopensles-standalone: source-header notices collected; review per-file terms and required full license texts",
-    "Owned runtime is not running; live optional-library observation was skipped without starting the game.",
     "System e2fsprogs: legacy declaration GPL; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.",
     "System libidn2: legacy declaration GPL2; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.",
     "System libidn2: legacy declaration LGPL3; confirm exact grant/version from source headers. Collected standard text is a reference, not a relicense.",

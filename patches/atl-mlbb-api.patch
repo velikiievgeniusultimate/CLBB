@@ -4419,7 +4419,7 @@ index e055ce0..2f96b86 100644
  	/* TODO: compare with canonicalized path */
  	if (!strcmp(*path, "/system/etc/fonts.xml")) {
 diff --git a/src/main-executable/main.c b/src/main-executable/main.c
-index f88cbd5..6de2d9a 100644
+index f88cbd5..046f8e1 100644
 --- a/src/main-executable/main.c
 +++ b/src/main-executable/main.c
 @@ -3,6 +3,7 @@
@@ -4451,7 +4451,7 @@ index f88cbd5..6de2d9a 100644
  
  #ifndef DEFFILEMODE
  	#define DEFFILEMODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH) /* 0666*/
-@@ -42,10 +50,89 @@
+@@ -42,10 +50,91 @@
  GtkWidget *window;
  char *apk_path;
  
@@ -4535,13 +4535,15 @@ index f88cbd5..6de2d9a 100644
 +	if (g_strcmp0(g_getenv("CLBB_FAST_WINDOW_CLOSE"), "1") == 0 &&
 +	    !g_object_get_data(G_OBJECT(self), "atl-activity-requested-close")) {
 +		clbb_mapper_unlink_control(self);
++		static const char close_marker[] = "[CLBB_EXIT] desktop_close\n";
++		(void)write(STDERR_FILENO, close_marker, sizeof(close_marker)-1);
 +		_exit(0);
 +	}
 +
  	activity_close_all();
  	return false;
  }
-@@ -59,7 +146,7 @@ char *get_app_data_dir()
+@@ -59,7 +148,7 @@ char *get_app_data_dir()
  
  char *construct_classpath(char *prefix, char **cp_array, size_t len)
  {
@@ -4550,7 +4552,7 @@ index f88cbd5..6de2d9a 100644
  	for (int i = 0; i < len; i++) {
  		if (cp_array[i])
  			result_len += strlen(cp_array[i]) + 1; // the 1 is for either : or the final \0
-@@ -87,17 +174,24 @@ JNIEnv *create_vm(char *api_impl_jar, char *apk_classpath, char *framework_res_a
+@@ -87,17 +176,24 @@ JNIEnv *create_vm(char *api_impl_jar, char *apk_classpath, char *framework_res_a
  	JNIEnv *env;
  	JavaVMInitArgs args = {
  		.version = JNI_VERSION_1_6,
@@ -4576,7 +4578,7 @@ index f88cbd5..6de2d9a 100644
  	if (jdwp_port)
  		args.nOptions += 2;
  	if (sdk_int)
-@@ -117,7 +211,8 @@ JNIEnv *create_vm(char *api_impl_jar, char *apk_classpath, char *framework_res_a
+@@ -117,7 +213,8 @@ JNIEnv *create_vm(char *api_impl_jar, char *apk_classpath, char *framework_res_a
  	// ATLLoadedApp relies on the first element in atl.app.class.path being the main apk
  	options[2].optionString = construct_classpath("-Datl.app.class.path=", (char *[]){apk_classpath}, 1);
  	options[3].optionString = construct_classpath("-Datl.app.library.path=", (char *[]){api_impl_natives_dir, app_lib_dir}, 2);
@@ -4586,7 +4588,7 @@ index f88cbd5..6de2d9a 100644
  	if (jdwp_port) {
  		strncat(jdwp_option_string, jdwp_port, 5); // 5 chars is enough for a port number, and won't overflow our array
  		options[option_counter++].optionString = "-XjdwpProvider:internal";
-@@ -154,24 +249,30 @@ void icon_override(GtkWidget *window, GList *icon_list)
+@@ -154,24 +251,30 @@ void icon_override(GtkWidget *window, GList *icon_list)
  	gdk_toplevel_set_icon_list(GDK_TOPLEVEL(window_surface), icon_list);
  }
  
@@ -4631,7 +4633,7 @@ index f88cbd5..6de2d9a 100644
  static void dynamic_launcher_ready_callback(GObject *portal, GAsyncResult *res, gpointer user_data)
  {
  	struct dynamic_launcher_callback_data *data = user_data;
-@@ -445,13 +546,17 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -445,13 +548,17 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  	dl_parse_library_path(ld_path, ":");
  	g_free(ld_path);
  
@@ -4651,7 +4653,7 @@ index f88cbd5..6de2d9a 100644
  
  	/* -- register our JNI library under the appropriate classloader -- */
  
-@@ -461,7 +566,9 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -461,7 +568,9 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  	jobject java_runtime = J__Runtime__getRuntime(env);
  
  	/* this method is private, but it seems we get away with calling it from C */
@@ -4662,7 +4664,7 @@ index f88cbd5..6de2d9a 100644
  
  	// some apps need the apk path since they directly read their apk
  	apk_path = strdup(apk_classpath);
-@@ -471,7 +578,20 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -471,7 +580,20 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  	/* -- misc -- */
  
  	window = gtk_application_window_new(app);
@@ -4683,7 +4685,7 @@ index f88cbd5..6de2d9a 100644
  	gtk_stack_set_transition_type(GTK_STACK(stack), GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT);
  	gtk_window_set_child(GTK_WINDOW(window), stack);
  
-@@ -491,8 +611,12 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -491,8 +613,12 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  	}
  	gtk_window_set_decorated(GTK_WINDOW(window), decorated);
  
@@ -4697,7 +4699,7 @@ index f88cbd5..6de2d9a 100644
  
  	// Load default css stylesheet
  	GtkCssProvider *cssProvider = gtk_css_provider_new();
-@@ -501,20 +625,30 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -501,20 +627,30 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  
  	prepare_main_looper(env);
  
@@ -4728,7 +4730,7 @@ index f88cbd5..6de2d9a 100644
  	if ((*env)->ExceptionCheck(env))
  		(*env)->ExceptionDescribe(env);
  
-@@ -537,6 +671,7 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -537,6 +673,7 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  			(*env)->ExceptionDescribe(env);
  	}
  
@@ -4736,7 +4738,7 @@ index f88cbd5..6de2d9a 100644
  	// construct main Activity
  	if (!d->apk_instrumentation_class && !d->install_internal) {
  		activity_object = J__Activity__createMainActivity(env, _JSTRING(d->apk_main_activity_class),
-@@ -552,7 +687,9 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -552,7 +689,9 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  			g_strfreev(d->extra_string_keys);
  		}
  	}
@@ -4746,7 +4748,7 @@ index f88cbd5..6de2d9a 100644
  
  	if (!d->apk_instrumentation_class) {
  		jstring package_name_jstr = J__Context__getPackageName(env, application_object);
-@@ -562,6 +699,7 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -562,6 +701,7 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  	}
  
  	jstring app_icon_path_jstr = J__Application__get_app_icon_path(env, application_object);
@@ -4754,7 +4756,7 @@ index f88cbd5..6de2d9a 100644
  	const char *app_icon_path = app_icon_path_jstr ? _CSTRING(app_icon_path_jstr) : NULL;
  	if ((*env)->ExceptionCheck(env))
  		(*env)->ExceptionDescribe(env);
-@@ -687,7 +825,23 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -687,7 +827,23 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  	GtkDropTarget *drop_target = gtk_drop_target_new(G_TYPE_STRING, GDK_ACTION_COPY);
  	g_signal_connect(drop_target, "drop", G_CALLBACK(on_drop), NULL);
  	gtk_widget_add_controller(window, GTK_EVENT_CONTROLLER(drop_target));
@@ -4779,7 +4781,7 @@ index f88cbd5..6de2d9a 100644
  
  	// set package name as application id for window icon on Wayland. Needs a {package_name}.desktop file defining the icon
  	const char *app_id = g_application_get_application_id(G_APPLICATION(app));
-@@ -716,9 +870,9 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
+@@ -716,9 +872,9 @@ static void open(GtkApplication *app, GFile **files, gint nfiles, const gchar *h
  	}
  
  	if (!d->apk_instrumentation_class) {
@@ -4791,7 +4793,7 @@ index f88cbd5..6de2d9a 100644
  	}
  
  	jobject input_queue_callback = g_object_get_data(G_OBJECT(window), "input_queue_callback");
-@@ -819,6 +973,8 @@ static void pregrow_stack()
+@@ -819,6 +975,8 @@ static void pregrow_stack()
  
  int main(int argc, char **argv)
  {

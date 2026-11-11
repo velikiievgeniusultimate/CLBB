@@ -1,0 +1,22 @@
+[Unit]
+Description=CLBB diagnostic report receiver
+After=network.target
+[Service]
+User=clbb-reports
+Group=clbb-reports
+ExecStart=/usr/local/libexec/clbb-report-server
+Environment=CLBB_REPORT_DIR=/var/lib/clbb-reports
+StateDirectory=clbb-reports
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET
+MemoryMax=96M
+TasksMax=16
+[Install]
+WantedBy=multi-user.target

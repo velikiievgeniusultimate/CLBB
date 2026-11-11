@@ -119,3 +119,13 @@ exact sources, export patches and notices, build runtime and source companions,
 and produce SHA256 sums with basenames from the output directory. Upload every
 asset to a draft release before publishing it. Preserve corresponding sources
 for every binary version still distributed.
+
+### Active developer runtime / Запущенная рабочая копия
+
+Do not install native build output over a running game. Build in `src/atl/build`
+without installing and stage new artifacts using package-release.py flags
+`--main-executable src/atl/build/android-translation-layer` and
+`--main-library src/atl/build/libtranslation_layer_main.so`.
+Не заменяйте бинарники активной рабочей копии: эти флаги включают новые сборочные
+артефакты только в релизный архив. Обычная сборка из исходников устанавливает
+актуальные артефакты в prefix и в этих флагах не нуждается.

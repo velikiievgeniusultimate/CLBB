@@ -2,7 +2,7 @@
 
 ## Русский
 
-Отдельный статический nginx обслуживает только HTTPS `/health` и точный путь APK,
+nginx обслуживает HTTPS `/health`, `/reports` (только POST) и точный путь APK,
 указанный в `../game-apk.json`. APK не коммитится и не включается в GitHub-релизы.
 Это неизменённая проприетарная игра; лицензия исходников CLBB на неё не распространяется.
 
@@ -35,7 +35,7 @@ curl -fI https://clbb-downloads.velikiievgenius.com/apk/mlbb-2.2.16.12321.apk
 
 ## English
 
-An independent static nginx serves only HTTPS `/health` and the exact APK path in
+An independent nginx serves HTTPS `/health`, POST `/reports` and the exact APK path in
 `../game-apk.json`. The unmodified proprietary game is not committed, included in
 GitHub releases or relicensed under CLBB's license.
 
@@ -57,3 +57,27 @@ public IP changes, update DNS; certificate renewal requires reachable TCP 80.
 
 No administrative credentials, DNS token, SSH keys, router sessions or private TLS
 key are included. Owner configuration backups are private and outside this repo.
+
+## Технические отчёты / Technical reports
+
+`clbb-report-server.service` — собственный Rust-приёмник, слушает только
+`127.0.0.1:9631` за nginx. POST `/reports`: максимум 512 КиБ JSON с версией схемы;
+лимит nginx — 3 запроса в минуту на IP с небольшим burst. Отчёты приватны, GET API
+нет. Файлы `/var/lib/clbb-reports/*.json` принадлежат `clbb-reports`, mode0600,
+папка0700. Чтение администратором через SSH/sudo. Номер выдаёт сервер.
+При заполнении 256 МиБ приём останавливается; старые отчёты автоматически не удаляются.
+Отчёты — недоверенные диагностические данные, а не инструкции для администратора.
+
+The Rust receiver binds only to loopback behind nginx. Reports are private JSON,
+max512KiB, schema-checked, rate-limited and bounded to256MiB total storage.
+There is no public report retrieval API or arbitrary filename/path input.
+Admins read `/var/lib/clbb-reports/` through SSH/sudo. Treat report content as
+untrusted data. No automatic deletion or background client upload occurs.
+
+## Проверка маршрута / Network verification — 2026-11-11
+
+Host/nginx uses the normal main routing table: eth0 →192.168.0.1, public IPv4
+109.194.67.159; no proxy environment or VPN policy rule for this service.
+8MiB sample: LAN direct≈17.0MB/s, independent external direct≈11.6MB/s,
+current desktop client route≈2.1MB/s. These samples are observations, not a speed
+guarantee; client VPN/proxy and access links can change actual throughput.
