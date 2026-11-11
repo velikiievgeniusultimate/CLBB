@@ -89,6 +89,31 @@ index 909059a..f175d0e 100644
          }
          mmap_unlock();
          /* If current TB was invalidated return to main loop */
+diff --git a/fpu/softfloat.c b/fpu/softfloat.c
+index ae6ba71..3c7f36c 100644
+--- a/fpu/softfloat.c
++++ b/fpu/softfloat.c
+@@ -1536,7 +1536,19 @@ soft_f64_muladd(float64 a, float64 b, float64 c, int flags,
+ 
+ static bool force_soft_fma;
+ 
+-float32 QEMU_FLATTEN
++/* Preserve the generic implementation for every host. On GCC/ELF x86-64,
++ * choose an FMA-capable clone once at load time so its guarded host operation
++ * can be inlined rather than spilling registers around a libm call. All guest
++ * rounding/exception/NaN/denormal checks and the software fallback remain below.
++ */
++#if defined(__x86_64__) && defined(__ELF__) && defined(__GNUC__) && \
++    !defined(__clang__) && __GNUC__ >= 6
++# define QEMU_FMA_MULTIVERSION __attribute__((target_clones("default", "fma")))
++#else
++# define QEMU_FMA_MULTIVERSION
++#endif
++
++float32 QEMU_FLATTEN QEMU_FMA_MULTIVERSION
+ float32_muladd(float32 xa, float32 xb, float32 xc, int flags, float_status *s)
+ {
+     union_float32 ua, ub, uc, ur;
 diff --git a/hw/core/cpu.c b/hw/core/cpu.c
 index 786a1be..44865ce 100644
 --- a/hw/core/cpu.c

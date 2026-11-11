@@ -128,12 +128,11 @@ fn widget_geometry<M: Memory>(
 }
 
 pub fn check<M: Memory>(r: &Reflection<M>, checks: &Checks) -> Result<()> {
-    for (a, b) in checks {
-        if r.read(*a, b.len())? != *b {
-            return Err("Match source ownership changed".into());
-        }
+    if crate::platform::matches_reads(&r.memory, checks)? {
+        Ok(())
+    } else {
+        Err("Match source ownership changed".into())
     }
-    Ok(())
 }
 /// Movement can be disabled by the game without losing the widget's native
 /// coordinates. Conversely, a missing optional widget must not reject a whole

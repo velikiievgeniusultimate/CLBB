@@ -113,7 +113,13 @@ impl<M: Memory> Reflection<M> {
     pub fn field(&mut self, object: u64, name: &str) -> Result<u64> {
         let mut address = self.pointer(object)?;
         for _ in 0..24 {
-            let class = self.class(address)?;
+            // Metadata is immutable for the cached class lifetime. Do not clone
+            // its name and complete field table for each live-value lookup.
+            // The object's class pointer above is still read on every call.
+            if !self.classes.contains_key(&address) {
+                self.class(address)?;
+            }
+            let class = &self.classes[&address];
             if let Some(field) = class.fields.get(name) {
                 if field.offset > 1048576 {
                     return Err("Unsupported field offset".into());
@@ -280,5 +286,203 @@ impl<M: Memory> Reflection<M> {
         }
         let raw = self.read(array + 32, count as usize * 8)?;
         Ok(raw.chunks_exact(8).map(|b| u64_at(b, 0)).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    struct TestMemory {
+        bytes: RefCell<Vec<u8>>,
+        reads: RefCell<Vec<(u64, usize)>>,
+    }
+    impl Memory for TestMemory {
+        fn regions(&self) -> Result<Vec<Region>> {
+            Ok(vec![Region {
+                start: 0,
+                end: self.bytes.borrow().len() as u64,
+                readable: true,
+                writable: true,
+                name: String::new(),
+            }])
+        }
+        fn read(&self, address: u64, length: usize) -> Result<Vec<u8>> {
+            let mut out = vec![0; length];
+            self.read_into(address, &mut out)?;
+            Ok(out)
+        }
+        fn read_into(&self, address: u64, bytes: &mut [u8]) -> Result<()> {
+            self.reads.borrow_mut().push((address, bytes.len()));
+            bytes.copy_from_slice(
+                self.bytes
+                    .borrow()
+                    .get(address as usize..address as usize + bytes.len())
+                    .ok_or("Invalid test read")?,
+            );
+            Ok(())
+        }
+    }
+    fn fixture() -> Reflection<TestMemory> {
+        let mut bytes = vec![0; 1024];
+        let mut write =
+            |at: usize, value: u64| bytes[at..at + 8].copy_from_slice(&value.to_le_bytes());
+        write(16, 256);
+        write(256 + 16, 600);
+        write(256 + 0x40, 256);
+        write(256 + 0x48, 256);
+        write(256 + 0x78, 640);
+        write(256 + 0xa8, 900);
+        write(640, 800);
+        write(648, 720);
+        write(656, 256);
+        bytes[256 + 0x104..256 + 0x106].copy_from_slice(&1u16.to_le_bytes());
+        bytes[640 + 24..640 + 28].copy_from_slice(&40u32.to_le_bytes());
+        bytes[720 + 8..720 + 12].copy_from_slice(&(8u32 << 16).to_le_bytes());
+        bytes[600..605].copy_from_slice(b"Hero\0");
+        bytes[800..805].copy_from_slice(b"life\0");
+        Reflection::new(TestMemory {
+            bytes: RefCell::new(bytes),
+            reads: RefCell::new(Vec::new()),
+        })
+        .unwrap()
+    }
+    #[test]
+    fn cached_field_lookup_keeps_live_class_identity_and_validates_cache_misses() {
+        let mut r = fixture();
+        assert_eq!(r.field(16, "life").unwrap(), 56);
+        assert!(r.classes.contains_key(&256));
+        r.memory.reads.borrow_mut().clear();
+        assert_eq!(r.field(16, "life").unwrap(), 56);
+        assert_eq!(&*r.memory.reads.borrow(), &[(16, 8)]);
+        // A different live class must immediately select its own metadata,
+        // rather than reusing an object-address/field-name shortcut.
+        r.classes.insert(
+            512,
+            Class {
+                address: 512,
+                name: "Other".into(),
+                parent: 0,
+                statics: 0,
+                fields: HashMap::from([(
+                    "life".into(),
+                    Field {
+                        offset: 64,
+                        is_static: false,
+                        kind: 8,
+                    },
+                )]),
+            },
+        );
+        r.memory.bytes.borrow_mut()[16..24].copy_from_slice(&512u64.to_le_bytes());
+        assert_eq!(r.field(16, "life").unwrap(), 80);
+        r.memory.bytes.borrow_mut()[16..24].copy_from_slice(&128u64.to_le_bytes());
+        assert!(
+            r.field(16, "life")
+                .unwrap_err()
+                .contains("identity mismatch")
+        );
+    }
+    #[test]
+    fn cached_field_lookup_preserves_inheritance_static_and_offset_rules() {
+        let mut r = fixture();
+        r.field(16, "life").unwrap();
+        r.classes.get_mut(&256).unwrap().parent = 512;
+        r.classes.insert(
+            512,
+            Class {
+                address: 512,
+                name: "Base".into(),
+                parent: 0,
+                statics: 900,
+                fields: HashMap::from([
+                    (
+                        "global".into(),
+                        Field {
+                            offset: 12,
+                            is_static: true,
+                            kind: 8,
+                        },
+                    ),
+                    (
+                        "bad".into(),
+                        Field {
+                            offset: 1048577,
+                            is_static: false,
+                            kind: 8,
+                        },
+                    ),
+                ]),
+            },
+        );
+        assert_eq!(r.field(16, "global").unwrap(), 912);
+        assert!(r.field(16, "bad").unwrap_err().contains("offset"));
+        assert!(
+            r.field(16, "missing")
+                .unwrap_err()
+                .contains("Missing reflected field")
+        );
+    }
+    /// Isolated metadata-only timing; this is not a game FPS benchmark.
+    #[test]
+    #[ignore]
+    fn cached_field_lookup_benchmark() {
+        use std::{hint::black_box, time::Instant};
+        let mut r = fixture();
+        r.field(16, "life").unwrap();
+        let class = r.classes.get_mut(&256).unwrap();
+        for i in 0..128 {
+            class.fields.insert(
+                format!("representative_field_{i}"),
+                Field {
+                    offset: 64 + i * 8,
+                    is_static: false,
+                    kind: 8,
+                },
+            );
+        }
+        let mut old = Vec::new();
+        let mut new = Vec::new();
+        for round in 0..10 {
+            let mut run = |baseline: bool| {
+                let begin = Instant::now();
+                let mut checksum = 0;
+                for i in 0..20000 {
+                    let name = if i % 2 == 0 {
+                        "life"
+                    } else {
+                        "representative_field_71"
+                    };
+                    let at = if baseline {
+                        let address = r.pointer(black_box(16)).unwrap();
+                        let c = r.class(address).unwrap();
+                        let f = c.fields.get(black_box(name)).unwrap();
+                        16 + f.offset
+                    } else {
+                        r.field(black_box(16), black_box(name)).unwrap()
+                    };
+                    checksum += black_box(at);
+                }
+                assert_eq!(checksum, 7040000);
+                begin.elapsed().as_nanos() as f64 / 20000.
+            };
+            if round % 2 == 0 {
+                old.push(run(true));
+                new.push(run(false));
+            } else {
+                new.push(run(false));
+                old.push(run(true));
+            }
+            r.memory.reads.borrow_mut().clear();
+        }
+        old.sort_by(f64::total_cmp);
+        new.sort_by(f64::total_cmp);
+        println!(
+            "CACHED_FIELD_METADATA_BENCH old_ns={:.1} new_ns={:.1} ratio={:.4} class_fields=129 live_object_pointer_read=preserved",
+            old[5],
+            new[5],
+            new[5] / old[5]
+        );
     }
 }

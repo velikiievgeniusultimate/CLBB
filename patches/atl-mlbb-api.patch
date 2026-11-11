@@ -5114,7 +5114,7 @@ index 3fd5b65..85e98f6 100644
  	'android/widget/TimePicker.java',
  	'android/widget/Toast.java',
 diff --git a/src/libandroid/egl.c b/src/libandroid/egl.c
-index 30ba805..f49dab5 100644
+index 30ba805..0033bc1 100644
 --- a/src/libandroid/egl.c
 +++ b/src/libandroid/egl.c
 @@ -8,7 +8,7 @@
@@ -5139,12 +5139,48 @@ index 30ba805..f49dab5 100644
  
  static GHashTable *egl_surface_hashtable;
  
-@@ -206,9 +212,13 @@ struct _ATLSurface {
+@@ -189,8 +195,31 @@ EGLSurface bionic_eglCreatePbufferSurface(EGLDisplay display, EGLConfig config,
+ 	}
+ }
+ 
+-#define NUM_BUFFERS 3
++#define MAX_SURFACE_BUFFERS 5
+ 
++/* Opt-in timing only; the normal frame path performs no clock reads. */
++static gboolean egl_profile_enabled(void)
++{
++    static gsize enabled = 0;
++    if (g_once_init_enter(&enabled)) {
++        const char *value = g_getenv("CLBB_PROFILE_EGL");
++        g_once_init_leave(&enabled, value && !strcmp(value, "1") ? 2 : 1);
++    }
++    return enabled == 2;
++}
++struct egl_profile_metric { guint64 count, total_us, max_us; };
++enum { PROFILE_PACE, PROFILE_FLUSH, PROFILE_VSYNC, PROFILE_POOL,
++       PROFILE_SWAP, PROFILE_BETWEEN, PROFILE_QUEUE, PROFILE_HANDOFF, PROFILE_METRICS };
++struct egl_profile_stats {
++    gint64 window_start_us, previous_swap_end_us;
++    guint64 pool_timeouts;
++    struct egl_profile_metric metrics[PROFILE_METRICS];
++};
++static void egl_profile_add(struct egl_profile_metric *metric, gint64 duration)
++{
++    guint64 us = duration > 0 ? (guint64)duration : 0;
++    ++metric->count; metric->total_us += us; metric->max_us = MAX(metric->max_us, us);
++}
+ struct _ATLSurface {
+ 	GObject parent;
+ 	int width;
+@@ -206,12 +235,20 @@ struct _ATLSurface {
  		GdkGLTextureBuilder *texture_builder;
  		uint32_t gl_texture;
  		uint32_t gl_framebuffer;
+-	} buffers[NUM_BUFFERS];
 +		unsigned int submit_serial;
- 	} buffers[NUM_BUFFERS];
++        gint64 queued_at_us;
++	} buffers[MAX_SURFACE_BUFFERS];
++    int num_buffers;
  	struct atl_surface_buffer *back_buffer;
 -	struct atl_surface_buffer *front_buffer;
 +	unsigned int submitted_frames;
@@ -5154,7 +5190,109 @@ index 30ba805..f49dab5 100644
  	GAsyncQueue *vsync;
  	GAsyncQueue *unused_buffers;
  	gboolean destroyed;
-@@ -414,18 +424,222 @@ static void destroy_texture(void *data)
++    GMutex profile_mutex;
++    struct egl_profile_stats profile;
+ };
+ G_DECLARE_FINAL_TYPE(ATLSurface, atl_surface, ATL, SURFACE, GObject);
+ static void atl_surface_dispose(GObject *object)
+@@ -219,7 +256,7 @@ static void atl_surface_dispose(GObject *object)
+ 	ATLSurface *atl_surface = ATL_SURFACE(object);
+ 	GdkGLContext *gtk_gl_context = gdk_surface_create_gl_context(gtk_native_get_surface(gtk_widget_get_native(GTK_WIDGET(atl_surface->surface_view_widget))), NULL);
+ 	gdk_gl_context_make_current(gtk_gl_context);
+-	for (int i = 0; i < NUM_BUFFERS; i++) {
++	for (int i = 0; i < atl_surface->num_buffers; i++) {
+ 		if (atl_surface->buffers[i].texture_builder) {
+ 			GLuint texture_id = gdk_gl_texture_builder_get_id(atl_surface->buffers[i].texture_builder);
+ 			glDeleteTextures(1, &texture_id);
+@@ -229,14 +266,68 @@ static void atl_surface_dispose(GObject *object)
+ 	g_async_queue_unref(atl_surface->unused_buffers);
+ 	g_async_queue_unref(atl_surface->vsync);
+ 	g_object_unref(atl_surface->surface_view_widget);
++    g_mutex_clear(&atl_surface->profile_mutex);
+ }
+ static void atl_surface_class_init(ATLSurfaceClass *class)
+ {
+ 	G_OBJECT_CLASS(class)->dispose = atl_surface_dispose;
+ }
+-static void atl_surface_init(ATLSurface *self) {}
++static void atl_surface_init(ATLSurface *self) {
++    g_mutex_init(&self->profile_mutex);
++    self->num_buffers=3;
++    const char *value=g_getenv("CLBB_EGL_BUFFERS");
++    if(value && (!strcmp(value,"4") || !strcmp(value,"5")))self->num_buffers=atoi(value);
++}
+ G_DEFINE_TYPE(ATLSurface, atl_surface, G_TYPE_OBJECT)
+ 
++/* Both render producer and GTK may contribute. Reporting happens only on
++ * the producer, after releasing the profiling mutex; one line per second. */
++static void egl_profile_swap(ATLSurface *surface, gint64 begin, gint64 paced,
++                             gint64 flushed, gint64 vsync_us, gint64 pool_us,
++                             gint64 end, gboolean timeout)
++{
++    struct egl_profile_stats report;
++    gboolean emit = FALSE;
++    g_mutex_lock(&surface->profile_mutex);
++    struct egl_profile_stats *stats = &surface->profile;
++    if (!stats->window_start_us) stats->window_start_us = begin;
++    if (stats->previous_swap_end_us)
++        egl_profile_add(&stats->metrics[PROFILE_BETWEEN], begin - stats->previous_swap_end_us);
++    stats->previous_swap_end_us = end;
++    egl_profile_add(&stats->metrics[PROFILE_PACE], paced - begin);
++    egl_profile_add(&stats->metrics[PROFILE_FLUSH], flushed - paced);
++    egl_profile_add(&stats->metrics[PROFILE_VSYNC], vsync_us);
++    egl_profile_add(&stats->metrics[PROFILE_POOL], pool_us);
++    egl_profile_add(&stats->metrics[PROFILE_SWAP], end - begin);
++    if (timeout) ++stats->pool_timeouts;
++    if (end - stats->window_start_us >= G_USEC_PER_SEC) {
++        report = *stats; emit = TRUE;
++        memset(stats, 0, sizeof(*stats));
++        stats->window_start_us = end; stats->previous_swap_end_us = end;
++    }
++    g_mutex_unlock(&surface->profile_mutex);
++    if (emit) {
++        static const char *names[] = {"pace", "flush", "vsync", "pool_wait", "swap", "between_swaps", "queue_delay", "gtk_handoff"};
++        GString *line = g_string_new(NULL);
++        g_string_append_printf(line, "[CLBB_EGL_PROFILE] surface=%p size=%dx%d span_us=%" G_GINT64_FORMAT " pool_timeouts=%" G_GUINT64_FORMAT,
++            surface, surface->width, surface->height, end - report.window_start_us, report.pool_timeouts);
++        for (guint i = 0; i < PROFILE_METRICS; ++i) {
++            struct egl_profile_metric *metric = &report.metrics[i];
++            g_string_append_printf(line, " %s_count=%" G_GUINT64_FORMAT " %s_avg_us=%.3f %s_max_us=%" G_GUINT64_FORMAT,
++                names[i], metric->count, names[i], metric->count ? (double)metric->total_us / metric->count : 0., names[i], metric->max_us);
++        }
++        fprintf(stderr, "%s\n", line->str);
++        g_string_free(line, TRUE);
++    }
++}
++static void egl_profile_handoff(ATLSurface *surface, gint64 queued, gint64 begin, gint64 end)
++{
++    g_mutex_lock(&surface->profile_mutex);
++    egl_profile_add(&surface->profile.metrics[PROFILE_QUEUE], begin - queued);
++    egl_profile_add(&surface->profile.metrics[PROFILE_HANDOFF], end - begin);
++    g_mutex_unlock(&surface->profile_mutex);
++}
++
+ /*
+  * Android exports eglCreateImageKHR (with EGLAttrib) as a direct libEGL.so symbol,
+  * while Mesa exports the core EGL 1.5 function eglCreateImage as its linkable entry
+@@ -322,7 +413,7 @@ EGLBoolean bionic_eglDestroySurface(EGLDisplay display, EGLSurface surface)
+ 	} else {
+ 		ATLSurface *atl_surface = surface;
+ 		atl_surface->destroyed = TRUE;
+-		for (int i = 0; i < NUM_BUFFERS; i++) {
++		for (int i = 0; i < atl_surface->num_buffers; i++) {
+ 			if (atl_surface->buffers[i].egl_image)
+ 				eglDestroyImage(display, atl_surface->buffers[i].egl_image);
+ 			atl_surface->buffers[i].egl_image = 0;
+@@ -375,7 +466,7 @@ EGLBoolean bionic_eglMakeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface
+ 			glBindRenderbuffer(GL_RENDERBUFFER, previous_renderbuffer);
+ 		}
+ 
+-		for (int i = 0; i < NUM_BUFFERS; i++) {
++		for (int i = 0; i < atl_surface->num_buffers; i++) {
+ 			atl_surface->buffers[i].surface = atl_surface;
+ 			glGenTextures(1, &atl_surface->buffers[i].gl_texture);
+ 			glBindTexture(GL_TEXTURE_2D, atl_surface->buffers[i].gl_texture);
+@@ -414,18 +505,224 @@ static void destroy_texture(void *data)
  
  static void frame_callback(SurfaceViewWidget *surface_view_widget)
  {
@@ -5364,6 +5502,8 @@ index 30ba805..f49dab5 100644
 -	ATLSurface *atl_surface = data;
 +	struct atl_surface_buffer *buffer = data;
 +	ATLSurface *atl_surface = buffer->surface;
++    gboolean profile = egl_profile_enabled();
++    gint64 profile_begin = profile ? g_get_monotonic_time() : 0;
  	if (atl_surface->destroyed) {
  		g_object_unref(atl_surface);
  		return G_SOURCE_REMOVE;
@@ -5380,7 +5520,7 @@ index 30ba805..f49dab5 100644
  	if (!buffer->texture_builder) {
  		GLuint texture_id;
  		GdkGLContext *gtk_gl_context = gdk_surface_create_gl_context(gtk_native_get_surface(gtk_widget_get_native(GTK_WIDGET(atl_surface->surface_view_widget))), NULL);
-@@ -435,6 +649,8 @@ static gboolean queue_texture(gpointer data)
+@@ -435,6 +732,8 @@ static gboolean queue_texture(gpointer data)
  		if (!glEGLImageTargetTexture2DOES)
  			glEGLImageTargetTexture2DOES = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress("glEGLImageTargetTexture2DOES");
  		glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, buffer->egl_image);
@@ -5389,7 +5529,7 @@ index 30ba805..f49dab5 100644
  		glBindTexture(GL_TEXTURE_2D, 0);
  		eglDestroyImage(eglGetCurrentDisplay(), buffer->egl_image);
  		buffer->egl_image = NULL;
-@@ -448,11 +664,44 @@ static gboolean queue_texture(gpointer data)
+@@ -448,11 +747,45 @@ static gboolean queue_texture(gpointer data)
  	}
  	atl_surface->surface_view_widget->frame_callback_data = atl_surface->vsync;
  	atl_surface->surface_view_widget->frame_callback = frame_callback;
@@ -5411,6 +5551,7 @@ index 30ba805..f49dab5 100644
 +	}
 +	surface_view_widget_set_texture(atl_surface->surface_view_widget, texture, TRUE);
 +	if (clbb_render_frame_event_host) clbb_render_frame_event_host((uint64_t)(uintptr_t)atl_surface, atl_surface->width, atl_surface->height, buffer->submit_serial, 1);
++    if (profile) egl_profile_handoff(atl_surface, buffer->queued_at_us, profile_begin, g_get_monotonic_time());
  	// atl_surface reference will be dropped in destroy_texture
  	return G_SOURCE_REMOVE;
  }
@@ -5435,23 +5576,31 @@ index 30ba805..f49dab5 100644
  EGLBoolean bionic_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
  {
  	if (getenv("ATL_DIRECT_EGL"))
-@@ -462,19 +711,36 @@ EGLBoolean bionic_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
+@@ -462,19 +795,49 @@ EGLBoolean bionic_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
  		return eglSwapBuffers(display, surface);
  	}
  	ATLSurface *atl_surface = surface;
+-
 +	GLuint previous_framebuffer = atl_surface->back_buffer ? atl_surface->back_buffer->gl_framebuffer : 0;
 +	if (clbb_boot_event && atl_surface->submitted_frames == 0) clbb_boot_event("egl.first_swap.begin");
++    gboolean profile = egl_profile_enabled();
++    gint64 profile_begin = profile ? g_get_monotonic_time() : 0;
 +	if (clbb_frame_pacing_wait) clbb_frame_pacing_wait();
- 
++    gint64 profile_paced = profile ? g_get_monotonic_time() : 0;
++    gint64 profile_vsync_us = 0;
++
 +	trace_swap(atl_surface);
 +	if (getenv("ATL_EGL_SYNC_DIAGNOSTIC"))
 +		glFinish();
  	glFlush();
++    gint64 profile_flushed = profile ? g_get_monotonic_time() : 0;
  	if (atl_surface->back_buffer) {
 -		g_async_queue_timeout_pop(atl_surface->vsync, 50000); // 50ms
 -		atl_surface->front_buffer = atl_surface->back_buffer;
++        gint64 profile_vsync_begin = profile ? g_get_monotonic_time() : 0;
 +		if (!clbb_frame_pacing_vsync || clbb_frame_pacing_vsync())
 +			g_async_queue_timeout_pop(atl_surface->vsync, 50000); // 50ms
++        if (profile) profile_vsync_us = g_get_monotonic_time() - profile_vsync_begin;
 +		struct atl_surface_buffer *submitted_buffer = atl_surface->back_buffer;
 +		submitted_buffer->submit_serial = ++atl_surface->submitted_frames;
 +		if (clbb_render_frame_event_host) clbb_render_frame_event_host((uint64_t)(uintptr_t)atl_surface, atl_surface->width, atl_surface->height, submitted_buffer->submit_serial, 0);
@@ -5467,19 +5616,25 @@ index 30ba805..f49dab5 100644
 -		g_idle_add_full(G_PRIORITY_HIGH_IDLE + 20, queue_texture, g_object_ref(atl_surface), NULL);
 +		/* Each idle owns this exact buffer and one surface reference. */
 +		g_object_ref(atl_surface);
++        if (profile) submitted_buffer->queued_at_us = g_get_monotonic_time();
 +		g_idle_add_full(G_PRIORITY_HIGH_IDLE + 20, queue_texture, submitted_buffer, NULL);
  	}
++    gint64 profile_pool_begin = profile ? g_get_monotonic_time() : 0;
  	atl_surface->back_buffer = g_async_queue_timeout_pop(atl_surface->unused_buffers, 100000); // 100ms
 -	if (atl_surface->back_buffer)
 -		glBindFramebuffer(GL_FRAMEBUFFER, atl_surface->back_buffer->gl_framebuffer);
 -	else
 -		glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    gint64 profile_pool_end = profile ? g_get_monotonic_time() : 0;
 +	rotate_default_framebuffer(previous_framebuffer,
 +	                          atl_surface->back_buffer ? atl_surface->back_buffer->gl_framebuffer : 0);
++    if (profile) egl_profile_swap(atl_surface, profile_begin, profile_paced,
++        profile_flushed, profile_vsync_us, profile_pool_end - profile_pool_begin,
++        g_get_monotonic_time(), atl_surface->back_buffer == NULL);
  
  	return EGL_TRUE;
  }
-@@ -514,6 +780,21 @@ void bionic_glBindFramebuffer(GLenum target, GLuint framebuffer)
+@@ -514,6 +877,21 @@ void bionic_glBindFramebuffer(GLenum target, GLuint framebuffer)
  {
  	if (getenv("ATL_DIRECT_EGL") || framebuffer != 0)
  		return glBindFramebuffer(target, framebuffer);

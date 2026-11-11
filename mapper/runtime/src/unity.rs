@@ -59,12 +59,11 @@ impl Path {
         Ok(Self { checks, transforms })
     }
     pub fn validate<M: Memory>(&self, r: &Reflection<M>) -> Result<()> {
-        for (address, expected) in &self.checks {
-            if r.read(*address, expected.len())? != *expected {
-                return Err("Native transform was reparented or destroyed".into());
-            }
+        if crate::platform::matches_reads(&r.memory, &self.checks)? {
+            Ok(())
+        } else {
+            Err("Native transform was reparented or destroyed".into())
         }
-        Ok(())
     }
     pub fn bytes<M: Memory>(&self, r: &Reflection<M>) -> Result<Vec<u8>> {
         self.validate(r)?;
