@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Arch Linux / Manjaro / EndeavourOS, x86_64. No game APK is redistributed.
+# Arch Linux / Manjaro / EndeavourOS, x86_64. Game APK is downloaded separately.
 set -eu
 [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] || { echo 'CLBB: Linux x86_64 required / требуется Linux x86_64' >&2; exit 1; }
 command -v pacman >/dev/null || { echo 'CLBB: this installer currently supports Arch, Manjaro and EndeavourOS.' >&2; exit 1; }
@@ -51,5 +51,30 @@ if [ -n "${CLBB_APK_FILE:-}" ]; then
 elif [ -n "${CLBB_APK_URL:-}" ]; then
     [ -n "${CLBB_APK_SHA256:-}" ] || { echo 'CLBB_APK_SHA256 is required for an APK download' >&2; exit 1; }
     "$CLBB_TMP/clbb-manager-linux-x86_64" --import-game-url "$CLBB_APK_URL" "$CLBB_APK_SHA256"
+elif [ "${CLBB_INSTALL_GAME:-1}" != 0 ]; then
+    CLBB_GAME_STATE="${CLBB_STATE_ROOT:-${CLBB_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/clbb}/state}"
+    if [ -f "$CLBB_GAME_STATE/game/base.apk" ]; then
+        printf '%s\n' 'Игра уже установлена; APK и аккаунт сохранены / Game already installed; preserving APK and account.'
+    else
+        curl --fail --location --silent --show-error --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 60 --retry 2 \
+            "https://raw.githubusercontent.com/$CLBB_REPO/main/distribution/game-apk.json" -o "$CLBB_TMP/game-apk.json"
+        python3 - "$CLBB_TMP/game-apk.json" > "$CLBB_TMP/game-source" <<'PYAPK'
+import json,re,sys,urllib.parse
+with open(sys.argv[1]) as stream: info=json.load(stream)
+url=info.get('download_url');digest=info.get('sha256','')
+if info.get('package')!='com.mobile.legends' or not isinstance(url,str):raise SystemExit('Invalid game download manifest')
+parsed=urllib.parse.urlsplit(url)
+if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or any(c.isspace() for c in url):raise SystemExit('Invalid game download URL')
+if not isinstance(digest,str) or not re.fullmatch('[0-9a-fA-F]{64}',digest):raise SystemExit('Invalid game SHA256')
+print(url);print(digest.lower())
+PYAPK
+        {
+            IFS= read -r CLBB_GAME_URL
+            IFS= read -r CLBB_GAME_SHA256
+        } < "$CLBB_TMP/game-source"
+        printf '%s\n' 'Скачивается APK Mobile Legends со StarFive, затем проверяется SHA256 / Downloading the game APK from StarFive and verifying SHA256…'
+        "$CLBB_TMP/clbb-manager-linux-x86_64" --import-game-url "$CLBB_GAME_URL" "$CLBB_GAME_SHA256"
+    fi
 fi
 printf '%s\n' 'CLBB установлен / installed. Запустите CLBB из меню приложений / Launch CLBB from your application menu.'

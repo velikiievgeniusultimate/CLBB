@@ -23,10 +23,15 @@ CLBB itself is installed in your user directory and added to the application men
 The installer selects the latest published testing or stable version, verifies
 SHA256 downloads and preserves previous application releases.
 
-**The game is not included in this repository or its releases.** On first launch,
-select your own Mobile Legends APK. For a split installation, select the base APK
-and all split APKs from the same game version. Files are not modified or re-signed;
-account data is not imported.
+**A clean installation automatically downloads the Mobile Legends APK from StarFive**
+and verifies its SHA256 before importing it. No manual APK selection or copying is needed.
+Re-running the installer preserves existing APKs and account data.
+The APK is not included in the Git repository or GitHub releases; it is a separate
+proprietary game download and is not covered by the CLBB license.
+The file is not modified or re-signed. Sign in to your account inside the game.
+
+To install CLBB without downloading the game, set `CLBB_INSTALL_GAME=0`:
+the first launch will offer a picker for your own APK.
 
 Install with an existing APK:
 

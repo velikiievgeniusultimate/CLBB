@@ -27,7 +27,8 @@ QEMU вычислительные функции в `execution-core/` и `transl
 в бинарный архив CLBB их копии не включаются.
 
 APK Mobile Legends, ресурсы игры, аккаунты и записи диагностики **не входят**
-в репозиторий или релизы. Пользователь предоставляет свою неизменённую копию игры.
+в репозиторий или релизы. Установщик может отдельно скачать неизменённый APK
+со StarFive по метаданным `distribution/game-apk.json` либо принять файл пользователя.
 Лицензия CLBB не предоставляет прав на игру, товарные знаки или сервис MOONTON.
 CLBB — независимый экспериментальный проект; необходимо отдельно учитывать правила игры.
 
@@ -57,6 +58,7 @@ payload is recorded in its `release.json`. System GTK/WebKit, drivers and fonts
 are installed through the distribution package manager, not copied into CLBB archives.
 
 Mobile Legends APKs, game assets, accounts and diagnostic recordings are excluded
-from the repository and releases. Users supply their own unmodified game files.
+from the repository and releases. The installer can separately download an unmodified
+APK from StarFive using `distribution/game-apk.json`, or accept user-supplied files.
 CLBB licensing grants no rights to the game, trademarks or MOONTON service.
 CLBB is an independent experimental project; game rules must be considered separately.

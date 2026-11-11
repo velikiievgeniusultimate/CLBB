@@ -28,7 +28,7 @@ sudo: если новой версии нужны дополнительные �
 
 ### APK
 
-Обычная установка CLBB:
+Обычная установка CLBB с автоматическим скачиванием и импортом APK со StarFive:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/velikiievgeniusultimate/CLBB/main/install.sh | sh
@@ -51,9 +51,12 @@ curl -fsSL https://raw.githubusercontent.com/velikiievgeniusultimate/CLBB/main/i
 переподписывает APK, не копирует аккаунты и не удаляет `state/data`. Предыдущий
 набор APK сохраняется в `state/game-backups/`. Импорт при работающей игре запрещён.
 
-`game-apk.json` содержит метаданные предоставленного владельцем APK, но не файл
-и не разрешение на публичное зеркалирование. `download_url` оставлен пустым.
-Получение APK из магазина само по себе не устанавливает право на его перераздачу.
+`game-apk.json` содержит HTTPS-адрес APK на StarFive, версию, размер и SHA256.
+Установщик использует его автоматически, если игра ещё не установлена и не заданы
+`CLBB_APK_FILE`/`CLBB_APK_URL`. `CLBB_INSTALL_GAME=0` отключает этот шаг.
+Установленные APK и аккаунт по умолчанию не заменяются. Файл предоставлен владельцем;
+APK остаётся проприетарным, не входит в исходники CLBB и не перелицензируется.
+Размещение файла не является заявлением о разрешении MOONTON на сторонние клиенты.
 
 ### Сборка релиза
 
@@ -102,8 +105,12 @@ The commands above cover normal installation, automatic local APK import through
 checks the package and matching split versions, keeps original bytes, preserves
 account data, backs up old APKs and refuses to run while CLBB is active.
 
-`game-apk.json` records metadata for an owner-provided APK. It is neither the APK
-nor a redistribution grant. Its `download_url` is intentionally unset.
+`game-apk.json` records the StarFive HTTPS URL, version, size and SHA256 for the
+owner-provided APK. With no explicit APK override, the installer downloads and
+imports it when the game is absent. `CLBB_INSTALL_GAME=0` disables this step.
+Existing APKs and account data are preserved by default. The game remains
+proprietary and is not included in the CLBB repository or GitHub releases.
+CLBB licensing does not grant game rights or imply MOONTON service approval.
 
 `build-from-source.sh --install-deps` prepares pinned sources and a local prefix
 following upstream build instructions. Native bootstrap is substantial. Use
