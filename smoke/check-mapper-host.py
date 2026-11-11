@@ -27,7 +27,7 @@ typedef short jshort;
 typedef struct {int unused;} snd_pcm_t;
 typedef long snd_pcm_sframes_t;
 static int writes,underrun;static short output[8];
-static long snd_pcm_writei(snd_pcm_t*p,const void*b,int n){(void)p;if(++writes==1&&underrun)return -EPIPE;memcpy(output,b,n*sizeof(short));return n;}
+int clbb_mixer_write(unsigned id,const short*b,int n){(void)id;++writes;memcpy(output,b,n*sizeof(short));return n;}
 static int snd_pcm_recover(snd_pcm_t*p,long e,int s){(void)p;(void)e;(void)s;return 0;}
 static int snd_pcm_start(snd_pcm_t*p){(void)p;return 0;}
 static const char *snd_strerror(long e){(void)e;return "test";}
@@ -44,16 +44,16 @@ int main(void){
  g_object_set_data(G_OBJECT(window),"atl-activity-stack",stack);g_object_ref(stack);gtk_window_set_child(window,NULL);GtkWidget*overlay=gtk_overlay_new();gtk_overlay_set_child(GTK_OVERLAY(overlay),stack);g_object_unref(stack);gtk_window_set_child(window,overlay);assert(activity_stack()==GTK_STACK(stack));
  GtkWidget*scene=gtk_label_new("scene");gtk_stack_add_child(activity_stack(),scene);gtk_stack_set_visible_child(activity_stack(),scene);assert(gtk_stack_get_visible_child(activity_stack())==scene);
  assert(clbb_pointer_action(0,1,0)==ACTION_DOWN);assert(clbb_pointer_action(0,2,1)==(ACTION_POINTER_DOWN|256));assert(clbb_pointer_action(2,2,0)==ACTION_POINTER_UP);assert(clbb_pointer_action(2,2,1)==(ACTION_POINTER_UP|256));assert(clbb_pointer_action(2,1,0)==ACTION_UP);assert(clbb_pointer_action(1,2,1)==ACTION_MOVE);
- short input[]={1000,-1000,7777};assert(write_frames(NULL,input,2,1,.5f,3)==2);assert(output[0]==250&&output[1]==-250);assert(input[0]==1000&&input[1]==-1000&&input[2]==7777);
- writes=0;underrun=1;assert(write_frames(NULL,input,2,1,.5f,3)==2);assert(writes==2&&output[0]==250&&input[0]==1000);
+ short input[]={1000,-1000,7777};assert(write_frames(1,input,2,1,.5f,3)==2);assert(output[0]==250&&output[1]==-250);assert(input[0]==1000&&input[1]==-1000&&input[2]==7777);
+ writes=0;underrun=1;assert(write_frames(1,input,2,1,.5f,3)==2);assert(writes==1&&output[0]==250&&input[0]==1000);
  // Received speech is independent of game volume, including SCO.
- assert(write_frames(NULL,input,2,1,1.f,0)==2);assert(output[0]==125);
- game=0;assert(write_frames(NULL,input,2,1,1.f,3)==2);assert(output[0]==0);
- assert(write_frames(NULL,input,2,1,1.f,0)==2);assert(output[0]==125);
- voice=0;game=1;assert(write_frames(NULL,input,2,1,1.f,6)==2);assert(output[0]==0);
- assert(write_frames(NULL,input,2,1,1.f,3)==2);assert(output[0]==500);
- master=0;assert(write_frames(NULL,input,2,1,1.f,0)==2);assert(output[0]==0);
- assert(write_frames(NULL,input,2,1,1.f,3)==2);assert(output[0]==0);master=.5f;
+ assert(write_frames(1,input,2,1,1.f,0)==2);assert(output[0]==125);
+ game=0;assert(write_frames(1,input,2,1,1.f,3)==2);assert(output[0]==0);
+ assert(write_frames(1,input,2,1,1.f,0)==2);assert(output[0]==125);
+ voice=0;game=1;assert(write_frames(1,input,2,1,1.f,6)==2);assert(output[0]==0);
+ assert(write_frames(1,input,2,1,1.f,3)==2);assert(output[0]==500);
+ master=0;assert(write_frames(1,input,2,1,1.f,0)==2);assert(output[0]==0);
+ assert(write_frames(1,input,2,1,1.f,3)==2);assert(output[0]==0);master=.5f;
  atomic_store(&clbb_sles_gain,clbb_game_gain);short out[2];float gains[]={.8f,.4f};SDL_mix(input,out,4,2,gains);assert(out[0]==400&&out[1]==-200);assert(input[0]==1000);
  gtk_window_destroy(window);puts("MAPPER_HOST_OK overlay_activity_identity=1 physical_primary_up=1 independent_game_voice_master_gains=1 java_pcm_immutable=1");return 0;
 }

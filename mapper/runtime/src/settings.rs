@@ -125,6 +125,7 @@ impl Settings {
         }
     }
     pub fn get(&self, key: &str, hero: i32) -> String {
+        if key == "enabled" { return "true".into(); }
         if let Some(tail) = key.strip_prefix("hero.bindings.") {
             if let Some((slot, field)) = tail.rsplit_once('.') {
                 if !(slot.starts_with("skill:") || slot.starts_with("combo:"))
@@ -302,10 +303,11 @@ impl Settings {
         let is_binding = key.starts_with("common.bindings.") || key.starts_with("hero.bindings.");
         let integer = value.parse::<i32>().ok();
         let valid = match key {
+            "enabled" => matches!(value,"true"|"1"),
             "display.resolution" => parse_resolution(value).is_some(),
             "display.fps_limit" => integer.is_some_and(|fps| (30..=240).contains(&fps)),
             "display.vsync" => matches!(value, "true" | "false" | "0" | "1"),
-            "enabled" | "audio.muted" | "debug.recording" | "debug.auto_marks" => matches!(value, "true" | "false" | "0" | "1"),
+            "audio.muted" | "debug.recording" | "debug.auto_marks" => matches!(value, "true" | "false" | "0" | "1"),
             "audio.input_device" | "audio.output_device" => !value.is_empty() && value.len() <= 255 && value.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b)),
             "audio.volume" | "audio.game_volume" | "audio.voice_volume" => integer.is_some_and(|v| (0..=100).contains(&v)),
             "movement.click_mode" => matches!(value, "0" | "1"),
@@ -428,6 +430,11 @@ pub fn tap_only(slot: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mapper_is_always_enabled_even_with_legacy_disabled_setting() {
+        let mut s=Settings::default();s.values.insert("enabled".into(),"false".into());
+        assert!(s.boolean("enabled",0));assert!(s.set("enabled","false",0).is_err());
+    }
     #[test]
     fn audio_channels_are_independent_and_old_settings_default_full_volume() {
         let mut s=Settings::default();

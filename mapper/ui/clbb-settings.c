@@ -36,10 +36,7 @@ struct ClbbSettings {
   GPtrArray *controls;
   GtkWidget *hero_box;
   GtkWidget *common_box;
-  GtkWidget *hero_title;
   GtkWidget *brand;
-  GtkWidget *status;
-  GtkWidget *source;
   GtkWidget *message;
   GtkWidget *capture_hint;
   GtkWidget *movement_distance_row;
@@ -1103,15 +1100,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_box_append(GTK_BOX(body), GTK_WIDGET(s->stack));
   GtkWidget *b =
       page(s, "main", "Настройки", "Ваше управление, встроенное в игру.");
-  GtkWidget *card = section(b, "Система управления");
-  switch_control(s, card, "Включить управление CLBB", "enabled", 1);
-  s->status = wrap_label("Ожидание матча", "clbb-info");
-  gtk_box_append(GTK_BOX(card), s->status);
-  gtk_box_append(GTK_BOX(card),
-                 wrap_label("Профиль героя выбирается автоматически в матче. В "
-                            "меню игровые назначения не перехватывают ввод.",
-                            "clbb-muted"));
-  card = section(b, "Обновление CLBB");
+  GtkWidget *card = section(b, "Обновление CLBB");
   s->update_version = label("", "clbb-label");
   gtk_box_append(GTK_BOX(card), s->update_version);
   gtk_box_append(GTK_BOX(card), wrap_label("Игра закроется. Обновление продолжится в отдельном окне.", "clbb-muted"));
@@ -1121,18 +1110,6 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_box_append(GTK_BOX(card),update_open);
   display_card(s,b);
 
-  card = section(b, "Состояние");
-  s->hero_title = label("Герой не определён", "clbb-label");
-  gtk_box_append(GTK_BOX(card), s->hero_title);
-  s->source = label("Источник данных: ожидание", "clbb-muted");
-  gtk_box_append(GTK_BOX(card), s->source);
-  card = section(b, "Прямое управление");
-  gtk_box_append(
-      GTK_BOX(card),
-      wrap_label("Левая кнопка мыши всегда остаётся обычным нажатием на экран. "
-                 "Её нельзя переназначить. Блокировка курсора действует только "
-                 "в окне игры и снимается при открытии настроек.",
-                 "clbb-muted"));
   b = page(s, "controls", "Управление",
            "Общие кнопки применяются ко всем героям.");
   card = section(b, "Передвижение");
@@ -1275,21 +1252,6 @@ void clbb_settings_refresh(ClbbSettings *s) {
     build_hero(s, hero);
   char *t = read_text(s, "name", "CLBB");
   gtk_label_set_text(GTK_LABEL(s->brand), t);
-  g_free(t);
-  t = read_text(s, "status", "Ожидание матча");
-  gtk_label_set_text(GTK_LABEL(s->status), t);
-  g_free(t);
-  t = read_text(s, "hero.name", hero == 25 ? "Кагура" : "Не определён");
-  char *h = hero > 0 ? g_strdup_printf("%s · ID %d", t, hero)
-                     : g_strdup("Герой определяется после входа в матч");
-  gtk_label_set_text(GTK_LABEL(s->hero_title), h);
-  g_free(h);
-  g_free(t);
-  t = read_text(s, "diagnostics.source_ms", "");
-  h = *t ? g_strdup_printf("Чтение источника: %s мс", t)
-         : g_strdup("Источник данных: ожидание");
-  gtk_label_set_text(GTK_LABEL(s->source), h);
-  g_free(h);
   g_free(t);
   t = read_text(s, "debug.status", "Запись выключена");
   gtk_label_set_text(GTK_LABEL(s->debug_status), t);

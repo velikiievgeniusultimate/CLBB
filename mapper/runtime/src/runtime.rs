@@ -788,7 +788,7 @@ impl Runtime {
         let view = self.core.inspect();
         let hero = view.heroId_;
         let v=match key {
-            "audio.input_devices"|"audio.output_devices"|"audio.status"|"audio.capture_status"=>crate::audio::read(key),
+            "audio.input_devices"|"audio.output_devices"|"audio.status"|"audio.capture_status"|"audio.playback_status"=>crate::audio::read(key),
             "hero.id"=>hero.to_string(),"hero.name"=>if hero==25{"Кагура".into()}else if hero>0{format!("Герой {hero}")}else{"Вне матча".into()},
             "status"|"diagnostics.status"=>if !self.error.is_empty(){self.error.clone()}else if !self.host.settings.boolean("enabled",0){"Управление CLBB выключено".into()}else if self.host.fresh().is_none(){"Ожидаю матч и кнопки героя".into()}else if self.suspended{"Профиль готов · управление приостановлено".into()}else{view.status_.owned()},
             "diagnostics.input"=>self.input_diagnostics(&view).to_string(),

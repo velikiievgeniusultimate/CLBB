@@ -9,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Audio client development library
-        run: sudo apt-get update && sudo apt-get install -y libpulse-dev
+        run: sudo apt-get update && sudo apt-get install -y libpulse-dev libsdl2-dev
       - name: Rust controller
         run: cargo test --manifest-path mapper/core/Cargo.toml --lib --locked --offline
       - name: Rust runtime and updater

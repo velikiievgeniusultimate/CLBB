@@ -187,6 +187,14 @@ capture. Channel settings persist and default to 100%; existing master volume is
 preserved. Android VOICE_CALL/BLUETOOTH_SCO playback is routed to voice gain;
 other AudioTrack streams and the game's OpenSL ES playback use game gain.
 
+Все источники игры и войсчата смешиваются в Rust и выводятся через один системный
+поток CLBB. Регулятор в системном микшере общий. Захват микрофона остаётся отдельным
+входом. Частоты источников приводятся к общему стереовыходу 48 кГц.
+
+Game and voice sources share one Rust mixer and one desktop playback stream.
+The system mixer controls their combined output; microphone capture stays a
+separate input. Source sample rates are converted to 48 kHz stereo internally.
+
 AudioRecord PCM16 capture is implemented in Rust with a bounded 200 ms queue and
 10 ms capture fragments. Java/JNI adapters support short arrays, byte arrays and
 direct buffers, blocking/nonblocking reads, and explicit initialization failures.

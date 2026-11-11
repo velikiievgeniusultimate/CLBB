@@ -15,11 +15,11 @@ if [[ ! -d "$CLBB_WEBKIT_PROCESS_DIR" ]]; then
 fi
 export WEBKIT_INJECTED_BUNDLE_PATH="$CLBB_WEBKIT_PROCESS_DIR/injected-bundle"
 export LD_PRELOAD="$CLBB_ATL_PREFIX/lib/libclbb_webkit_launch_adapter.so${LD_PRELOAD:+:$LD_PRELOAD}"
-# Use the desktop mixer for independent game/video streams when it is available.
+# Select the host compatibility device for optional Android audio APIs.
 if [[ -z "${ATL_AUDIO_DEVICE:-}" && -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pipewire-0" ]]; then
     export ATL_AUDIO_DEVICE=pipewire
 fi
-# Both audio backends identify themselves as this one application in desktop mixers.
+# The Rust playback mixer exposes one desktop output for game and voice.
 # CLBB provides a real host capture backend; expose the matching Android permission.
 export ATL_UGLY_ENABLE_MICROPHONE=1
 export SDL_APP_NAME=CLBB

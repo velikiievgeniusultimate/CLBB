@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory(prefix='clbb-track-api-') as tmp:
  (ann/'Export.java').write_text('package android.atl.annotation;public @interface Export {}')
  (p/'Check.java').write_text('''import android.media.AudioTrack;import java.nio.ByteBuffer;
 public class Check {static void check(boolean b){if(!b)throw new AssertionError();}public static void main(String[] args){System.load(args[0]);
- AudioTrack a=new AudioTrack(3,44100,12,2,1920,1);check(a.getState()==1&&a.getChannelCount()==2&&a.getStreamType()==3&&a.getBufferSizeInFrames()==480);check(a.getBufferCapacityInFrames()==480);check(AudioTrack.getMaxVolume()==1&&AudioTrack.getNativeOutputSampleRate(3)==44100);
+ AudioTrack a=new AudioTrack(3,44100,12,2,1920,1);check(a.getState()==1&&a.getChannelCount()==2&&a.getStreamType()==3&&a.getBufferSizeInFrames()==480);check(a.getBufferCapacityInFrames()==480);check(AudioTrack.getMaxVolume()==1&&AudioTrack.getNativeOutputSampleRate(3)==48000);
  ByteBuffer direct=ByteBuffer.allocateDirect(64);direct.position(2);check(a.write(direct,8,0)==8&&direct.position()==10);
  direct.clear();check(a.write(direct,32,1)==16&&direct.position()==16);check(a.write(direct,100,0)==-2);check(a.write(direct,1,99)==-2);
  ByteBuffer heap=ByteBuffer.wrap(new byte[32]);heap.position(3);check(a.write(heap,8,0)==8&&heap.position()==11);

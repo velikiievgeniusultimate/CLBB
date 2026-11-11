@@ -38,6 +38,7 @@ pub fn configure(input: String, output: String) {
     s.output = output;
 }
 pub fn read(key: &str) -> String {
+    if key == "audio.playback_status" {return crate::playback::status();}
     if key == "audio.capture_status" {
         let map = captures().lock().unwrap();
         return serde_json::json!({"streams":map.iter().map(|(id,c)|{let q=c.queue.0.lock().unwrap();serde_json::json!({"id":id,"active":q.active,"failed":q.failed,"samples":q.total,"queued":q.samples.len(),"channels":c.channels,"epoch":q.epoch,"delivered_samples":q.delivered,"dropped_samples":q.dropped,"cancelled_samples":q.cancelled,"reads":q.reads,"short_blocking_reads":q.short_reads,"requested_frames":q.requested,"returned_frames":q.returned,"peak":q.peak,"peak_max":q.peak_max,"rms":q.rms,"rms_max":q.rms_max,"last_read_age_ms":q.last_read.map(|t|t.elapsed().as_millis())})}).collect::<Vec<_>>()}).to_string();
