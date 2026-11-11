@@ -91,6 +91,36 @@ fn devices(items: &[Value], input: bool) -> String {
     }
     out
 }
+fn object_id(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+}
+fn with_client_owners(mut streams: Vec<Value>, clients: &[Value]) -> Vec<Value> {
+    for stream in &mut streams {
+        if stream["properties"]["application.process.id"]
+            .as_str()
+            .is_some()
+        {
+            continue;
+        }
+        let Some(client_id) = object_id(&stream["client"]) else {
+            continue;
+        };
+        if let Some(client) = clients
+            .iter()
+            .find(|c| object_id(&c["index"]) == Some(client_id))
+        {
+            if let Some(pid) = client["properties"]["pipewire.sec.pid"]
+                .as_str()
+                .or_else(|| client["properties"]["application.process.id"].as_str())
+            {
+                stream["properties"]["application.process.id"] = Value::String(pid.into());
+            }
+        }
+    }
+    streams
+}
 fn route(streams: &[Value], devices: &[Value], target: &str, input: bool) -> Result<(), String> {
     let Some(index) = devices
         .iter()
@@ -145,8 +175,9 @@ fn routing(state: Arc<Mutex<State>>) {
                 s.inputs = devices(&inputs, true);
                 s.outputs = devices(&outputs, false);
             }
+            let clients = list("clients")?;
             route(
-                &list("sink-inputs")?,
+                &with_client_owners(list("sink-inputs")?, &clients),
                 &outputs,
                 if output == "default" {
                     &default_out
@@ -156,7 +187,7 @@ fn routing(state: Arc<Mutex<State>>) {
                 false,
             )?;
             route(
-                &list("source-outputs")?,
+                &with_client_owners(list("source-outputs")?, &clients),
                 &inputs,
                 if input == "default" {
                     &default_in
@@ -542,5 +573,27 @@ mod routing_tests {
         }
         assert_eq!(command(&["get-default-source"]).unwrap(), before_in);
         assert_eq!(command(&["get-default-sink"]).unwrap(), before_out);
+    }
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+    #[test]
+    fn native_pipewire_stream_resolves_via_client() {
+        let streams =
+            vec![serde_json::json!({"client":"15345","properties":{"application.name":"CLBB"}})];
+        let clients =
+            vec![serde_json::json!({"index":15345,"properties":{"pipewire.sec.pid":"12345"}})];
+        let resolved = with_client_owners(streams, &clients);
+        assert_eq!(resolved[0]["properties"]["application.process.id"], "12345");
+    }
+    #[test]
+    fn name_alone_is_never_ownership() {
+        let s = with_client_owners(
+            vec![serde_json::json!({"client":"missing","properties":{"application.name":"CLBB"}})],
+            &[],
+        );
+        assert!(s[0]["properties"]["application.process.id"].is_null());
     }
 }
