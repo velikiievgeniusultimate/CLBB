@@ -27,6 +27,9 @@ typedef struct {
 
 struct ClbbSettings {
   GtkWidget *debug_status;
+  GtkWidget *audio_input, *audio_output, *audio_status;
+  GPtrArray *audio_input_ids, *audio_output_ids;
+  char *audio_inventory[2];
   GtkWidget *panel;
   GWeakRef previous_focus;
   ClbbSettingsCallbacks callbacks;
@@ -160,6 +163,41 @@ static gboolean write_value(ClbbSettings *s, const char *key,
   if (!ok)
     clbb_settings_refresh(s);
   return ok;
+}
+static void audio_selected(GObject *widget, GParamSpec *pspec, gpointer user) {
+  (void)pspec;ClbbSettings *s=user;if(s->refreshing)return;
+  gboolean input=GTK_WIDGET(widget)==s->audio_input;
+  GPtrArray *ids=input?s->audio_input_ids:s->audio_output_ids;
+  guint selected=gtk_drop_down_get_selected(GTK_DROP_DOWN(widget));
+  if(ids && selected<ids->len)write_value(s,input?"audio.input_device":"audio.output_device",g_ptr_array_index(ids,selected));
+}
+static void audio_refresh_clicked(GtkButton *button,gpointer user) {
+  (void)button;ClbbSettings *s=user;write_value(s,"audio.refresh","1");
+}
+static void audio_refresh(ClbbSettings *s) {
+  for(int i=0;i<2;i++) {
+    GtkWidget *widget=i?s->audio_output:s->audio_input;
+    if(!widget)continue;
+    char *rows=read_text(s,i?"audio.output_devices":"audio.input_devices","");
+    char *chosen=read_text(s,i?"audio.output_device":"audio.input_device","default");
+    char *inventory=g_strconcat(rows,"|",chosen,NULL);
+    if(g_strcmp0(inventory,s->audio_inventory[i])) {
+      g_free(s->audio_inventory[i]);s->audio_inventory[i]=inventory;inventory=NULL;
+      GPtrArray **ids=i?&s->audio_output_ids:&s->audio_input_ids;
+      if(*ids)g_ptr_array_unref(*ids);*ids=g_ptr_array_new_with_free_func(g_free);
+      GtkStringList *model=gtk_string_list_new(NULL);
+      gtk_string_list_append(model,"Системное устройство по умолчанию");g_ptr_array_add(*ids,g_strdup("default"));
+      char **lines=g_strsplit(rows,"\n",-1);guint selected=0;gboolean found=!g_strcmp0(chosen,"default");
+      for(int j=0;lines[j];j++) {char *tab=strchr(lines[j],'\t');if(!tab)continue;*tab=0;
+        if(!*lines[j]||!g_strcmp0(lines[j],"default"))continue;
+        gtk_string_list_append(model,tab+1);g_ptr_array_add(*ids,g_strdup(lines[j]));
+        if(!g_strcmp0(chosen,lines[j])){selected=(*ids)->len-1;found=TRUE;}}
+      if(!found){char *label=g_strdup_printf("Недоступно: %s",chosen);gtk_string_list_append(model,label);g_free(label);g_ptr_array_add(*ids,g_strdup(chosen));selected=(*ids)->len-1;}
+      gtk_drop_down_set_model(GTK_DROP_DOWN(widget),G_LIST_MODEL(model));gtk_drop_down_set_selected(GTK_DROP_DOWN(widget),selected);g_object_unref(model);g_strfreev(lines);
+    }
+    g_free(inventory);g_free(rows);g_free(chosen);
+  }
+  if(s->audio_status){char *status=read_text(s,"audio.status","Поиск аудиоустройств…");gtk_label_set_text(GTK_LABEL(s->audio_status),status);g_free(status);}
 }
 static gboolean write_int(ClbbSettings *s, const char *key, int value) {
   char v[32];
@@ -1138,6 +1176,17 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   s->common_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
   gtk_box_append(GTK_BOX(b), s->common_box);
   b = page(s, "sound", "Звук", "Единая громкость приложения.");
+  card = section(b, "Аудиоустройства");
+  gtk_box_append(GTK_BOX(card),wrap_label("Аудиовывод", "clbb-muted"));
+  s->audio_output=gtk_drop_down_new(NULL,NULL);g_object_set_data(G_OBJECT(s->audio_output),"clbb-settings-key","audio.output_device");gtk_box_append(GTK_BOX(card),s->audio_output);
+  gtk_box_append(GTK_BOX(card),wrap_label("Аудиовход · микрофон", "clbb-muted"));
+  s->audio_input=gtk_drop_down_new(NULL,NULL);g_object_set_data(G_OBJECT(s->audio_input),"clbb-settings-key","audio.input_device");gtk_box_append(GTK_BOX(card),s->audio_input);
+  g_signal_connect(s->audio_input,"notify::selected",G_CALLBACK(audio_selected),s);
+  g_signal_connect(s->audio_output,"notify::selected",G_CALLBACK(audio_selected),s);
+  GtkWidget *audio_scan=gtk_button_new_with_label("Обновить список устройств");gtk_box_append(GTK_BOX(card),audio_scan);
+  g_signal_connect(audio_scan,"clicked",G_CALLBACK(audio_refresh_clicked),s);
+  s->audio_status=wrap_label("Поиск аудиоустройств…","clbb-muted");gtk_box_append(GTK_BOX(card),s->audio_status);
+  gtk_box_append(GTK_BOX(card),wrap_label("Выбор применяется только к CLBB. Включите микрофон в самой игре для голосового чата.","clbb-muted"));
   card = section(b, "Громкость CLBB");
   c = new_control(s, card, "Общий уровень", "audio.volume", CONTROL_VOLUME,
                   100);
@@ -1205,6 +1254,7 @@ void clbb_settings_refresh(ClbbSettings *s) {
   gtk_label_set_text(GTK_LABEL(s->update_version), update_label);
   g_free(update_label); g_free(update_text);
   }
+  audio_refresh(s);
   display_refresh(s);
   pacing_refresh(s);
   int hero = read_int(s, "hero.id", 0);
@@ -1321,6 +1371,9 @@ void clbb_settings_destroy(ClbbSettings *s) {
                              s->panel);
   g_weak_ref_clear(&s->previous_focus);
   g_ptr_array_unref(s->controls);
+  if(s->audio_input_ids)g_ptr_array_unref(s->audio_input_ids);
+  if(s->audio_output_ids)g_ptr_array_unref(s->audio_output_ids);
+  g_free(s->audio_inventory[0]);g_free(s->audio_inventory[1]);
   g_free(s);
 }
 

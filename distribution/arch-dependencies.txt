@@ -48,3 +48,6 @@ libavcodec.so=63-64
 libswscale.so=10-64
 libicuuc.so=78-64
 libicui18n.so=78-64
+
+# Per-application audio routing and microphone capture.
+libpulse

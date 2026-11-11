@@ -1306,3 +1306,9 @@ License/notice text / Текст: legal/third-party/common/GPL-2.0-only.txt
 - Create corresponding source archives for each distributed binary, with CLBB patches and build instructions; links alone are not the completed source-delivery plan.
 - Define final installer payload and audit optional plugins/fonts/codecs and private-prefix package versions; live mapped libraries are not a complete dependency closure.
 - Game APK/resources are proprietary and excluded. This inventory grants no MOONTON redistribution or service permission.
+
+libpulse 17.0+r98+gb096704c0-1
+Scope / Область: host package owning observed or ELF-linked shared libraries; not necessarily bundled
+License / Лицензия: LGPL-2.1-or-later
+Upstream / Источник: https://www.freedesktop.org/wiki/Software/PulseAudio/
+License/notice text / Текст: legal/third-party/common/LGPL-2.1-or-later.txt

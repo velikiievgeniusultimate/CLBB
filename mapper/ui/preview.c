@@ -155,6 +155,10 @@ int main(int argc, char **argv) {
   put(&p, "common.bindings.attack.key", "32");
   put(&p, "common.bindings.extra:2.key", "70");
   put(&p, "audio.volume", "72");
+  put(&p,"audio.input_device","default");put(&p,"audio.output_device","default");
+  put(&p,"audio.input_devices","default\tDefault\nmic.one\tМикрофон гарнитуры\nmic.two\tВнешний микрофон\n");
+  put(&p,"audio.output_devices","default\tDefault\nsink.one\tНаушники\nsink.two\tКолонки\n");
+  put(&p,"audio.status","Устройства подключены");
   put(&p, "display.width", "1280");
   put(&p, "display.height", "720");
   put(&p, "display.imported_resolution", "4000x3111");
@@ -197,6 +201,24 @@ int main(int argc, char **argv) {
     clbb_settings_refresh(s);
   }
   if (selftest) {
+    GtkWidget *mic=find_control(clbb_settings_panel(s),"audio.input_device");
+    GtkWidget *speaker=find_control(clbb_settings_panel(s),"audio.output_device");
+    g_assert_nonnull(mic);g_assert_nonnull(speaker);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(mic),2);
+    g_assert_cmpstr(read_value(&p,"audio.input_device"),==,"mic.two");
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(speaker),1);
+    g_assert_cmpstr(read_value(&p,"audio.output_device"),==,"sink.one");
+    guint audio_writes=p.writes;clbb_settings_refresh(s);
+    g_assert_cmpuint(p.writes,==,audio_writes);
+    put(&p,"audio.input_devices","default\tDefault\nmic.one\tМикрофон гарнитуры\n");
+    clbb_settings_refresh(s);
+    g_assert_cmpuint(gtk_drop_down_get_selected(GTK_DROP_DOWN(mic)),==,2);
+    g_assert_cmpstr(gtk_string_list_get_string(GTK_STRING_LIST(gtk_drop_down_get_model(GTK_DROP_DOWN(mic))),2),==,"Недоступно: mic.two");
+    g_assert_cmpstr(read_value(&p,"audio.input_device"),==,"mic.two");
+    g_assert_cmpuint(p.writes,==,audio_writes);
+    g_signal_emit_by_name(find_button(clbb_settings_panel(s),"Обновить список устройств"),"clicked");
+    g_assert_cmpstr(read_value(&p,"audio.refresh"),==,"1");
+
     GtkWidget *record_row = find_control(clbb_settings_panel(s), "debug.recording");
     GtkWidget *record_button = find_type(record_row, GTK_TYPE_TOGGLE_BUTTON);
     g_assert_nonnull(record_button);

@@ -21,3 +21,6 @@ pub mod settings;
 pub mod source;
 pub mod unity;
 pub mod updater;
+
+#[cfg(target_os = "linux")]
+pub mod audio;

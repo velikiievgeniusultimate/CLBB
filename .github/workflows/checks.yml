@@ -8,10 +8,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Audio client development library
+        run: sudo apt-get update && sudo apt-get install -y libpulse-dev
       - name: Rust controller
         run: cargo test --manifest-path mapper/core/Cargo.toml --lib --locked --offline
       - name: Rust runtime and updater
         run: cargo test --manifest-path mapper/runtime/Cargo.toml --lib --locked --offline
+      - name: Android microphone JNI adapter
+        run: python3 smoke/check-audiorecord-jni.py
       - name: Installer manager
         run: cargo test --manifest-path distribution/manager/Cargo.toml --locked --offline
       - name: Launcher diagnostics

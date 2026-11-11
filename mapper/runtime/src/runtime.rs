@@ -520,6 +520,7 @@ impl Runtime {
         self.core.apply_input(&mut self.host, event, now_ns())
     }
     fn configure(&mut self) {
+        crate::audio::configure(self.host.settings.get("audio.input_device",0),self.host.settings.get("audio.output_device",0));
         let recording=self.host.settings.boolean("debug.recording",0);
         if recording != self.recorder.is_enabled() {self.debug_pending_since=0;self.debug_mismatch_since=0;}
         self.recorder.set_enabled(recording);
@@ -772,6 +773,7 @@ impl Runtime {
         let view = self.core.inspect();
         let hero = view.heroId_;
         let v=match key {
+            "audio.input_devices"|"audio.output_devices"|"audio.status"|"audio.capture_status"=>crate::audio::read(key),
             "hero.id"=>hero.to_string(),"hero.name"=>if hero==25{"Кагура".into()}else if hero>0{format!("Герой {hero}")}else{"Вне матча".into()},
             "status"|"diagnostics.status"=>if !self.error.is_empty(){self.error.clone()}else if !self.host.settings.boolean("enabled",0){"Управление CLBB выключено".into()}else if self.host.fresh().is_none(){"Ожидаю матч и кнопки героя".into()}else if self.suspended{"Профиль готов · управление приостановлено".into()}else{view.status_.owned()},
             "diagnostics.input"=>self.input_diagnostics(&view).to_string(),
@@ -810,6 +812,7 @@ impl Runtime {
         self.read.as_ptr()
     }
     fn write(&mut self, key: &str, value: &str) -> bool {
+        if key=="audio.refresh" {crate::audio::refresh();return true;}
         if matches!(key,"updates.check"|"updates.install"){return matches!(value,"1"|"true")&&self.updates.request(key); }
         if key=="debug.mark" {return self.recorder.mark(now_ns(),value,false);}
         if key=="diagnostics.contact_rotation" {

@@ -609,6 +609,174 @@ index 3eb505c..34a72dc 100644
  }
  
  JNIEXPORT void JNICALL Java_android_app_Dialog_nativeShow(JNIEnv *env, jobject this, jlong ptr)
+diff --git a/src/api-impl-jni/audio/android_media_AudioRecord.c b/src/api-impl-jni/audio/android_media_AudioRecord.c
+index febf9f3..922f45d 100644
+--- a/src/api-impl-jni/audio/android_media_AudioRecord.c
++++ b/src/api-impl-jni/audio/android_media_AudioRecord.c
+@@ -1,139 +1,32 @@
+-#include <alsa/asoundlib.h>
+-
++#include <dlfcn.h>
++#include <stdint.h>
+ #include "../defines.h"
+-#include "audio.h"
+-
+ #include "../generated_headers/android_media_AudioRecord.h"
+-
+-JNIEXPORT jlong JNICALL Java_android_media_AudioRecord_native_1constructor(JNIEnv *env, jobject this, jint streamType, jint rate, jint channel_config, jint audioFormat, jint buffer_size)
+-{
+-	snd_pcm_t *pcm_handle;
+-	snd_pcm_hw_params_t *params;
+-	unsigned int channels;
+-	unsigned int channels_out;
+-	int ret;
+-
+-	if (!getenv("ATL_UGLY_ENABLE_MICROPHONE"))
+-		return 0;
+-
+-	/* Open the PCM device in playback mode */
+-	ret = snd_pcm_open(&pcm_handle, PCM_DEVICE, SND_PCM_STREAM_CAPTURE, 0);
+-	if (ret < 0)
+-		printf("ERROR: Can't open \"%s\" PCM device. %s\n", PCM_DEVICE, snd_strerror(ret));
+-
+-	snd_pcm_hw_params_alloca(&params);
+-	helper_hw_params_init(pcm_handle, params, rate, channel_config, SND_PCM_FORMAT_S16_LE, &channels);
+-
+-	snd_pcm_uframes_t buffer_size_as_uframes_t = buffer_size / channels / 2; // 2 means PCM16
+-	snd_pcm_hw_params_set_buffer_size_near(pcm_handle, params, &buffer_size_as_uframes_t);
+-
+-	/* Write parameters */
+-	ret = snd_pcm_hw_params(pcm_handle, params);
+-	if (ret < 0)
+-		printf("ERROR: Can't set harware parameters. %s\n", snd_strerror(ret));
+-
+-	snd_pcm_uframes_t period_size;
+-
+-	ret = snd_pcm_hw_params_get_period_size(params, &period_size, 0);
+-	if (ret < 0)
+-		printf("Error calling snd_pcm_hw_params_get_period_size: %s\n", snd_strerror(ret));
+-
+-	snd_pcm_sw_params_t *sw_params;
+-
+-	snd_pcm_sw_params_malloc(&sw_params);
+-	snd_pcm_sw_params_current(pcm_handle, sw_params);
+-
+-	snd_pcm_sw_params_set_start_threshold(pcm_handle, sw_params, (buffer_size_as_uframes_t / period_size) * period_size);
+-	snd_pcm_sw_params_set_avail_min(pcm_handle, sw_params, period_size);
+-
+-	snd_pcm_sw_params(pcm_handle, sw_params);
+-
+-	snd_pcm_hw_params_get_channels(params, &channels_out);
+-
+-	_SET_INT_FIELD(this, "channels", channels_out);
+-	return _INTPTR(pcm_handle);
++/* Thin JNI adapter; capture ownership and host backend live in Rust. */
++JNIEXPORT jlong JNICALL Java_android_media_AudioRecord_native_1constructor(JNIEnv *env,jobject this,jint source,jint rate,jint config,jint format,jint size) {
++ unsigned channels=config==12?2:(config==1||config==2||config==16?1:0);
++ if(!channels||format!=2||size<=0) return 0;
++ uint64_t (*open_capture)(uint32_t,uint32_t)=dlsym(RTLD_DEFAULT,"clbb_capture_open");
++ if(!open_capture) return 0;
++ uint64_t id=open_capture(rate,channels);if(id) _SET_INT_FIELD(this,"channels",channels);return id;
+ }
+-
+-JNIEXPORT jint JNICALL Java_android_media_AudioRecord_getMinBufferSize(JNIEnv *env, jclass this_class, jint sampleRateInHz, jint channelConfig, jint audioFormat)
+-{
+-	snd_pcm_t *pcm_handle;
+-	snd_pcm_hw_params_t *params;
+-	snd_pcm_uframes_t frames;
+-	int ret;
+-	unsigned int num_channels;
+-
+-	ret = snd_pcm_open(&pcm_handle, PCM_DEVICE, SND_PCM_STREAM_CAPTURE, 0);
+-	if (ret < 0)
+-		printf("Error calling snd_pcm_open: %s\n", snd_strerror(ret));
+-
+-	snd_pcm_hw_params_alloca(&params);
+-	helper_hw_params_init(pcm_handle, params, sampleRateInHz, channelConfig, SND_PCM_FORMAT_S16_LE, &num_channels); // FIXME: a switch?
+-
+-	ret = snd_pcm_hw_params(pcm_handle, params);
+-	if (ret < 0)
+-		printf("Error calling snd_pcm_hw_params: %s\n", snd_strerror(ret));
+-
+-	ret = snd_pcm_hw_params_get_period_size(params, &frames, 0);
+-	if (ret < 0)
+-		printf("Error calling snd_pcm_hw_params_get_period_size: %s\n", snd_strerror(ret));
+-
+-	snd_pcm_close(pcm_handle);
+-
+-	printf("\n\nJava_android_media_AudioRecord_getMinBufferSize is returning: %ld\n\n\n", frames * num_channels * 2);
+-	return frames * num_channels * 2; // 2 bytes = 16 bits (s16)
++JNIEXPORT jint JNICALL Java_android_media_AudioRecord_getMinBufferSize(JNIEnv *env,jclass cls,jint rate,jint config,jint format) {
++ int channels=config==12?2:(config==1||config==2||config==16?1:0);
++ if(!channels||format!=2||rate<8000||rate>192000)return -2;
++ return ((rate+49)/50)*channels*2;
+ }
+-
+-JNIEXPORT void JNICALL Java_android_media_AudioRecord_native_1record(JNIEnv *env, jobject this, jlong pcm_handle_ptr)
+-{
+-	if (!getenv("ATL_UGLY_ENABLE_MICROPHONE"))
+-		return;
+-
+-	snd_pcm_t *pcm_handle = _PTR(pcm_handle_ptr);
+-
+-	snd_pcm_start(pcm_handle);
++JNIEXPORT jint JNICALL Java_android_media_AudioRecord_native_1record(JNIEnv *env,jobject this,jlong id) {
++ int (*active)(uint64_t,int)=dlsym(RTLD_DEFAULT,"clbb_capture_active");return active?active(id,1):-3;
+ }
+-
+-JNIEXPORT void JNICALL Java_android_media_AudioRecord_native_1stop(JNIEnv *env, jobject this, jlong pcm_handle_ptr)
+-{
+-	if (!getenv("ATL_UGLY_ENABLE_MICROPHONE"))
+-		return;
+-
+-	snd_pcm_t *pcm_handle = _PTR(pcm_handle_ptr);
+-
+-	snd_pcm_drain(pcm_handle);
++JNIEXPORT void JNICALL Java_android_media_AudioRecord_native_1stop(JNIEnv *env,jobject this,jlong id) {
++ int (*active)(uint64_t,int)=dlsym(RTLD_DEFAULT,"clbb_capture_active");if(active)active(id,0);
+ }
+-
+-JNIEXPORT jint JNICALL Java_android_media_AudioRecord_native_1read(JNIEnv *env, jobject this, jlong pcm_handle_ptr, jshortArray audio_data, jint offset_in_shorts, jint frames_to_read)
+-{
+-	if (!getenv("ATL_UGLY_ENABLE_MICROPHONE"))
+-		return 0;
+-
+-	snd_pcm_t *pcm_handle = _PTR(pcm_handle_ptr);
+-	snd_pcm_sframes_t frames_read;
+-
+-	jshort *buffer = (*env)->GetShortArrayElements(env, audio_data, NULL);
+-
+-	frames_read = snd_pcm_readi(pcm_handle, buffer + offset_in_shorts, frames_to_read);
+-	if (frames_read == -EPIPE) {
+-		printf("XRUN.\n");
+-		snd_pcm_recover(pcm_handle, frames_read, 0);
+-		frames_read = snd_pcm_readi(pcm_handle, buffer + offset_in_shorts, frames_to_read);
+-		snd_pcm_start(pcm_handle);
+-	}
+-	if (frames_read < 0) {
+-		printf("ERROR. Can't read from PCM capture device. %s\n", snd_strerror(frames_read));
+-		frames_read = 0;
+-	}
+-	(*env)->ReleaseShortArrayElements(env, audio_data, buffer, 0);
+-
+-	return frames_read;
++JNIEXPORT jint JNICALL Java_android_media_AudioRecord_native_1read(JNIEnv *env,jobject this,jlong id,jshortArray data,jint offset,jint frames,jint mode) {
++ int (*read_capture)(uint64_t,int16_t*,uint32_t,int)=dlsym(RTLD_DEFAULT,"clbb_capture_read");
++ if(!read_capture||!id)return -3;if(frames<0||frames>8192)return -2;
++ jshort *buffer=(*env)->GetShortArrayElements(env,data,NULL);if(!buffer)return -1;
++ int result=read_capture(id,buffer+offset,frames,mode==0);(*env)->ReleaseShortArrayElements(env,data,buffer,0);return result;
+ }
+-
+-JNIEXPORT void JNICALL Java_android_media_AudioRecord_native_1release(JNIEnv *env, jobject this, jlong pcm_handle_ptr)
+-{
+-	if (!getenv("ATL_UGLY_ENABLE_MICROPHONE"))
+-		return;
+-
+-	snd_pcm_t *pcm_handle = _PTR(pcm_handle_ptr);
+-	snd_pcm_close(pcm_handle);
++JNIEXPORT void JNICALL Java_android_media_AudioRecord_native_1release(JNIEnv *env,jobject this,jlong id) {
++ void (*close_capture)(uint64_t)=dlsym(RTLD_DEFAULT,"clbb_capture_close");if(close_capture)close_capture(id);
+ }
 diff --git a/src/api-impl-jni/audio/android_media_AudioTrack.c b/src/api-impl-jni/audio/android_media_AudioTrack.c
 index 78d094f..3b6312f 100644
 --- a/src/api-impl-jni/audio/android_media_AudioTrack.c
@@ -774,6 +942,40 @@ index 0098b29..5e870c7 100644
 +#define PCM_DEVICE atl_audio_device()
  
  void helper_hw_params_init(snd_pcm_t *pcm_handle, snd_pcm_hw_params_t *params, unsigned int rate, int channel_config, snd_pcm_format_t format, unsigned int *channels);
+diff --git a/src/api-impl-jni/generated_headers/android_media_AudioRecord.h b/src/api-impl-jni/generated_headers/android_media_AudioRecord.h
+index d62463b..eb62e71 100644
+--- a/src/api-impl-jni/generated_headers/android_media_AudioRecord.h
++++ b/src/api-impl-jni/generated_headers/android_media_AudioRecord.h
+@@ -13,6 +13,16 @@ extern "C" {
+ #define android_media_AudioRecord_RECORDSTATE_RECORDING 3L
+ #undef android_media_AudioRecord_ERROR_BAD_VALUE
+ #define android_media_AudioRecord_ERROR_BAD_VALUE -2L
++#undef android_media_AudioRecord_ERROR_INVALID_OPERATION
++#define android_media_AudioRecord_ERROR_INVALID_OPERATION -3L
++#undef android_media_AudioRecord_STATE_UNINITIALIZED
++#define android_media_AudioRecord_STATE_UNINITIALIZED 0L
++#undef android_media_AudioRecord_STATE_INITIALIZED
++#define android_media_AudioRecord_STATE_INITIALIZED 1L
++#undef android_media_AudioRecord_READ_BLOCKING
++#define android_media_AudioRecord_READ_BLOCKING 0L
++#undef android_media_AudioRecord_READ_NON_BLOCKING
++#define android_media_AudioRecord_READ_NON_BLOCKING 1L
+ /*
+  * Class:     android_media_AudioRecord
+  * Method:    native_constructor
+@@ -40,10 +50,10 @@ JNIEXPORT void JNICALL Java_android_media_AudioRecord_native_1stop
+ /*
+  * Class:     android_media_AudioRecord
+  * Method:    native_read
+- * Signature: (J[SII)I
++ * Signature: (J[SIII)I
+  */
+ JNIEXPORT jint JNICALL Java_android_media_AudioRecord_native_1read
+-  (JNIEnv *, jobject, jlong, jshortArray, jint, jint);
++  (JNIEnv *, jobject, jlong, jshortArray, jint, jint, jint);
+ 
+ /*
+  * Class:     android_media_AudioRecord
 diff --git a/src/api-impl-jni/generated_headers/android_media_MediaCodec.h b/src/api-impl-jni/generated_headers/android_media_MediaCodec.h
 index 8e855fe..71921c6 100644
 --- a/src/api-impl-jni/generated_headers/android_media_MediaCodec.h
@@ -2534,6 +2736,105 @@ index 7d7213e..243d770 100644
  			case "layer-list": {
  				LayerDrawable drawable = new LayerDrawable();
  				drawable.inflate(resources, parser, attrs, theme);
+diff --git a/src/api-impl/android/media/AudioRecord.java b/src/api-impl/android/media/AudioRecord.java
+index ae1144c..5b0d714 100644
+--- a/src/api-impl/android/media/AudioRecord.java
++++ b/src/api-impl/android/media/AudioRecord.java
+@@ -6,6 +6,9 @@ public class AudioRecord {
+ 	public static final int RECORDSTATE_RECORDING = 3;
+ 
+ 	public static final int ERROR_BAD_VALUE = -2;
++ public static final int ERROR_INVALID_OPERATION = -3;
++ public static final int STATE_UNINITIALIZED = 0, STATE_INITIALIZED = 1;
++ public static final int READ_BLOCKING = 0, READ_NON_BLOCKING = 1;
+ 
+ 	private long pcm_handle;
+ 	private int channels; // set by native constructor
+@@ -13,9 +16,9 @@ public class AudioRecord {
+ 	private int sampleRateInHz;
+ 
+ 	private native long native_constructor(int streamType, int sampleRateInHz, int num_channels, int audioFormat, int bufferSizeInBytes);
+-	private native void native_record(long pcm_handle);
++	private native int native_record(long pcm_handle);
+ 	private native void native_stop(long pcm_handle);
+-	private native int native_read(long pcm_handle, short[] audioData, int offsetInShorts, int framesToWrite);
++	private native int native_read(long pcm_handle, short[] audioData, int offsetInShorts, int framesToWrite, int mode);
+ 	private native void native_release(long pcm_handle);
+ 
+ 	public AudioRecord(int streamType, int sampleRateInHz, int channelConfig, int audioFormat, int bufferSizeInBytes) {
+@@ -30,19 +33,27 @@ public class AudioRecord {
+ 	}
+ 
+ 	public int getState() {
+-		return /*STATE_INITIALIZED*/ 1;
++		return pcm_handle != 0 ? STATE_INITIALIZED : STATE_UNINITIALIZED;
+ 	}
+ 
+-	public int getRecordingState() {
++	public int getChannelCount() {return channels;}
++ public int getAudioFormat() {return 2;}
++ public int getAudioSessionId() {return 1;}
++ public int getAudioSource() {return 1;}
++ public int getRecordingState() {
+ 		return recordingState;
+ 	}
+ 
+-	public void startRecording() {
+-		native_record(pcm_handle);
++	public synchronized void startRecording() {
++        if (pcm_handle == 0) throw new IllegalStateException("AudioRecord is not initialized");
++		if (native_record(pcm_handle) != 0) throw new IllegalStateException("Microphone start failed");
+ 		recordingState = RECORDSTATE_RECORDING;
+ 	}
+ 
+-	public int read(short[] audioData, int offsetInShorts, int sizeInShorts) {
++	public int read(short[] audioData,int offsetInShorts,int sizeInShorts) {return read(audioData,offsetInShorts,sizeInShorts,READ_BLOCKING);}
++ public synchronized int read(short[] audioData, int offsetInShorts, int sizeInShorts,int mode) {
++        if (mode != READ_BLOCKING && mode != READ_NON_BLOCKING) return ERROR_BAD_VALUE;
++        if (pcm_handle == 0 || recordingState != RECORDSTATE_RECORDING) return ERROR_INVALID_OPERATION;
+ 		/* sanity check the parameters before calling native_write */
+ 		if ((audioData == null)
+ 		    || (offsetInShorts < 0) || (sizeInShorts < 0)
+@@ -51,17 +62,36 @@ public class AudioRecord {
+ 			return ERROR_BAD_VALUE;
+ 		}
+ 
+-		return native_read(pcm_handle, audioData, offsetInShorts, sizeInShorts / channels) * channels;
++		int result = native_read(pcm_handle, audioData, offsetInShorts, Math.min(sizeInShorts / channels, 8192),mode);
++        return result < 0 ? result : result * channels;
+ 	}
+ 
+-	public void stop() {
++
++ public int read(byte[] data,int offset,int size) {return read(data,offset,size,READ_BLOCKING);}
++ public int read(byte[] data,int offset,int size,int mode) {
++  if(mode!=READ_BLOCKING && mode!=READ_NON_BLOCKING)return ERROR_BAD_VALUE;
++  if(data==null || offset<0 || size<0 || offset>data.length-size)return ERROR_BAD_VALUE;
++  short[] samples=new short[Math.min(size/2,16384)];int count=read(samples,0,samples.length,mode);
++  if(count<0)return count;for(int i=0;i<count;i++){data[offset+2*i]=(byte)samples[i];data[offset+2*i+1]=(byte)(samples[i]>>8);}return count*2;
++ }
++ public int read(java.nio.ByteBuffer data,int size) {return read(data,size,READ_BLOCKING);}
++ public int read(java.nio.ByteBuffer data,int size,int mode) {
++  if(mode!=READ_BLOCKING && mode!=READ_NON_BLOCKING)return ERROR_BAD_VALUE;
++  if(data==null || !data.isDirect() || data.isReadOnly() || size<0 || size>data.capacity())return ERROR_BAD_VALUE;
++  byte[] bytes=new byte[Math.min(size,32768)];int count=read(bytes,0,bytes.length,mode);
++  if(count>0){java.nio.ByteBuffer copy=data.duplicate();copy.clear();copy.put(bytes,0,count);}return count;
++ }
++
++ public synchronized void stop() {
++        if (pcm_handle == 0) return;
+ 		native_stop(pcm_handle);
+ 		recordingState = RECORDSTATE_STOPPED;
+ 	}
+ 
+-	public void release() {
++	public synchronized void release() {
+ 		native_release(pcm_handle);
+ 		pcm_handle = 0;
++        recordingState = RECORDSTATE_STOPPED;
+ 	}
+ 
+ 	public static class Builder {
 diff --git a/src/api-impl/android/media/MediaCodec.java b/src/api-impl/android/media/MediaCodec.java
 index 6aaa9c4..05096c1 100644
 --- a/src/api-impl/android/media/MediaCodec.java

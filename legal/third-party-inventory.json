@@ -3277,6 +3277,19 @@
           "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
         }
       ]
+    },
+    {
+      "name": "libpulse",
+      "version": "17.0+r98+gb096704c0-1",
+      "scope": "host package owning observed or ELF-linked shared libraries; not necessarily bundled",
+      "url": "https://www.freedesktop.org/wiki/Software/PulseAudio/",
+      "license_expression": "LGPL-2.1-or-later",
+      "license_files": [
+        {
+          "path": "legal/third-party/common/LGPL-2.1-or-later.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+        }
+      ]
     }
   ],
   "prefix_license_files": [

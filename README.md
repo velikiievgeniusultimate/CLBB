@@ -162,3 +162,26 @@ APK. Архитектура ПК не используется для выбор
 отдельный этап; повторные запуски используют проверенный кэш соответствующего APK.
 Это исправляет ошибку первых alpha-сборок, где чистая копия могла не найти
 `libmain.so`/`libEncryptorP.so`, хотя APK был скачан правильно.
+
+### Аудиоустройства / Audio devices
+
+F7 → **Звук**: выбирайте аудиовывод и микрофон. Выбор сохраняется; «Системное
+устройство по умолчанию» следует настройке рабочего стола. Смена устройства
+перенаправляет только потоки процесса CLBB. Мониторы выходов скрыты из списка
+микрофонов. При отключении выбранного устройства его имя остаётся в списке как
+недоступное. Включение голосового чата выполняется в самой игре.
+
+F7 → **Sound** lets you select the output and microphone. Choices persist;
+“System default” follows the desktop setting. Routing affects CLBB streams only.
+Output monitors are excluded from the microphone picker. Disconnected selections
+remain visible as unavailable. Enable voice chat inside the game itself.
+
+AudioRecord PCM16 capture is implemented in Rust with a bounded 200 ms queue and
+10 ms capture fragments. Java/JNI adapters support short arrays, byte arrays and
+direct buffers, blocking/nonblocking reads, and explicit initialization failures.
+Diagnostic counters contain no saved voice recordings. Requires a local
+PulseAudio-compatible server (including PipeWire-Pulse) and `libpulse`/`pactl`.
+
+Checks: `python3 smoke/check-audiorecord-jni.py`,
+`python3 smoke/check-microphone.py` (local synthetic source),
+`bash mapper/ui/check-preview.sh` (isolated settings UI).

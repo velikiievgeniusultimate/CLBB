@@ -9,6 +9,10 @@ typedef struct ClbbSettings ClbbSettings;
  * All callbacks run on the GTK main thread. Do not inject input from read().
  *
  * Values are UTF-8 strings. Booleans: "true"/"false"; numbers: decimal.
+ * audio.input_device / audio.output_device: stable server name or "default".
+ * audio.input_devices / audio.output_devices: read-only UTF-8 id TAB label LF rows.
+ * audio.refresh: rescan asynchronously; audio.status: routing status.
+ * audio.capture_status: counters and state only, no saved voice data.
  * enabled
  * name (default CLBB), status (read-only runtime status)
  * diagnostics.source_ms (read-only sample duration, in milliseconds)
