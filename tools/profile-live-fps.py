@@ -33,4 +33,5 @@ summary={'pid':pid,'seconds':elapsed,'fps_mean':statistics.mean(interval_fps),'f
 painted=[(b['snapshot']['total']-c['snapshot']['total'])/(b['time']-c['time'])for c,b in zip(rows,rows[1:])if b.get('snapshot') and c.get('snapshot') and b['surface']==c['surface'] and b['snapshot']['total']>=c['snapshot']['total']]
 summary['snapshot_fps_mean']=statistics.mean(painted)if painted else None
 summary['source_ms']=read('diagnostics.source_ms')
+summary['job_worker_count']=sum(t['name'].startswith('Job.worker')for t in threads)
 a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text(json.dumps({'summary':summary,'samples':rows},ensure_ascii=False,indent=2)+'\n');print(json.dumps(summary,ensure_ascii=False))

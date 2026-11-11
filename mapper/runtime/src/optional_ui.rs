@@ -17,9 +17,7 @@ use std::collections::HashMap;
 type Checks = Vec<(u64, Vec<u8>)>;
 
 fn current<M: Memory>(r: &Reflection<M>, checks: &Checks) -> bool {
-    checks
-        .iter()
-        .all(|(a, bytes)| r.read(*a, bytes.len()).is_ok_and(|v| v == *bytes))
+    crate::platform::matches_reads(&r.memory, checks).unwrap_or(false)
 }
 fn capture<M: Memory>(
     r: &Reflection<M>,

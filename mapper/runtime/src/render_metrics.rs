@@ -110,18 +110,26 @@ pub extern "C" fn clbb_render_frame_event(
         s.painted.observe(now, serial)
     }
 }
-/// Rate of distinct frames handed to GTK on the most recently active surface.
-/// Overlay redraws and repeated serials do not count as new game frames.
+fn visible_series(surface: &Surface) -> &Series {
+    if surface.painted.rows.is_empty() { &surface.handoff } else { &surface.painted }
+}
+fn displayed_surface(surfaces: &[Surface], now: Instant) -> Option<&Surface> {
+    surfaces.iter().filter_map(|s| {
+        let rows=&visible_series(s).rows;
+        let last=rows.back()?.0;
+        (rows.len()>1 && now.saturating_duration_since(last)<=Duration::from_millis(500))
+            .then_some((s,last))
+    }).max_by_key(|(s,last)|(u64::from(s.size[0])*u64::from(s.size[1]),*last)).map(|(s,_)|s)
+}
+/// Unique game frames included in GTK snapshots, not physical monitor scan-out.
+/// Prefer the largest live game surface; unrelated HUD redraws never renew a frame.
 pub fn fps() -> f64 {
     let now=Instant::now();let m=METRICS.lock().unwrap();
-    let Some(s)=m.surfaces.iter().filter(|s|s.handoff.rows.len()>1).max_by_key(|s|s.last) else{return 0.};
-    let rows=if s.painted.rows.is_empty(){&s.handoff.rows}else{&s.painted.rows};
-    let Some((first,_))=rows.front() else{return 0.};
-    let Some((last,_))=rows.back() else{return 0.};
-    if now.saturating_duration_since(*last)>Duration::from_millis(500){return 0.}
-    let span=last.saturating_duration_since(*first).as_secs_f64();
+    let Some(s)=displayed_surface(&m.surfaces,now) else{return 0.};
+    let rows=&visible_series(s).rows;
+    let first=rows.front().unwrap().0;let last=rows.back().unwrap().0;
+    let span=last.saturating_duration_since(first).as_secs_f64();
     if span>0. {(rows.len()-1) as f64/span}else{0.}
-
 }
 pub fn snapshot() -> Value {
     let now = Instant::now();
@@ -132,6 +140,23 @@ pub fn snapshot() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn painted_surface(key:u64,size:[u32;2],now:Instant,age:Duration)->Surface {
+        let mut s=Surface{key,size,last:now,submit:Series::default(),handoff:Series::default(),painted:Series::default()};
+        s.painted.observe(now-age-Duration::from_millis(10),1);s.painted.observe(now-age,2);s
+    }
+    #[test]
+    fn hud_prefers_large_live_game_over_small_video() {
+        let now=Instant::now();let rows=vec![painted_surface(1,[4000,3111],now,Duration::from_millis(5)),painted_surface(2,[320,200],now,Duration::ZERO)];
+        assert_eq!(displayed_surface(&rows,now).unwrap().key,1);
+    }
+    #[test]
+    fn repeated_snapshot_does_not_make_stale_surface_live_again() {
+        let now=Instant::now();let mut stale=painted_surface(1,[4000,3111],now,Duration::from_secs(2));
+        stale.last=now;stale.painted.observe(now,2);
+        let rows=vec![stale,painted_surface(2,[320,200],now,Duration::ZERO)];
+        assert_eq!(displayed_surface(&rows,now).unwrap().key,2);
+        assert!(displayed_surface(&rows[..1],now).is_none());
+    }
     #[test]
     fn reports_known_rate_without_counting_duplicate_frames() {
         let now = Instant::now();

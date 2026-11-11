@@ -204,3 +204,23 @@ PulseAudio-compatible server (including PipeWire-Pulse) and `libpulse`/`pactl`.
 Checks: `python3 smoke/check-audiorecord-jni.py`,
 `python3 smoke/check-microphone.py` (local synthetic source),
 `bash mapper/ui/check-preview.sh` (isolated settings UI).
+
+### Частота кадров / Frame rate
+
+F7 → «Основное» → «Показывать FPS»: счётчик новых игровых кадров, включённых GTK
+в отрисовку. Он не считает повторные перерисовки HUD и не измеряет физическую
+развёртку монитора. Частота передачи текстур и частота отрисовки доступны отдельно
+в `diagnostics.render` (`gtk_handoff` / `gtk_snapshot`).
+
+Для GL/EGL-окна CLBB управляет интервалом вывода согласно переключателю VSync,
+устраняя отдельное ограничение GTK/X11 в 60 Гц. Настройки рабочего стола и драйвера
+не меняются. Явные альтернативные `GSK_RENDERER=cairo/vulkan` сохраняют штатную
+политику часов GTK; они не проверены как высокочастотный путь этой сборки.
+
+The FPS overlay counts unique game textures included in GTK snapshots, rather
+than all texture handoffs or physical monitor scan-out. GL/EGL presentation follows
+CLBB's VSync setting without changing desktop or driver-wide settings. Explicit
+alternative renderer overrides retain their standard GTK frame-clock policy.
+
+Runtime profiling: `python3 tools/profile-live-fps.py --seconds 15 --output REPORT.json`.
+Opt-in `CLBB_PROFILE_EGL=1` logs aggregate producer, queue and buffer-wait timings.
