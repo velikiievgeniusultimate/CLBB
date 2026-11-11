@@ -19,6 +19,16 @@ def run(args,env=None):
     try:
         value=subprocess.run(args,env=env,capture_output=True,text=True,timeout=20);return clean(value.stdout+'\n'+value.stderr)
     except (OSError,subprocess.TimeoutExpired)as error:return str(error)
+def crash_stack(run_directory):
+    if run_directory is None:return ''
+    try:
+        pid=json.loads((run_directory/'launch.json').read_text())['pid']
+        if not isinstance(pid,int)or pid<=0:return ''
+        result=run(['coredumpctl','--no-pager','info',str(pid)])
+        # Frame addresses/symbols only; never collect core memory, environment or argv.
+        return '\n'.join(line for line in result.splitlines()if re.search(r'Stack trace of thread|^\s*#\d+\s',line))[:16000]
+    except (OSError,ValueError,KeyError):return ''
+
 def collect(root,state,reason):
     logs=state/'logs';logs.mkdir(parents=True,exist_ok=True)
     latest=sorted(logs.glob('qemu-launch-*'));errors=tail(logs/'launcher-stderr.log')
@@ -36,7 +46,7 @@ def collect(root,state,reason):
     if latest:
         try:last_exit=json.loads((latest[-1]/'exit.json').read_text())
         except (OSError,ValueError):pass
-    return {'last_exit':last_exit,'game_native':{name:(state/'data/base.apk_/lib'/name).is_file()for name in ['libmain.so','libEncryptorP.so','libunity.so','libil2cpp.so']},'schema':'clbb-diagnostic-v1','app_version':(root/'VERSION').read_text().strip()if(root/'VERSION').is_file()else 'unknown','kind':'launcher_fallback','reason':clean(reason),'summary':summary,'host':{'kernel':platform.platform(),'glibc':platform.libc_ver(),'display_available':bool(os.environ.get('DISPLAY')or os.environ.get('WAYLAND_DISPLAY')),'cpu':[line for line in cpu.splitlines()if line.startswith(('model name','flags'))][:2]},'checks':checks,'startup_errors':clean(errors)}
+    return {'crash_stack':crash_stack(latest[-1]if latest else None),'private_state':{'identity_present':(state/'device/android-id').is_file(),'guest_fonts_visible':(state/'guest-root/system/etc/fonts.xml').is_file()},'last_exit':last_exit,'game_native':{name:(state/'data/base.apk_/lib'/name).is_file()for name in ['libmain.so','libEncryptorP.so','libunity.so','libil2cpp.so']},'schema':'clbb-diagnostic-v1','app_version':(root/'VERSION').read_text().strip()if(root/'VERSION').is_file()else 'unknown','kind':'launcher_fallback','reason':clean(reason),'summary':summary,'host':{'kernel':platform.platform(),'glibc':platform.libc_ver(),'display_available':bool(os.environ.get('DISPLAY')or os.environ.get('WAYLAND_DISPLAY')),'cpu':[line for line in cpu.splitlines()if line.startswith(('model name','flags'))][:2]},'checks':checks,'startup_errors':clean(errors)}
 def main():
     root=Path(sys.argv[1]);state=Path(sys.argv[2]);reason=sys.argv[3]if len(sys.argv)>3 else 'Проверка запуска CLBB по запросу'
     value=collect(root,state,reason);directory=state/'logs/reports';directory.mkdir(parents=True,exist_ok=True);directory.chmod(0o700)
