@@ -83,3 +83,6 @@
 
 # Private login-webpage experiments include downloaded proprietary H5 assets.
 /smoke/*h5*
+
+# Cargo vendor build/ directories contain required source files.
+!/vendor/**
