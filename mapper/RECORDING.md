@@ -70,3 +70,14 @@ indicator updates; such missing visual feedback must not hold a released key or
 block subsequent presses. Held aiming, explicit cancellation, range gestures and
 instant-mode receipt checks remain separate. Diagnostic reason:
 `physical_up_after_final_direction_move`.
+
+Если игра не открыла индикатор после DOWN, обычный направленный навык всё равно
+завершается по физическому UP: конечный угол вычисляется из текущей принадлежащей
+этой кнопке геометрии и камеры (кадр не старше 100 мс). Это не подтверждение прицела
+игрой. Путь запрещён для удержания, моментального режима и сменившейся формы с
+дальностью. Диагностика: `final_geometry_from_fresh_button`.
+
+When DOWN did not open an indicator, ordinary direction UP may use the owned
+current button geometry/camera from a frame no older than 100 ms. It still sends
+final MOVE then UP and is not a native aim receipt. Held/instant gestures and a
+changed range form cannot use this path. Trace: `final_geometry_from_fresh_button`.

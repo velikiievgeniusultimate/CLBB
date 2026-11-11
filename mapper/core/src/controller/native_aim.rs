@@ -153,10 +153,30 @@ impl Controller {
         SkillBehavior::AwaitVariant
     }
     pub(crate) fn direction_point(&mut self, host: &mut impl Host) -> Option<Point> {
-        if !self.directionGeometryFresh_ || !self.frameCameraReady_ {
+        if !self.frameCameraReady_ {
             return None;
         }
-        if self.directionGoalSequence_ != 0 {
+        let (center,radius)=if self.directionGeometryFresh_ {
+            (self.directionCenter_,self.directionRadius_)
+        } else {
+            // A DOWN can race a cooldown reset/buffered cast and never open an
+            // indicator. Physical UP must still finish that contact. Use the
+            // fresh, owned button layout for the final angle, not a previous
+            // cast's indicator; never promote this fallback to a native ACK.
+            if !self.pendingRelease_ || self.skillCastMode_!=0 || self.skillKeyHeld_
+                || self.lastFrameNs_<=0 || self.now_-self.lastFrameNs_>100_000_000 {
+                return None;
+            }
+            let b=self.find_button(&self.activeSlot_)?;
+            if !b.available || self.classify_skill(b)!=SkillBehavior::Direction
+                || !finite(b.center) || !finite(b.radius) || b.radius.x<=0. || b.radius.y<=0. {
+                return None;
+            }
+            let geometry=(b.center,b.radius);
+            self.trace(host,"direction_goal","final_geometry_from_fresh_button");
+            geometry
+        };
+        if self.directionGeometryFresh_ && self.directionGoalSequence_ != 0 {
             let rotation_change = self
                 .frameCamera_
                 .iter()
@@ -193,8 +213,8 @@ impl Controller {
         }
         let mut angular = AngularRadialSolver::default();
         if !angular.configure(
-            self.pixels(self.directionCenter_),
-            self.radius_pixels(self.directionRadius_),
+            self.pixels(center),
+            self.radius_pixels(radius),
             self.frameCamera_,
             1.,
             self.androidSize_,
@@ -212,7 +232,10 @@ impl Controller {
         self.pendingWorldResolver_ = 0;
         self.pendingDirectionValid_ = false;
         self.pendingWorldValid_ = false;
-        if let Some(world) = host.skill_direction_world(self.pointer_,self.coreSkill_).filter(|p| finite(*p)) {
+        let projection_skill=if self.coreSkill_>0 {self.coreSkill_} else {
+            self.find_button(&self.activeSlot_).map_or(0,|b|self.measured_direction_skill_id(b))
+        };
+        if let Some(world) = host.skill_direction_world(self.pointer_,projection_skill).filter(|p| finite(*p)) {
             self.pendingWorld_ = world;
             self.pendingWorldValid_ = true;
         }
@@ -1443,7 +1466,7 @@ mod tests {
 
     fn buffered_direction_fixture() -> (Controller,TestHost) {
         let (mut c,_,h)=setup();
-        c.enabled_=true;c.ready_=true;c.heroId_=84;
+        c.enabled_=true;c.ready_=true;c.traceEnabled_=true;c.heroId_=84;
         c.activeSlot_="skill:1".into();c.frameActiveSlot_=c.activeSlot_.clone();
         c.coreSkill_=8420;c.skillKey_=87;c.skillKeyHeld_=false;c.skillBehavior_=SkillBehavior::Direction;
         c.buttons_[0].slot=c.activeSlot_.clone();c.buttons_[0].skillId=8420;c.buttons_[0].aimType=2;
@@ -1475,6 +1498,28 @@ mod tests {
         c.tick(&mut h);assert!(h.edges.iter().all(|e|e.0!="up"));
         c.skillKeyHeld_=false;c.pendingRelease_=true;c.directionGeometryFresh_=false;
         c.tick(&mut h);assert!(h.edges.iter().all(|e|e.0!="up"));
+    }
+    #[test]
+    fn physical_up_with_no_indicator_uses_current_button_and_does_not_block_next_press() {
+        let (mut c,mut h)=buffered_direction_fixture();
+        c.coreSkill_=0;c.directionGeometryFresh_=false;
+        let b=&mut c.buttons_[0];b.available=true;b.center=Point::new(0.82589750665,0.7794586664);
+        b.radius=Point::new(0.1072924943,0.1379524169);
+        c.queuedSkills_.push(QueuedSkill{slot:b.slot.clone(),key:87,held:true,requestedNs:c.now_,..QueuedSkill::default()});
+        c.tick(&mut h);
+        assert_eq!(c.skillTouch_,-1);assert_eq!(c.queuedSkills_.len(),1);
+        assert!(h.traces.iter().any(|(_,reason)|reason=="final_geometry_from_fresh_button"));
+        assert!(h.traces.iter().any(|(event,reason)|event=="release"&&reason=="cast"));
+        assert_eq!(h.edges.last().unwrap().0,"up");
+    }
+    #[test]
+    fn absent_indicator_fallback_rejects_stale_layout_and_changed_range_form() {
+        for changed_form in [false,true] {
+            let (mut c,mut h)=buffered_direction_fixture();c.coreSkill_=0;c.directionGeometryFresh_=false;
+            c.buttons_[0].available=true;c.buttons_[0].center=Point::new(0.8,0.8);c.buttons_[0].radius=Point::new(0.1,0.1);
+            if changed_form {c.buttons_[0].aimType=3;}else{c.lastFrameNs_=c.now_-101_000_000;}
+            c.tick(&mut h);assert!(h.edges.iter().all(|edge|edge.0!="up"));
+        }
     }
     #[test]
     fn direction_transport_failure_does_not_commit_a_cast() {
