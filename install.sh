@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Arch Linux / Manjaro / EndeavourOS, x86_64. Game APK is downloaded separately.
 set -eu
+printf "%s\n" "CLBB: установка временно остановлена: проверяется изоляция данных аккаунта / Installation suspended pending account-data isolation audit." >&2
+exit 1
 printf '%s\n' '[1/8] Проверка системы / Checking system'
 [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] || { echo 'CLBB: Linux x86_64 required / требуется Linux x86_64' >&2; exit 1; }
 command -v pacman >/dev/null || { echo 'CLBB: this installer currently supports Arch, Manjaro and EndeavourOS.' >&2; exit 1; }
