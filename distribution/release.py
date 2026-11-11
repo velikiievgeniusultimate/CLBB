@@ -93,6 +93,13 @@ def import_release(directory,tag):
     verify(directory)
 
 def use_local(directory):
+    lockpath=ROOT/'logs/clbb-launch.lock';lockpath.parent.mkdir(parents=True,exist_ok=True)
+    with lockpath.open('a+b')as lock:
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:raise ValueError('Close CLBB before switching the local runtime')
+        _use_local(directory)
+
+def _use_local(directory):
     directory,record,target=verify(directory)
     data=Path(os.environ.get('XDG_DATA_HOME')or Path.home()/'.local/share')
     stable=data/'clbb-workbench'/('candidates/'+record['version']+'-'+record['assets'][record['runtime']][:12])

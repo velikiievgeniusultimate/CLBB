@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import importlib.util,json,tempfile,unittest
+import fcntl,importlib.util,json,tempfile,unittest
+from unittest.mock import patch
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('workflow',ROOT/'release.py');workflow=importlib.util.module_from_spec(spec);spec.loader.exec_module(workflow)
@@ -24,3 +25,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
    (p/'payload.tar.gz').write_bytes(b'fixture')
    (p/'candidate.json').write_text(json.dumps({'version':'v1.0.0','runtime':'payload.tar.gz','assets':{'payload.tar.gz':workflow.sha(p/'payload.tar.gz')}}))
    with self.assertRaisesRegex(ValueError,'Unexpected files'):workflow.verify(p)
+
+ def test_active_profile_cannot_be_switched_out_from_under_diagnostics(self):
+  with tempfile.TemporaryDirectory()as temp:
+   p=Path(temp);(p/'logs').mkdir()
+   with (p/'logs/clbb-launch.lock').open('a+b')as lock,patch.object(workflow,'ROOT',p):
+    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    with self.assertRaisesRegex(ValueError,'Close CLBB'):workflow.use_local(p/'unused')
