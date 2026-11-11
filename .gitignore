@@ -86,3 +86,6 @@
 
 # Cargo vendor build/ directories contain required source files.
 !/vendor/**
+
+# Android font compatibility links generated in a development checkout.
+/vendor/etc/
