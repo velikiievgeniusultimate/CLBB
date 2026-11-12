@@ -637,11 +637,12 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
   char *key=cancel?g_strdup_printf("%s.cancel_key",prefix):g_strdup_printf("%s.bindings.%s.key",prefix,slot);
   bind_control(s,box,"Клавиша",key,cancel?'T':action_key(slot));g_free(key);
   gboolean fixed=g_str_has_prefix(slot,"combo:");
+  gboolean held_only=s->hero==126 && (!strcmp(slot,"skill:0")||!strcmp(slot,"skill:1")||!strcmp(slot,"skill:2"));
   if (!cancel&&!fixed) {
     GPtrArray *forms=g_ptr_array_new_with_free_func(g_free);
     g_ptr_array_add(forms,g_strdup(!strcmp(slot,"extra:2")?mode_config:slot));
     char **lines=g_strsplit(s->hero_layout,"\n",258);
-    if (g_str_has_prefix(slot,"skill:")) for (guint n=1;lines[n]&&forms->len<16;++n) {
+    if (!held_only && g_str_has_prefix(slot,"skill:")) for (guint n=1;lines[n]&&forms->len<16;++n) {
       char **v=g_strsplit(lines[n],"\t",7);
       if (g_strv_length(v)==6&&!strcmp(v[0],slot)&&valid_action(v[1])&&g_str_has_prefix(v[1],slot)&&v[1][strlen(slot)]==':') {
         gboolean found=FALSE;for (guint k=0;k<forms->len;++k) found|=!strcmp(g_ptr_array_index(forms,k),v[1]);
@@ -653,8 +654,18 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
     for (guint n=0;n<forms->len;++n) {
       const char *form=g_ptr_array_index(forms,n);
       char *title=forms->len>1?g_strdup_printf("Нажатие · версия %u",n+1):g_strdup("Нажатие");
-      key=g_strdup_printf("%s.bindings.%s.cast_mode",prefix,form);
-      mode_control(s,box,title,key,0,FALSE);g_free(key);g_free(title);
+      if (held_only) {
+        GtkWidget *row=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,16);
+        gtk_widget_add_css_class(row,"clbb-row");
+        GtkWidget *caption=label("Нажатие","clbb-label");gtk_widget_set_hexpand(caption,TRUE);
+        gtk_box_append(GTK_BOX(row),caption);
+        gtk_box_append(GTK_BOX(row),label("При отпускании","clbb-muted"));
+        gtk_box_append(GTK_BOX(box),row);
+      } else {
+        key=g_strdup_printf("%s.bindings.%s.cast_mode",prefix,form);
+        mode_control(s,box,title,key,0,FALSE);g_free(key);
+      }
+      g_free(title);
     }
     if (g_str_has_prefix(slot,"skill:")||!strcmp(slot,"extra:2")) for (guint n=0;n<forms->len;++n) {
       const char *form=g_ptr_array_index(forms,n);
@@ -676,6 +687,8 @@ static void action_body(ClbbSettings *s,GtkWidget *content,const char *slot,cons
   gtk_box_append(GTK_BOX(content),flow);
   action_scope(s,flow,"common",config,mode_config,slot,type,cancel);
   action_scope(s,flow,"hero",config,mode_config,slot,type,cancel);
+  if(s->hero==126 && (!strcmp(slot,"skill:0")||!strcmp(slot,"skill:1")||!strcmp(slot,"skill:2")))
+    gtk_box_append(GTK_BOX(content),wrap_label("Результат навыка зависит от длительности удержания. Применение — только при отпускании.","clbb-muted"));
 }
 static void action_card(ClbbSettings *s,const char *slot,const char *config,const char *mode_config,int skill,int type,GHashTable *expanded,gboolean cancel) {
   char *title;

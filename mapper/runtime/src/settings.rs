@@ -17,7 +17,7 @@ pub struct Settings {
     #[serde(skip)]
     native_charge_slots: BTreeMap<i32, BTreeSet<String>>,
     #[serde(skip)]
-    pub observed_forms: BTreeMap<i32, BTreeMap<String, BTreeSet<i32>>>,
+    pub observed_forms: BTreeMap<i32, BTreeMap<(String, i32), BTreeSet<i32>>>,
 }
 impl Settings {
     pub fn load() -> Self {
@@ -155,6 +155,18 @@ impl Settings {
     }
     pub fn get(&self, key: &str, hero: i32) -> String {
         if key == "enabled" { return "true".into(); }
+        if let Some((scope, tail))=key.split_once(".bindings.") {
+            if let Some((slot,field))=tail.rsplit_once('.') {
+                if hold_duration_skill(hero,slot) {
+                    if field=="cast_mode" {return "0".into();}
+                    if matches!(field,"key"|"stop_movement") {
+                        if let Some(base)=variant_base(slot) {
+                            return self.get(&format!("{scope}.bindings.{base}.{field}"),hero);
+                        }
+                    }
+                }
+            }
+        }
         if let Some((scope, tail)) = key.split_once(".bindings.") {
             if let Some((slot, field)) = tail.rsplit_once('.') {
                 if let Some(base) = variant_base(slot) {
@@ -367,6 +379,20 @@ impl Settings {
     }
     pub fn set(&mut self, key: &str, value: &str, hero: i32) -> Result<(), String> {
         if let Some((scope,tail))=key.split_once(".bindings.") {
+            if let Some((slot,field))=tail.rsplit_once('.') {
+                if hold_duration_skill(hero,slot) {
+                    if field=="cast_mode" && value!="0" {
+                        return Err("Навыки Су Ё применяются при отпускании: результат зависит от длительности удержания".into());
+                    }
+                    if matches!(field,"key"|"cast_mode"|"stop_movement") {
+                        if let Some(base)=variant_base(slot) {
+                            return self.set(&format!("{scope}.bindings.{base}.{field}"),value,hero);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some((scope,tail))=key.split_once(".bindings.") {
             if let Some(slot)=tail.strip_suffix(".key") {
                 if let Some(base)=variant_base(slot) { return self.set(&format!("{scope}.bindings.{base}.key"),value,hero); }
             }
@@ -520,6 +546,9 @@ pub fn parse_resolution(value: &str) -> Option<(u32, u32)> {
         && (256..=8192).contains(&h)
         && u64::from(w) * u64::from(h) <= 32 * 1024 * 1024)
         .then_some((w, h))
+}
+pub fn hold_duration_skill(hero: i32, slot: &str) -> bool {
+    hero==126 && matches!(variant_base(slot).unwrap_or(slot),"skill:0"|"skill:1"|"skill:2")
 }
 pub fn valid_key(key: i32) -> bool {
     key == 0
@@ -969,6 +998,27 @@ mod field_inheritance_tests {
         let before=s.values.clone();
         assert!(s.set("hero.bindings.extra:2.key","70",73).is_err());
         assert_eq!(s.values,before);std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn suyou_three_skills_always_release_and_internal_forms_share_one_setting() {
+        let mut s=Settings::default();
+        for (n,base) in [(0,12610),(1,12630),(2,12650)] {
+            let slot=format!("skill:{n}");let alt=format!("{slot}:{}",base+2);
+            // Previously saved quick modes must not bypass the restriction.
+            s.values.insert(format!("common.bindings.{slot}.cast_mode"),"1".into());
+            s.values.insert(format!("heroes.126.bindings.{slot}.cast_mode"),"1".into());
+            s.values.insert(format!("heroes.126.bindings.{alt}.cast_mode"),"1".into());
+            assert_eq!(s.binding(126,&slot).cast_mode,0);
+            assert_eq!(s.binding(126,&alt).cast_mode,0);
+            assert_eq!(s.binding(25,&slot).cast_mode,1);
+            assert!(s.set(&format!("hero.bindings.{slot}.cast_mode"),"1",126).is_err());
+            assert!(s.set(&format!("common.bindings.{alt}.cast_mode"),"1",126).is_err());
+            s.set(&format!("hero.bindings.{alt}.stop_movement"),"true",126).unwrap();
+            assert!(s.binding(126,&slot).stop_movement);
+            assert!(s.binding(126,&alt).stop_movement);
+        }
+        s.set("hero.bindings.extra:2.cast_mode","1",126).unwrap();
+        assert_eq!(s.binding(126,"extra:2").cast_mode,1);
     }
     #[test]
     fn extended_keyboard_identities_are_saved_without_aliasing_mouse_or_function_keys() {

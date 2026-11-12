@@ -614,6 +614,23 @@ int main(int argc, char **argv) {
     g_assert_null(find_control(window, "hero.bindings.combo:0.key"));
     g_assert_nonnull(find_control(window, "hero.bindings.skill:2.key"));
     g_print("CLBB_LINKED_BINDINGS_UI_OK personal keys, capability refresh, no combo aim modes\n");
+    put(&p,"hero.id","126");
+    put(&p,"hero.name","Су Ё");
+    put(&p,"preview.controls","1\t126\nskill:0\tskill:0\tskill:0\t12610\t12610\t2\nskill:0\tskill:0:12611\tskill:0:12611\t12610\t12611\t2\nskill:1\tskill:1\tskill:1\t12630\t12630\t2\nskill:1\tskill:1:12632\tskill:1:12632\t12630\t12632\t2\nskill:2\tskill:2\tskill:2\t12650\t12650\t2\nskill:2\tskill:2:12652\tskill:2:12652\t12650\t12652\t2\n");
+    clbb_settings_refresh(s);
+    for(int i=0;i<3;i++) {
+      char *key=g_strdup_printf("hero.bindings.skill:%d.cast_mode",i);
+      g_assert_null(find_control(window,key));g_free(key);
+      key=g_strdup_printf("common.bindings.skill:%d.cast_mode",i);
+      g_assert_null(find_control(window,key));g_free(key);
+      key=g_strdup_printf("hero.bindings.skill:%d.key",i);
+      g_assert_nonnull(find_control(window,key));g_free(key);
+      key=g_strdup_printf("hero.bindings.skill:%d.stop_movement",i);
+      g_assert_nonnull(find_control(window,key));g_free(key);
+    }
+    g_hash_table_remove(p.values,"preview.controls");put(&p,"hero.id","25");clbb_settings_refresh(s);
+    g_assert_nonnull(find_control(window,"hero.bindings.skill:0.cast_mode"));
+    g_print("CLBB_SUYOU_SINGLE_HOLD_SKILL_UI_OK three fixed release modes, shared stop/key settings\n");
     g_print("CLBB_SETTINGS_SELFTEST_OK key normalization, reserved LMB, hotkey "
             "conflicts, refresh, hero switch, overrides, stop movement, "
             "atomic display apply, preserved draft, atomic FPS VSync, "

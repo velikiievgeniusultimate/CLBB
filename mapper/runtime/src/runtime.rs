@@ -741,7 +741,7 @@ impl Runtime {
                         let owned=sample.frame.ui.buttons.iter().take(sample.frame.ui.button_count.min(32) as usize)
                             .any(|b|b.kind.as_str()=="skill"&&b.slot.as_str()==v.slot.as_str()&&b.skill_id.int()==v.base_skill_id.int());
                         if owned && v.slot.as_str().starts_with("skill:") && v.active_skill_id.int()>0 && forms.len()<32 {
-                            let ids=forms.entry(v.slot.owned()).or_default();
+                            let ids=forms.entry((v.slot.owned(),v.base_skill_id.int())).or_default();
                             if ids.len()<16 {ids.insert(v.active_skill_id.int());}
                         }
                     }
@@ -1069,8 +1069,8 @@ impl Runtime {
             let kind=sample.control_types.get(slot).copied().unwrap_or(0);
             let mode_config=if slot=="extra:2"&&b.skill_id.int()==20080 {"extra:2:20080"}else{config};
             text.push_str(&format!("{slot}\t{config}\t{mode_config}\t{}\t{variant}\t{kind}\n",b.skill_id.int()));
-            if b.kind.as_str()=="skill" {
-                let mut forms=self.host.settings.observed_forms.get(&hero).and_then(|m|m.get(slot)).cloned().unwrap_or_default();
+            if b.kind.as_str()=="skill" && !crate::settings::hold_duration_skill(hero,slot) {
+                let mut forms=self.host.settings.observed_forms.get(&hero).and_then(|m|m.get(&(slot.to_owned(),b.skill_id.int()))).cloned().unwrap_or_default();
                 if variant>0 {forms.insert(variant);}
                 if hero==25 {match slot {"skill:1"=>{forms.extend([2520,2521]);},"skill:2"=>{forms.extend([2530,2531]);},_=>{}}}
                 if hero==84&&slot=="skill:1" {forms.extend([8420,8425]);}
@@ -1421,7 +1421,7 @@ mod tests {
             sample.frame.skill_state.count=1;sample.frame.skill_state.buttons[0]=clbb_moba_core::controller::snapshot::Variant{
                 slot:text("skill:2"),base_skill_id:number(if case==2{8430.}else{1830.}),active_skill_id:number(1831.),..Default::default()};
             r.worker.shared.lock().unwrap().sample=Some(Arc::new(sample));r.poll(1280.,720.);
-            assert_eq!(r.host.settings.observed_forms.get(&18).is_some_and(|v|v.get("skill:2").is_some_and(|s|s.contains(&1831))),case==3);
+            assert_eq!(r.host.settings.observed_forms.get(&18).is_some_and(|v|v.get(&("skill:2".into(),1830)).is_some_and(|s|s.contains(&1831))),case==3);
         }
     }
     #[test]
@@ -1473,6 +1473,24 @@ mod tests {
             assert!(layout.contains(&format!("{slot}\t{slot}\t{slot}\t{base}")));
             assert!(layout.contains(&format!("{slot}\t{slot}:{alt}\t{slot}:{alt}\t{base}")));
         }
+    }
+    #[test]
+    fn hold_duration_skills_have_one_ui_row_and_observed_forms_are_scoped_by_base_skill() {
+        let mut events=Vec::new();let mut r=fixture(&mut events);
+        for n in 0..3 {
+            let slot=format!("skill:{n}");let mut sample=template_sample(126,2,now_ns());
+            sample.frame.ui.buttons[0].slot=crate::source::text(&slot);
+            let base=12610+n*20;sample.frame.ui.buttons[0].skill_id=crate::source::number(base as f64);
+            r.host.settings.observed_forms.entry(126).or_default().insert((slot.clone(),base),[base+1,base+2,2510].into());
+            r.host.sample=Some(Arc::new(sample));let rows=r.hero_controls();
+            assert_eq!(rows.lines().count(),2,"{rows}");
+            assert!(!rows.contains(&format!("{slot}:")));
+        }
+        let sample=template_sample(18,2,now_ns());
+        r.host.settings.observed_forms.entry(18).or_default().insert(("skill:2".into(),2530),[2531].into());
+        r.host.settings.observed_forms.entry(18).or_default().insert(("skill:2".into(),1830),[1831].into());
+        r.host.sample=Some(Arc::new(sample));let rows=r.hero_controls();
+        assert!(!rows.contains("2531"));assert!(rows.contains("skill:2:1831"));
     }
     #[test]
     fn hero_controls_exposes_only_fresh_present_buttons_and_current_forms() {
