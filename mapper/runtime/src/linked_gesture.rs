@@ -40,6 +40,7 @@ pub struct Held {
     pub pressed: bool,
     pub acknowledged: bool,
     pub down_observed: bool,
+    pub quarantined: bool,
     pub chosen_skill: i32,
     probe_move_ns: Option<i64>,
     pub started_ns: i64,
@@ -73,7 +74,7 @@ impl Gestures {
         }
         let contact=transport.down(geometry.endpoints[origin]);
         if contact<0 {self.ignored.push(key);return true;}
-        self.active.push(Held {key,contact,origin,pressed:true,acknowledged:false,down_observed:false,
+        self.active.push(Held {key,contact,origin,pressed:true,acknowledged:false,down_observed:false,quarantined:false,
             chosen_skill:0,probe_move_ns:None,started_ns:now,cancel_requested_ns:None,cancel_move_ns:None,cancel_first_move_ns:None,geometry,slots:observed.endpoints.clone()});
         true
     }
@@ -83,7 +84,7 @@ impl Gestures {
         }
         let Some(i)=self.active.iter().position(|h|h.key==key) else{return false;};
         self.active[i].pressed=false;
-        if self.active[i].acknowledged && self.active[i].cancel_requested_ns.is_none() {
+        if self.active[i].acknowledged && !self.active[i].quarantined && self.active[i].cancel_requested_ns.is_none() {
             let h=self.active.remove(i);
             transport.motion(h.contact,h.geometry.endpoints[1-h.origin]);
             transport.up(h.contact,h.geometry.endpoints[1-h.origin]);
@@ -101,12 +102,15 @@ impl Gestures {
                 h.geometry.cancel=cancel_feedback.as_ref().and_then(|s|s.point);
             }
             if !valid {
-                if h.geometry.cancel.is_none() {transport.abort_all();}
-                let h=self.active.remove(i);
-                Self::retire_cancelled(transport, &h);
-                if h.pressed {self.ignored.push(h.key);}
+                // A single lost owner/optional observation is not an all-input
+                // reset. Keep this contact tracked until owned cancellation or
+                // a separately authorized global native retirement succeeds.
+                h.quarantined=true;
+                h.cancel_requested_ns.get_or_insert(now);
+                i+=1;
                 continue;
             }
+            h.quarantined=false;
             if !h.acknowledged && now-h.started_ns>500_000_000 {
                 h.cancel_requested_ns.get_or_insert(now);
             }
@@ -194,12 +198,30 @@ impl Gestures {
     }
     pub fn reset(&mut self, transport:&mut impl Transport) {
         if self.active.iter().any(|h|h.geometry.cancel.is_none()) && transport.abort_all() {
-            self.active.clear();self.ignored.clear();return;
+            self.forget_after_native_reset();return;
         }
+        self.reset_after_failed_native_abort(transport);
+    }
+    /// Failed all-context retirement cannot erase an unsupported held contact.
+    pub fn reset_after_failed_native_abort(&mut self,transport:&mut impl Transport) {
+        let mut retained=Vec::new();
+        let mut ignored=std::mem::take(&mut self.ignored);
+        for mut h in self.active.drain(..) {
+            if h.geometry.cancel.is_none()&&!transport.abort(h.contact,h.geometry.endpoints[h.origin]) {
+                h.quarantined=true;h.cancel_requested_ns.get_or_insert(h.started_ns);retained.push(h);
+            }else{
+                if h.geometry.cancel.is_some(){Self::retire_cancelled(transport,&h);}
+                if h.pressed&&!ignored.contains(&h.key){ignored.push(h.key);}
+            }
+        }
+        self.active=retained;self.ignored=ignored;
+    }
+    /// Native all-contact cancellation already succeeded. Never replay old
+    /// per-contact MOVE/UP while discarding the retired logical generation.
+    pub fn forget_after_native_reset(&mut self) {
         for h in self.active.drain(..) {
-            Self::retire_cancelled(transport, &h);
+            if h.pressed&&!self.ignored.contains(&h.key){self.ignored.push(h.key);}
         }
-        self.ignored.clear();
     }
     fn retire_cancelled(transport: &mut impl Transport, h: &Held) {
         if let Some(point)=h.geometry.cancel {
@@ -346,13 +368,15 @@ mod tests {
         g.poll(&mut s,"match",Some(&o),1234,3,3,None);assert!(g.active.is_empty());
         assert_eq!(s.0.last().unwrap().2,geometry().endpoints[0]);
     }
-    #[test] fn unavailable_press_requires_new_down_and_lost_match_cancels_only_owned_contact() {
+    #[test] fn unavailable_press_requires_new_down_and_lost_owner_quarantines_without_global_cancel() {
         let(mut s,mut g,mut o)=(Sink::default(),Gestures::default(),observed());o.enough_energy=false;
         g.begin(&mut s,69,0,geometry(),&o,1);o.enough_energy=true;
         g.begin(&mut s,69,0,geometry(),&o,2);assert!(s.0.is_empty());g.release(&mut s,69);
         g.begin(&mut s,69,0,geometry(),&o,3);g.poll(&mut s,"another_match",Some(&o),0,4,4,None);
-        assert!(g.active.is_empty());assert_eq!(s.0.last().unwrap().2,geometry().cancel.unwrap());
-        assert!(g.contains(69));g.release(&mut s,69);assert!(!g.contains(69));
+        assert_eq!(g.active.len(),1);assert!(g.active[0].quarantined);
+        assert_eq!(s.0.len(),1,"owner mismatch cannot MOVE/UP/reset unrelated input");
+        assert!(g.contains(69));g.release(&mut s,69);assert!(g.contains(69));
+        g.forget_after_native_reset();assert!(!g.contains(69));assert_eq!(s.0.len(),1);
     }
     #[test]
     fn cancelling_an_acknowledged_combo_blocks_normal_up_and_waits_for_fresh_receipt() {

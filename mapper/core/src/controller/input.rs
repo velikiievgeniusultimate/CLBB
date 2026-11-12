@@ -7,6 +7,31 @@ impl Controller {
         pressed: bool,
         auto_repeat: bool,
     ) -> bool {
+        if !pressed && !auto_repeat { self.physicalKeys_.remove(&key); }
+        if self.contextIgnoredKeys_.contains(&key) {
+            if !pressed && !auto_repeat { self.contextIgnoredKeys_.remove(&key); }
+            return true;
+        }
+        let handled = self.handle_key_inner(host, key, pressed, auto_repeat);
+        if handled && pressed && !auto_repeat && key != 0 { self.physicalKeys_.insert(key); }
+        handled
+    }
+    fn handle_key_inner(
+        &mut self,
+        host: &mut impl Host,
+        key: i32,
+        pressed: bool,
+        auto_repeat: bool,
+    ) -> bool {
+        // Auxiliary physical UP is independent of Source freshness, cooldowns,
+        // the primary gesture, and a possibly changed current key binding.
+        if self.auxiliaryHeldKeys_.contains(&key) {
+            if !pressed && !auto_repeat {
+                self.auxiliaryHeldKeys_.remove(&key);
+                self.release_auxiliary_key(host, key);
+            }
+            return true;
+        }
         if !self.ready() {
             return false;
         }
@@ -17,12 +42,6 @@ impl Controller {
             if pressed || auto_repeat || key != self.skillKey_ || !self.skillKeyHeld_ {
                 return true;
             }
-        }
-        if self.auxiliaryHeldKeys_.contains(&key) {
-            if !pressed && !auto_repeat {
-                self.auxiliaryHeldKeys_.remove(&key);
-            }
-            return true;
         }
         if key != 0 && key == self.cancelKey_ {
             if pressed && !auto_repeat {
@@ -148,11 +167,13 @@ impl Controller {
                     continue;
                 }
                 if pressed && !auto_repeat {
-                    if self.classify_skill(&b)==SkillBehavior::Selection&&!self.selection_phase_known(&b) {
-                        self.auxiliaryHeldKeys_.insert(key);
-                        self.trace(host,"selection_start_rejected","selector_phase_unconfirmed");
-                        self.set_status("F7: форма выбора ещё не подтверждена — повтори нажатие");
-                        return true;
+                    if self.classify_skill(&b)==SkillBehavior::Selection {
+                        if let Some(reason)=self.selection_start_rejection(&b) {
+                            self.auxiliaryHeldKeys_.insert(key);
+                            self.trace(host,"selection_start_rejected",reason);
+                            self.set_status("F7: режим или форма выбора ещё не подтверждены — повтори нажатие");
+                            return true;
+                        }
                     }
                     let cd = self.cooldown_block(&b, 0);
                     if !cd.is_empty() {
@@ -164,7 +185,7 @@ impl Controller {
                 if Self::tap_only(&b) {
                     if pressed && !auto_repeat {
                         self.auxiliaryHeldKeys_.insert(key);
-                        self.begin_auxiliary_tap(host, &b)
+                        self.begin_auxiliary(host, &b)
                     }
                 } else if pressed && !auto_repeat {
                     let mut requested = b;

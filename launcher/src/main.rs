@@ -2,12 +2,13 @@
 //! Normal CLBB entry point. Never starts or resumes a runtime before invocation.
 mod shader_cache;
 mod diagnostics;
+mod launch_scope;
 use std::{env, fs::{self, File, OpenOptions}, io, path::PathBuf};
 #[cfg(target_os = "linux")]
 use std::{os::{fd::AsRawFd, unix::process::CommandExt}, process::Command};
 
 #[cfg(target_os = "linux")]
-fn launch() -> io::Result<()> {
+fn launch(failure_scope: &mut Option<launch_scope::Context>) -> io::Result<()> {
     #[repr(C)]
     struct Timespec { seconds: i64, nanoseconds: i64 }
     unsafe extern "C" {
@@ -26,8 +27,8 @@ fn launch() -> io::Result<()> {
         let status=command.arg("--import-game-dialog").env("CLBB_STATE_ROOT",&state).status()?;
         if !status.success(){return Err(io::Error::other("Game import cancelled or failed"));}
     }
-    let logs = state.join("logs");
-    fs::create_dir_all(&logs)?;
+    fs::create_dir_all(state.join("logs"))?;
+    let logs = state.join("logs").canonicalize()?;
     let lock = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(logs.join("clbb-launch.lock"))?;
     if unsafe { flock(lock.as_raw_fd(), 2 | 4) } != 0 {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, "CLBB is already running"));
@@ -70,7 +71,9 @@ fn launch() -> io::Result<()> {
     let lifetime=std::time::Instant::now();
     let mut child = command.spawn()?;
     let pid = child.id();
-    let metadata = format!("{{\"backend\":\"qemu\",\"launcher_pid\":{},\"pid\":{},\"start_monotonic_ns\":{},\"fresh_process\":true}}\n", std::process::id(), pid, start_ns);
+    let context = launch_scope::new_context(&root, &run, pid, start_ns);
+    let metadata = serde_json::to_vec(&context.record)?;
+    *failure_scope = Some(context);
     // Atomic current pointer; individual launch evidence is never overwritten.
     let publish = || -> io::Result<()> {
         fs::write(run.join("launch.json"), &metadata)?;
@@ -85,7 +88,12 @@ fn launch() -> io::Result<()> {
     }
     println!("{{\"runtime_pid\":{pid},\"backend\":\"qemu\",\"start_monotonic_ns\":{start_ns}}}");
     let status = child.wait()?;
-    fs::write(run.join("exit.json"), format!("{{\"success\":{},\"code\":{}}}\n", status.success(), status.code().map_or("null".to_owned(), |x| x.to_string())))?;
+    use std::os::unix::process::ExitStatusExt;
+    fs::write(run.join("exit.json"), serde_json::to_vec(&serde_json::json!({
+        "success":status.success(),"code":status.code(),"signal":status.signal(),"core_dumped":status.core_dumped(),
+        "pid":pid,"launcher_pid":std::process::id(),"start_monotonic_ns":start_ns,
+        "finished_unix_ns":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64,
+    }))?)?;
     drop(lock);
     let runtime_log=fs::read_to_string(run.join("runtime.log")).unwrap_or_default();
     if wants_update_window(status.success(),&runtime_log) {
@@ -133,8 +141,8 @@ fn main() {
         let result=(||->io::Result<()>{
             let root=runtime_root()?;let state=env::var_os("CLBB_STATE_ROOT").map(PathBuf::from).unwrap_or_else(||root.clone());
             let path=if args[0]=="--diagnose" {
-                let run=fs::read_dir(state.join("logs")).ok().into_iter().flatten().filter_map(Result::ok).map(|e|e.path()).filter(|p|p.is_dir()&&p.file_name().unwrap_or_default().to_string_lossy().starts_with("qemu-launch-")).max();
-                diagnostics::report(&root,&state,"Проверка запуска по запросу / Manual startup check","manual",run.as_deref())?
+                let evidence=launch_scope::resolve(&state,None);
+                diagnostics::report(&root,&state,"Проверка запуска по запросу / Manual startup check","manual",&evidence)?
             }else{args.get(1).map(PathBuf::from).unwrap_or_else(||state.join("logs/last-diagnostic.json"))};
             if args[0]=="--send-report" {println!("Report sent: {}",diagnostics::send(&path)?);Ok(())}else{diagnostics::show(&path)}
         })();
@@ -159,16 +167,20 @@ fn main() {
         let result=runtime_root().and_then(|root|std::process::Command::new(root.join("bin/clbb-manager")).arg(command).args(&args[1..]).status());
         match result {Ok(status)=>std::process::exit(status.code().unwrap_or(1)),Err(e)=>{eprintln!("CLBB: {e}");std::process::exit(1);}}
     }
+    let mut failure_scope=None;
     #[cfg(target_os = "linux")]
-    let result = launch();
+    let result = launch(&mut failure_scope);
     #[cfg(not(target_os = "linux"))]
     let result: io::Result<()> = Err(io::Error::new(io::ErrorKind::Unsupported, "This runtime is currently available for Linux"));
     if let Err(error) = result {
         eprintln!("CLBB: {error}");
         if let Ok(root)=runtime_root(){
             let state=env::var_os("CLBB_STATE_ROOT").map(PathBuf::from).unwrap_or_else(||root.clone());
-            let run=fs::read_dir(state.join("logs")).ok().into_iter().flatten().filter_map(Result::ok).map(|e|e.path()).filter(|p|p.is_dir()&&p.file_name().unwrap_or_default().to_string_lossy().starts_with("qemu-launch-")).max();
-            if let Ok(path)=diagnostics::report(&root,&state,&error.to_string(),"launch_failure",run.as_deref()){
+            let evidence=match failure_scope.as_ref(){
+                Some(context)=>launch_scope::resolve(&state,Some(context)),
+                None=>launch_scope::unavailable("Launcher failed before a child launch context was published"),
+            };
+            if let Ok(path)=diagnostics::report(&root,&state,&error.to_string(),"launch_failure",&evidence){
                 if env::var("CLBB_WRAPPED").as_deref()!=Ok("1"){let _=diagnostics::show(&path);}
             }
         }

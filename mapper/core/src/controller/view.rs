@@ -51,8 +51,21 @@ pub struct VariantView {
     pub charge_skill: super::snapshot::Flag,
 }
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct AuxiliaryHoldView {
+    pub slot: super::snapshot::Text,
+    pub id: i32,
+    pub key: i32,
+    pub point: Point,
+    pub owner_id: u64,
+    pub down_ns: i64,
+    pub cancel_supported: super::snapshot::Flag,
+}
+#[repr(C)]
 #[derive(Default)]
 pub struct View {
+    pub auxiliaryHolds_: [AuxiliaryHoldView; 8],
+    pub auxiliaryHoldCount_: u32,
     pub traceEnabled_: u8,
     pub enabled_: u8,
     pub ready_: u8,
@@ -99,6 +112,16 @@ pub struct View {
     pub chargeEndSampleNs_: i64,
     pub chargeLastSampleNs_: i64,
     pub selectionOwner_: u64,
+    pub selectionKind_: u8,
+    pub selectionBackendOwner_: u64,
+    pub selectionContactOwner_: u64,
+    pub selectionTargetGuid_: u32,
+    pub selectionTargetOwner_: u64,
+    pub selectionTargetSelf_: u64,
+    pub selectionTargetInvalid_: u8,
+    pub selectionGoalTargetGuid_: u32,
+    pub selectionGoalTargetOwner_: u64,
+    pub selectionGoalTargetSelf_: u64,
     pub selectionRevoked_: u8,
     pub selectionGeometryFresh_: u8,
     pub selectionAccepted_: u8,
@@ -266,6 +289,16 @@ pub(crate) fn text(s: &str) -> Text {
 }
 impl View {
     pub fn of(s: &Controller) -> Self {
+        let mut auxiliary_holds = [AuxiliaryHoldView::default(); 8];
+        for (out, hold) in auxiliary_holds.iter_mut().zip(&s.auxiliaryHolds_) {
+            out.slot = text(&hold.slot);
+            out.id = hold.id;
+            out.key = hold.key;
+            out.point = hold.point;
+            out.owner_id = hold.owner_id;
+            out.down_ns = hold.down_ns;
+            out.cancel_supported = hold.cancel_supported;
+        }
         let mut buttons = [ButtonView::default(); 32];
         for (i, b) in s.buttons_.iter().take(32).enumerate() {
             buttons[i] = b.into()
@@ -285,6 +318,8 @@ impl View {
             }
         }
         Self {
+            auxiliaryHolds_: auxiliary_holds,
+            auxiliaryHoldCount_: s.auxiliaryHolds_.len().min(8) as u32,
             traceEnabled_: s.traceEnabled_ as u8,
             enabled_: s.enabled_ as u8,
             ready_: s.ready_ as u8,
@@ -331,6 +366,16 @@ impl View {
             chargeEndSampleNs_: s.chargeGesture_.as_ref().map_or(0, |v| v.end_sample_ns),
             chargeLastSampleNs_: s.chargeGesture_.as_ref().map_or(0, |v| v.last_sample_ns),
             selectionOwner_: s.selection_.owner,
+            selectionKind_: s.selection_.kind,
+            selectionBackendOwner_: s.selection_.backend_owner,
+            selectionContactOwner_: s.selection_.contact_owner,
+            selectionTargetGuid_: s.selection_.target_guid,
+            selectionTargetOwner_: s.selection_.target_owner,
+            selectionTargetSelf_: s.selection_.target_self,
+            selectionTargetInvalid_: s.selection_.target_invalid as u8,
+            selectionGoalTargetGuid_: s.selection_.goal_target_guid,
+            selectionGoalTargetOwner_: s.selection_.goal_target_owner,
+            selectionGoalTargetSelf_: s.selection_.goal_target_self,
             selectionRevoked_: s.selection_.revoked as u8,
             selectionGeometryFresh_: s.selection_.geometry_fresh as u8,
             selectionAccepted_: s.selection_.accepted as u8,
@@ -524,6 +569,15 @@ mod send_time_tests {
 
 impl View {
     pub fn refresh_scalars(&mut self, s: &Controller) {
+        self.auxiliaryHolds_ = [AuxiliaryHoldView::default(); 8];
+        for (out, hold) in self.auxiliaryHolds_.iter_mut().zip(&s.auxiliaryHolds_) {
+            *out = AuxiliaryHoldView {
+                slot: text(&hold.slot), id: hold.id, key: hold.key, point: hold.point,
+                owner_id: hold.owner_id, down_ns: hold.down_ns,
+                cancel_supported: hold.cancel_supported,
+            };
+        }
+        self.auxiliaryHoldCount_ = s.auxiliaryHolds_.len().min(8) as u32;
         self.traceEnabled_ = s.traceEnabled_ as u8;
         self.enabled_ = s.enabled_ as u8;
         self.ready_ = s.ready_ as u8;
@@ -570,6 +624,16 @@ impl View {
         self.chargeEndSampleNs_ = s.chargeGesture_.as_ref().map_or(0, |v| v.end_sample_ns);
         self.chargeLastSampleNs_ = s.chargeGesture_.as_ref().map_or(0, |v| v.last_sample_ns);
         self.selectionOwner_ = s.selection_.owner;
+        self.selectionKind_ = s.selection_.kind;
+        self.selectionBackendOwner_ = s.selection_.backend_owner;
+        self.selectionContactOwner_ = s.selection_.contact_owner;
+        self.selectionTargetGuid_ = s.selection_.target_guid;
+        self.selectionTargetOwner_ = s.selection_.target_owner;
+        self.selectionTargetSelf_ = s.selection_.target_self;
+        self.selectionTargetInvalid_ = s.selection_.target_invalid as u8;
+        self.selectionGoalTargetGuid_ = s.selection_.goal_target_guid;
+        self.selectionGoalTargetOwner_ = s.selection_.goal_target_owner;
+        self.selectionGoalTargetSelf_ = s.selection_.goal_target_self;
         self.selectionRevoked_ = s.selection_.revoked as u8;
         self.selectionGeometryFresh_ = s.selection_.geometry_fresh as u8;
         self.selectionAccepted_ = s.selection_.accepted as u8;

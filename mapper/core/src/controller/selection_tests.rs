@@ -18,6 +18,7 @@ struct TestHost {
     mode: i32,
     selection_type: u8,
     world_reads: usize,
+    fail_move_id: Option<i32>,
 }
 impl Host for TestHost {
     fn begin(&mut self, p: Point) -> i32 {
@@ -27,6 +28,7 @@ impl Host for TestHost {
         id
     }
     fn move_touch(&mut self, id: i32, p: Point) -> bool {
+        if self.fail_move_id == Some(id) { return false; }
         let Some(old) = self.active.get_mut(&id) else { return false };
         *old = p;
         self.moves.push((id, p));
@@ -125,6 +127,7 @@ fn frame(at: i64) -> snapshot::Frame {
         };
     }
     f.selection_input = snapshot::SelectionInput {
+        kind: n(1.),
         ready: flag(true), coherent: flag(true), input_ready: flag(false),
         panel_visible: flag(false), has_drag: flag(false), selected_option_valid: flag(false),
         source: text(SOURCE), token: f.token, slot: text(SLOT), hero_id: f.hero_id,
@@ -506,5 +509,71 @@ fn missing_choice_receipt_at_release_deadline_requests_cancel_and_never_forces_u
     assert!(h.active.contains_key(&movement));
     snapshot(&mut c, &mut h, cancel_ack(T + 1590 * MS));
     assert!(released(&h, finger) && h.active.contains_key(&movement));
+    assert!(c.cooldownCasts_.is_empty());
+}
+
+#[test]
+fn unproven_plain_and_center_modes_never_fall_through_to_choice_or_tap() {
+    for mode in [2, 3] {
+        let (mut c, mut h) = setup(mode);
+        let movement = c.movementTouch_;
+        let count = h.next;
+        key(&mut c, &mut h, 60, 69, true);
+        assert_eq!(h.next, count, "unproven Selection mode {mode}");
+        assert!(reason(&h, "selection_plain_or_center_mode_unproven"));
+        assert!(h.active.contains_key(&movement));
+        h.mode = 0;
+        snapshot(&mut c, &mut h, frame(T + 65 * MS));
+        key(&mut c, &mut h, 66, 69, true);
+        assert_eq!(h.next, count, "changing mode cannot rearm the held rejected key");
+        key(&mut c, &mut h, 67, 69, false);
+        key(&mut c, &mut h, 68, 69, true);
+        assert!(c.skillTouch_ >= 0 && c.skillBehavior_ == SkillBehavior::Selection);
+    }
+}
+
+#[test]
+fn queued_choice_rejected_after_its_physical_up_does_not_swallow_the_next_real_press() {
+    let (mut c, mut h) = setup(0);
+    key(&mut c, &mut h, 60, 81, true);
+    let previous = c.skillTouch_;
+    key(&mut c, &mut h, 65, 69, true);
+    key(&mut c, &mut h, 66, 69, false);
+    assert_eq!(c.queuedSkills_.len(), 1);
+    assert!(!c.queuedSkills_[0].held && c.skillCancelPending_);
+    h.mode = 2;
+    let mut f = frame(T + 75 * MS);
+    f.skill_id = n(13110.);
+    f.ui.active_slot = text("skill:0");
+    f.cancel_state = snapshot::CancelState {
+        ready: flag(true), coherent: flag(true), source: text("UIKeySkill.bCancelSkill"),
+        token: f.token, hero_id: f.hero_id, slot: text("skill:0"), base_skill_id: n(13110.),
+        cancelled: flag(true), sample_start_ns: n((T + 74 * MS) as f64), sample_end_ns: f.time_ns,
+    };
+    snapshot(&mut c, &mut h, f);
+    assert!(released(&h, previous));
+    snapshot(&mut c, &mut h, frame(T + 80 * MS));
+    assert!(c.queuedSkills_.is_empty() && c.skillTouch_ < 0);
+    assert!(!c.auxiliaryHeldKeys_.contains(&69), "queued physical UP already consumed this key");
+    h.mode = 0;
+    snapshot(&mut c, &mut h, frame(T + 90 * MS));
+    key(&mut c, &mut h, 91, 69, true);
+    assert!(c.skillTouch_ >= 0 && c.skillBehavior_ == SkillBehavior::Selection);
+}
+
+#[test]
+fn choice_final_move_failure_waits_for_native_cancel_ack_and_preserves_movement() {
+    let (mut c, mut h, finger, movement) = started(0);
+    h.fail_move_id = Some(finger);
+    key(&mut c, &mut h, 80, 69, false);
+    assert!(c.skillCancelPending_ && !released(&h, finger));
+    assert_eq!(c.skillCancelSentNs_, 0);
+    assert!(h.active.contains_key(&movement));
+    h.fail_move_id = None;
+    snapshot(&mut c, &mut h, captured(T + 90 * MS));
+    assert!(c.skillCancelSentNs_ > 0 && !released(&h, finger));
+    snapshot(&mut c, &mut h, cancel_ack(T + 100 * MS));
+    assert!(released(&h, finger) && h.active.contains_key(&movement));
+    assert!(!reason(&h, "selection_up_after_ui_ack"));
     assert!(c.cooldownCasts_.is_empty());
 }

@@ -125,12 +125,16 @@ if [ "$#" -gt 0 ]; then exec "$CLBB_ROOT/bin/clbb-launcher" "$@"; fi
 mkdir -p "$CLBB_STATE_ROOT/logs"
 rm -f -- "$CLBB_STATE_ROOT/logs/last-diagnostic.json"
 export CLBB_WRAPPED=1
+# A unique wrapper invocation also identifies stderr if the Rust ELF cannot load.
+CLBB_DIAGNOSTIC_INVOCATION="$(date +%s%N)-$$"
+export CLBB_DIAGNOSTIC_INVOCATION
+CLBB_LAUNCHER_STDERR="$CLBB_STATE_ROOT/logs/launcher-stderr-$CLBB_DIAGNOSTIC_INVOCATION.log"
 set +e
-"$CLBB_ROOT/bin/clbb-launcher" 2>"$CLBB_STATE_ROOT/logs/launcher-stderr.log"
+"$CLBB_ROOT/bin/clbb-launcher" 2>"$CLBB_LAUNCHER_STDERR"
 CLBB_EXIT=$?
 set -e
 if [ "$CLBB_EXIT" -ne 0 ]; then
-    "$CLBB_ROOT/bin/clbb-launcher" --show-last-error 2>>"$CLBB_STATE_ROOT/logs/launcher-stderr.log" || \
+    "$CLBB_ROOT/bin/clbb-launcher" --show-last-error 2>>"$CLBB_LAUNCHER_STDERR" || \
         python3 "$CLBB_ROOT/distribution/launch-fallback.py" "$CLBB_ROOT" "$CLBB_STATE_ROOT" "Ошибка запуска CLBB (код $CLBB_EXIT)"
 fi
 exit "$CLBB_EXIT"

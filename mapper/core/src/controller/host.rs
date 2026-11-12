@@ -22,6 +22,13 @@ pub trait Host {
     fn cancel_touch(&mut self, _id: i32, _p: Point) -> bool {
         false
     }
+    /// Context retirement only: every input owner is being discarded. Never
+    /// use this for an individual skill cancellation or owner replacement.
+    fn abort_all_touches(&mut self) -> bool {
+        false
+    }
+    /// Changes only after a successful all-owner native context cancellation.
+    fn touch_reset_generation(&self) -> u64 { 0 }
     fn pointer_world(&mut self, p: Point) -> Option<Point>;
     fn ground_world(&mut self, p: Point) -> Option<Point>;
     fn skill_direction_world(&mut self, p:Point, _skill:i32)->Option<Point> {self.ground_world(p)}

@@ -131,7 +131,7 @@ impl Controller {
             }
         }
         if self.skillTouch_>=0&&!self.skillCancelPending_&&self.skillBehavior_==SkillBehavior::Selection {
-            if !self.send_selection(host){self.finish_skill(host,true);return;}
+            if !self.send_selection(host){self.selection_transport_failed(host,"selection_pointer_move_delivery_failed");return;}
         }
         if self.skillTouch_ >= 0
             && !self.skillCancelPending_
@@ -192,7 +192,11 @@ impl Controller {
         {
             self.skillEchoPending_ = false;
             if !host.move_touch(self.skillTouch_, self.skillPoint_) {
-                self.finish_skill(host, true);
+                if self.skillBehavior_ == SkillBehavior::Selection {
+                    self.selection_transport_failed(host, "selection_pointer_echo_delivery_failed");
+                } else {
+                    self.finish_skill(host, true);
+                }
                 return;
             }
             self.sync_clock(host);
@@ -515,9 +519,12 @@ impl Controller {
         if self.skillCancelPending_ || self.skillTouch_ >= 0 {
             return false;
         }
-        if self.classify_skill(b)==SkillBehavior::Selection&&!self.selection_phase_known(b) {
-            self.trace(host,"selection_start_rejected","selector_phase_unconfirmed");
-            return false;
+        if self.classify_skill(b)==SkillBehavior::Selection {
+            if let Some(reason)=self.selection_start_rejection(b) {
+                if self.physicalKeys_.contains(&b.key) { self.auxiliaryHeldKeys_.insert(b.key); }
+                self.trace(host,"selection_start_rejected",reason);
+                return false;
+            }
         }
         let state_forbidden = self.state_forbidden(b, self.cooldown_variant(b), 0) == Some(true);
         self.flush_pointer(host);
@@ -667,15 +674,19 @@ impl Controller {
             if !cancel && !auto_completed {
                 let finishing = self.skillTouch_;
                 self.flush_pointer(host);
-                if self.skillTouch_ != finishing {
+                if self.skillTouch_ != finishing
+                    || (self.skillBehavior_ == SkillBehavior::Selection && self.skillCancelPending_)
+                {
                     return;
                 }
             }
             self.trace(host, "release", if auto_completed { "auto_completed" } else if cancel { "cancel" }
                 else if self.skillBehavior_==SkillBehavior::Selection {"selection_up_after_ui_ack"} else { "cast" });
             if !cancel || self.skillCancelAcknowledged_ || !self.abort_retribution_touch(host) {
-                if cancel && self.cancelReady_ && !self.skillCancelPending_ {
-                    self.move_skill(host, self.cancelPoint_, false);
+                if cancel && !self.skillCancelPending_ {
+                    if let Some(point) = self.selection_cancel_point() {
+                        self.move_skill(host, point, false);
+                    }
                 }
                 host.end(self.skillTouch_, self.skillPoint_);
             }
@@ -763,9 +774,13 @@ impl Controller {
             self.finish_skill(host, true);
             return;
         }
-        if self.cancelReady_ {
-            if !self.move_skill(host, self.cancelPoint_, false) {
-                self.finish_skill(host, true);
+        if let Some(point) = self.selection_cancel_point() {
+            if !self.send_skill_cancel_point(host, point) {
+                if self.skillBehavior_ == SkillBehavior::Selection {
+                    self.selection_transport_failed(host, "selection_cancel_move_delivery_failed");
+                } else {
+                    self.finish_skill(host, true);
+                }
                 return;
             }
             self.skillCancelSentNs_ = self.now_;
@@ -778,6 +793,13 @@ impl Controller {
         if !self.skillCancelPending_ || self.skillCancelSentNs_ == 0 || self.skillTouch_ < 0 {
             return;
         }
+        if self.skillBehavior_ == SkillBehavior::Selection && self.selection_.kind == 2 {
+            if self.selection_target_cancel_ack(f) {
+                self.skillCancelAcknowledged_ = true;
+                self.trace(host, "cancel_acknowledged", "owned_target_cancel_flag_and_exact_native_touch");
+            }
+            return;
+        }
         let Some(b) = self.find_button(&self.activeSlot_) else {
             return;
         };
@@ -788,7 +810,7 @@ impl Controller {
         let now = self.now_ as f64;
         if !s.ready.get()
             || !s.coherent.get()
-            || s.source.as_str() != "UIKeySkill.bCancelSkill"
+            || s.source.as_str() != self.selection_cancel_source()
             || !f.token_string.get()
             || !f.token_nonempty.get()
             || s.token.as_str() != self.frameEpoch_
@@ -819,7 +841,7 @@ impl Controller {
         self.manualTouch_ = -1
     }
     pub(crate) fn begin_auxiliary_tap(&mut self, host: &mut impl Host, b: &Button) {
-        if !b.available || self.auxiliaryTaps_.len() >= 8 {
+        if !b.available || self.auxiliaryTaps_.len() + self.auxiliaryHolds_.len() >= 8 {
             return;
         }
         let id = host.begin(b.press);
@@ -872,6 +894,8 @@ impl Controller {
         self.auxiliaryHeldKeys_.clear();
     }
     pub(crate) fn release_all(&mut self, host: &mut impl Host) {
+        self.tombstone_physical_inputs();
+        self.abort_owned_context(host);
         host.timer(Timer::Pointer, None);
         self.clear_queued_skills(host, "lifecycle_reset");
         self.cooldownIgnoredKeys_.clear();
@@ -880,8 +904,11 @@ impl Controller {
         self.finish_movement(host, "");
         self.finish_manual(host);
         self.finish_auxiliary_taps(host);
+        self.finish_auxiliary_holds(host);
     }
     pub(crate) fn invalidate(&mut self, host: &mut impl Host, reason: &str) {
+        self.tombstone_physical_inputs();
+        self.abort_owned_context(host);
         self.clear_queued_skills(host, "telemetry_invalidated");
         self.cooldownIgnoredKeys_.clear();
         let was = self.ready_;
@@ -889,6 +916,7 @@ impl Controller {
         self.kaguraThrow_ = None;
         self.finish_movement(host, "");
         self.finish_auxiliary_taps(host);
+        self.finish_auxiliary_holds(host);
         self.ready_ = false;
         self.aimReady_ = false;
         self.directStartups_.clear();

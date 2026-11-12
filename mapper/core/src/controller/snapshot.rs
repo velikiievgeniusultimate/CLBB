@@ -11,7 +11,11 @@ impl Number {
         self.kind == 1
     }
     pub fn get(self, default: f64) -> f64 {
-        if self.kind == 1 { self.value } else { default }
+        if self.kind == 1 {
+            self.value
+        } else {
+            default
+        }
     }
     pub fn int(self) -> i32 {
         let n = self.get(0.);
@@ -273,6 +277,9 @@ pub struct Direction {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SelectionInput {
+    /// 1 native UI Choice; 2 native UI target panel. Missing/unknown is not an
+    /// authorization to reinterpret either family as world-space aiming.
+    pub kind: Number,
     /// Typed native UI ownership is independent of a post-MOVE hover receipt.
     pub ready: Flag,
     pub coherent: Flag,
@@ -295,6 +302,47 @@ pub struct SelectionInput {
     pub selected_option: Number,
     pub raw_touch_xyz: Vector3,
     pub drag_direction_xy: Vector2,
+    /// Target panels publish a native UI contact/recipient receipt. None of
+    /// these fields is a world direction or a successful native cast result.
+    pub target_guid: Number,
+    pub target_valid: Flag,
+    pub target_owner_id: u64,
+    pub target_self_id: u64,
+    pub backend_owner_id: u64,
+    pub contact_owner_id: u64,
+    pub contact_present: Flag,
+    pub native_contact_id: Number,
+    pub native_cancel: Flag,
+    pub native_unselectable: Flag,
+    pub backend_state: Number,
+    pub target_cancel_hit: Flag,
+    /// Independently owned target-panel cancellation geometry. This never
+    /// replaces another contact's generic UI cancel point or acknowledgement.
+    pub target_cancel_ready: Flag,
+    pub target_cancel_uv: Vector2,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AuxiliaryControlRow {
+    pub slot: Text,
+    /// Unknown is different from a positively observed absent native button.
+    pub owner_present: Flag,
+    pub owner_id: u64,
+    pub hold_to_release: Flag,
+    pub cancel_supported: Flag,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AuxiliaryControlState {
+    pub ready: Flag,
+    pub coherent: Flag,
+    pub source: Text,
+    pub token: Text,
+    pub hero_id: Number,
+    pub sample_start_ns: Number,
+    pub sample_end_ns: Number,
+    pub controls: [AuxiliaryControlRow; 8],
+    pub count: u32,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -330,6 +378,7 @@ pub struct Frame {
     pub active_joystick: Geometry,
     pub direction_input: Direction,
     pub selection_input: SelectionInput,
+    pub auxiliary_controls: AuxiliaryControlState,
     pub cancel_state: CancelState,
     pub logical: Logical,
     pub motion: Motion,

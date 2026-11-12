@@ -2,6 +2,9 @@
 #![recursion_limit="512"]
 pub mod aim;
 mod control_audit;
+mod target_contacts;
+mod target_cancel_geometry;
+mod target_selection;
 pub mod linked_gesture;
 pub mod math;
 pub mod navigation;

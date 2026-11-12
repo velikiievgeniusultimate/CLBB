@@ -10,6 +10,7 @@ mod frame;
 pub mod api;
 pub mod host;
 mod input;
+mod auxiliary;
 mod lifecycle;
 mod charge_lifecycle;
 mod movement;
@@ -329,6 +330,15 @@ pub struct Controller {
     pub(crate) queuedSkills_: Vec<QueuedSkill>,
     pub(crate) kaguraThrow_: Option<KaguraThrowTransition>,
     pub(crate) auxiliaryTaps_: Vec<AuxiliaryTap>,
+    pub(crate) auxiliaryHolds_: Vec<auxiliary::AuxiliaryHold>,
+    pub(crate) auxiliaryControlState_: snapshot::AuxiliaryControlState,
+    pub(crate) auxiliaryKnownHolds_: BTreeSet<String>,
+    pub(crate) auxiliaryControlSampleNs_: i64,
+    pub(crate) touchResetGeneration_: u64,
+    pub(crate) physicalKeys_: BTreeSet<i32>,
+    pub(crate) physicalMouseButtons_: BTreeSet<i32>,
+    pub(crate) contextIgnoredKeys_: BTreeSet<i32>,
+    pub(crate) contextIgnoredMouseButtons_: BTreeSet<i32>,
     pub(crate) skillVariants_: Vec<SkillVariant>,
     pub(crate) directRanges_: Vec<DirectRange>,
     pub(crate) directStartups_: Vec<DirectStartup>,
