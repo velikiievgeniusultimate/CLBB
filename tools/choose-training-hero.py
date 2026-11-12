@@ -217,15 +217,16 @@ class Selector:
         if not self.binary.is_file():
             raise RuntimeError("Build the training-ui-audit developer binary first")
 
-    def audit(self, name, family=None):
+    def audit(self, name, family=None, timeout=20):
         self.runtime.identity()
         self.serial += 1
         output = self.directory / f"{self.serial:03d}-{name}.ui.json"
         args = [str(self.binary), str(self.runtime.pid), str(output)]
         if family is not None:
             args.append(family)
-        subprocess.run(args, cwd=ROOT, check=True, capture_output=True, timeout=20)
+        subprocess.run(args, cwd=ROOT, check=True, capture_output=True, timeout=timeout)
         result = json.loads(output.read_text())
+        self.runtime.identity()
         if result.get("truncated") or not result.get("topology_unchanged"):
             raise RuntimeError("UI topology moved or exceeded audit bounds; refusing a click")
         return result
@@ -239,18 +240,120 @@ class Selector:
             raise RuntimeError(f"A unique visible native UI target is absent: {suffix}")
         return candidates[0]
 
-    def open(self):
-        state = self.audit("training-menu", "Train")
-        if any(v["class"] == "UIChooseHeroTrain" for v in state["frames"]):
-            return
-        change = "UITrainGM.uiFrame.m_Sprite_F8_Addbgyx"
+    @staticmethod
+    def picker_present(state):
+        return any(v.get("class") == "UIChooseHeroTrain" for v in state.get("frames", []))
+
+    @classmethod
+    def picker_ready(cls, state):
+        if not cls.picker_present(state):
+            return False
+        pickers = [o for o in state.get("objects", []) if o.get("class") == "UIChooseHeroTrain"]
+        wrappers = [o for o in state.get("objects", []) if o.get("class") == "UIListWrapper"
+                    and "ChooseHeroTrain" in o.get("path", "")]
+        if len(pickers) != 1 or len(wrappers) != 1:
+            return False
         try:
-            point = self.visible_widget(state, change)
+            cls.visible_widget(state, "m_Label_TrainConfirm")
         except RuntimeError:
-            self.runtime.tap(self.visible_widget(state, "UITrainGM.uiFrame.m_Sprite_GmIcon"))
-            state = self.audit("training-menu-open", "Train")
-            point = self.visible_widget(state, change)
-        self.runtime.tap(point)
+            return False
+        return True
+
+    @classmethod
+    def change_target(cls, state):
+        if cls.picker_present(state):
+            raise RuntimeError("Hero picker is already present; refusing another GM click")
+        suffix = "UITrainGM.uiFrame.m_Sprite_F8_Addbgyx"
+        point = cls.visible_widget(state, suffix)
+        target = next(o for o in state["objects"] if o["path"].endswith(suffix)
+                      and o.get("widget") and o["widget"].get("visible") and o["widget"].get("onscreen"))
+        owners = [f.get("object") for f in state.get("frames", []) if f.get("class") == "UITrainGM"]
+        if len(owners) != 1 or type(owners[0]) is not int or owners[0] <= 4096 or type(target.get("object")) is not int or target["object"] <= 4096:
+            raise RuntimeError("Current training GM/button owner is unknown")
+        return point, (owners[0], target["object"])
+
+    def open(self):
+        # Every observation is retained; a tap ACK alone never means the picker
+        # opened. The only retry must use a newly observed, same-owner GM button.
+        record = {"format": "clbb-training-picker-open", "pid": self.runtime.pid,
+                  "birth": str(self.runtime.birth), "attempts": [], "observations": []}
+        path = self.directory / f"{self.serial + 1:03d}-open-observations.json"
+
+        def tap(point, kind):
+            self.runtime.identity()
+            self.runtime.idle()
+            contacts = json.loads(self.runtime.rpc("read diagnostics.contacts"))
+            if contacts.get("active") != []:
+                raise RuntimeError("Mapped contacts are held or unknown; refusing GM input")
+            self.runtime.identity()
+            row = {"kind": kind, "point": list(point), "start_ns": time.monotonic_ns(), "raw_idle": True}
+            record["observations"].append(row)
+            self.runtime.tap(point)
+            row.update(completed_ns=time.monotonic_ns(), tap_returned=True)
+
+        def wait_picker(attempt):
+            deadline = time.monotonic() + 2.
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                row = {"attempt": attempt, "start_ns": time.monotonic_ns()}
+                record["observations"].append(row)
+                try:
+                    state = self.audit(f"picker-open-{attempt}", "ChooseHeroTrain", timeout=remaining)
+                except subprocess.TimeoutExpired:
+                    row.update(audit_timeout=True, end_ns=time.monotonic_ns())
+                    return False
+                self.runtime.identity()
+                row.update(picker_present=self.picker_present(state), picker_ready=self.picker_ready(state), end_ns=time.monotonic_ns())
+                if row["picker_ready"]:
+                    return True
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(min(.1, remaining))
+            return False
+
+        with path.open("x") as output:
+            try:
+                state = self.audit("training-menu", "Train")
+                if self.picker_ready(state):
+                    record["picker_ready"] = True
+                    return
+                if self.picker_present(state):
+                    if wait_picker(0):
+                        record["picker_ready"] = True
+                        return
+                    raise RuntimeError("Existing hero picker did not become ready within2s; no GM retry")
+                try:
+                    self.visible_widget(state, "UITrainGM.uiFrame.m_Sprite_F8_Addbgyx")
+                except RuntimeError:
+                    tap(self.visible_widget(state, "UITrainGM.uiFrame.m_Sprite_GmIcon"), "open_gm")
+                    state = self.audit("training-menu-open", "Train")
+                point, owner = self.change_target(state)
+                for attempt in (1, 2):
+                    if attempt == 2:
+                        self.runtime.identity()
+                        self.runtime.idle()
+                        state = self.audit("training-menu-retry", "Train")
+                        if self.picker_ready(state):
+                            record["picker_ready"] = True
+                            return
+                        point, fresh_owner = self.change_target(state)
+                        if fresh_owner != owner:
+                            raise RuntimeError("Training GM/button owner changed; refusing retry")
+                    record["attempts"].append({"attempt": attempt, "point": list(point), "owner": list(owner)})
+                    tap(point, f"change_hero_{attempt}")
+                    if wait_picker(attempt):
+                        record["picker_ready"] = True
+                        return
+                raise RuntimeError("Training hero picker did not open after2 bounded attempts; no further input")
+            except BaseException as error:
+                record["error"] = f"{type(error).__name__}: {error}"
+                raise
+            finally:
+                record["end_ns"] = time.monotonic_ns()
+                json.dump(record, output, ensure_ascii=False, indent=2)
+                output.write("\n")
 
     def snapshot(self):
         ui = self.audit("picker", "ChooseHeroTrain")
