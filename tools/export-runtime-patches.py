@@ -51,6 +51,7 @@ SPECS = [
     ]),
     ('qemu', 'src/nb-qemu/qemu', 'qemu-runtime.patch', [
         'target/arm/rsqrt-estimate-table.h',
+        'linux-user/clone-signal-mask.h',
     ]),
     ('nb-qemu-bionic', 'src/nb-qemu/libnb-qemu-guest/bionic', 'bionic-runtime.patch', [
         'libc/bionic/standalone_system_properties.c',

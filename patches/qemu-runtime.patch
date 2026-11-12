@@ -642,10 +642,18 @@ index 836efb8..0db6ecb 100644
  {
      TaskState *ts = (TaskState *)thread_cpu->opaque;
 diff --git a/linux-user/syscall.c b/linux-user/syscall.c
-index c1b79ed..0bc1b26 100644
+index c1b79ed..f43615c 100644
 --- a/linux-user/syscall.c
 +++ b/linux-user/syscall.c
-@@ -1200,9 +1200,72 @@ static inline abi_long copy_from_user_timeval(struct timeval *tv,
+@@ -19,6 +19,7 @@
+ 
+ #define _ATFILE_SOURCE
+ #include "qemu/osdep.h"
++#include "clone-signal-mask.h"
+ #include "qemu/cutils.h"
+ #include "qemu/path.h"
+ #include "qemu/memfd.h"
+@@ -1200,9 +1201,72 @@ static inline abi_long copy_from_user_timeval(struct timeval *tv,
      return 0;
  }
  
@@ -718,7 +726,7 @@ index c1b79ed..0bc1b26 100644
      struct target_timeval *target_tv;
  
      if (!lock_user_struct(VERIFY_WRITE, target_tv, target_tv_addr, 0)) {
-@@ -1215,6 +1278,7 @@ static inline abi_long copy_to_user_timeval(abi_ulong target_tv_addr,
+@@ -1215,6 +1279,7 @@ static inline abi_long copy_to_user_timeval(abi_ulong target_tv_addr,
      unlock_user_struct(target_tv, target_tv_addr, 1);
  
      return 0;
@@ -726,7 +734,7 @@ index c1b79ed..0bc1b26 100644
  }
  
  static inline abi_long copy_to_user_timeval64(abi_ulong target_tv_addr,
-@@ -1274,6 +1338,12 @@ static inline abi_long target_to_host_timespec64(struct timespec *host_ts,
+@@ -1274,6 +1339,12 @@ static inline abi_long target_to_host_timespec64(struct timespec *host_ts,
  static inline abi_long host_to_target_timespec(abi_ulong target_addr,
                                                 struct timespec *host_ts)
  {
@@ -739,7 +747,7 @@ index c1b79ed..0bc1b26 100644
      struct target_timespec *target_ts;
  
      if (!lock_user_struct(VERIFY_WRITE, target_ts, target_addr, 0)) {
-@@ -1283,11 +1353,18 @@ static inline abi_long host_to_target_timespec(abi_ulong target_addr,
+@@ -1283,11 +1354,18 @@ static inline abi_long host_to_target_timespec(abi_ulong target_addr,
      __put_user(host_ts->tv_nsec, &target_ts->tv_nsec);
      unlock_user_struct(target_ts, target_addr, 1);
      return 0;
@@ -758,7 +766,7 @@ index c1b79ed..0bc1b26 100644
      struct target__kernel_timespec *target_ts;
  
      if (!lock_user_struct(VERIFY_WRITE, target_ts, target_addr, 0)) {
-@@ -1297,12 +1374,19 @@ static inline abi_long host_to_target_timespec64(abi_ulong target_addr,
+@@ -1297,12 +1375,19 @@ static inline abi_long host_to_target_timespec64(abi_ulong target_addr,
      __put_user(host_ts->tv_nsec, &target_ts->tv_nsec);
      unlock_user_struct(target_ts, target_addr, 1);
      return 0;
@@ -778,7 +786,7 @@ index c1b79ed..0bc1b26 100644
      struct target_timezone *target_tz;
  
      if (!lock_user_struct(VERIFY_WRITE, target_tz, target_tz_addr, 1)) {
-@@ -1315,6 +1399,7 @@ static inline abi_long copy_to_user_timezone(abi_ulong target_tz_addr,
+@@ -1315,6 +1400,7 @@ static inline abi_long copy_to_user_timezone(abi_ulong target_tz_addr,
      unlock_user_struct(target_tz, target_tz_addr, 1);
  
      return 0;
@@ -786,7 +794,7 @@ index c1b79ed..0bc1b26 100644
  }
  #endif
  
-@@ -1529,9 +1614,10 @@ static inline abi_long target_to_host_sockaddr(int fd, struct sockaddr *addr,
+@@ -1529,9 +1615,10 @@ static inline abi_long target_to_host_sockaddr(int fd, struct sockaddr *addr,
      const socklen_t unix_maxlen = sizeof (struct sockaddr_un);
      sa_family_t sa_family;
      struct target_sockaddr *target_saddr;
@@ -799,7 +807,7 @@ index c1b79ed..0bc1b26 100644
      }
  
      target_saddr = lock_user(VERIFY_READ, target_addr, len, 1);
-@@ -3133,13 +3219,13 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
+@@ -3133,13 +3220,13 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
      msg.msg_iov = vec;
  
      if (send) {
@@ -816,7 +824,7 @@ index c1b79ed..0bc1b26 100644
              if (ret >= 0) {
                  msg.msg_iov->iov_base = host_msg;
                  ret = get_errno(safe_sendmsg(fd, &msg, flags));
-@@ -3154,10 +3240,11 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
+@@ -3154,10 +3241,11 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
      } else {
          ret = get_errno(safe_recvmsg(fd, &msg, flags));
          if (!is_error(ret)) {
@@ -831,7 +839,7 @@ index c1b79ed..0bc1b26 100644
              } else {
                  ret = host_to_target_cmsg(msgp, &msg);
              }
-@@ -3374,6 +3461,7 @@ static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
+@@ -3374,6 +3462,7 @@ static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
      void *host_msg;
      void *copy_msg = NULL;
      abi_long ret;
@@ -839,7 +847,7 @@ index c1b79ed..0bc1b26 100644
  
      if ((int)addrlen < 0) {
          return -TARGET_EINVAL;
-@@ -3382,11 +3470,12 @@ static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
+@@ -3382,11 +3471,12 @@ static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
      host_msg = lock_user(VERIFY_READ, msg, len, 1);
      if (!host_msg)
          return -TARGET_EFAULT;
@@ -854,7 +862,7 @@ index c1b79ed..0bc1b26 100644
          if (ret < 0) {
              goto fail;
          }
-@@ -3442,11 +3531,11 @@ static abi_long do_recvfrom(int fd, abi_ulong msg, size_t len, int flags,
+@@ -3442,11 +3532,11 @@ static abi_long do_recvfrom(int fd, abi_ulong msg, size_t len, int flags,
          ret = get_errno(safe_recvfrom(fd, host_msg, len, flags, NULL, 0));
      }
      if (!is_error(ret)) {
@@ -871,7 +879,7 @@ index c1b79ed..0bc1b26 100644
                  goto fail;
              }
          }
-@@ -5920,6 +6009,8 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
+@@ -5920,6 +6010,8 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
  #define NEW_STACK_SIZE 0x40000
  
  
@@ -880,7 +888,29 @@ index c1b79ed..0bc1b26 100644
  static pthread_mutex_t clone_lock = PTHREAD_MUTEX_INITIALIZER;
  typedef struct {
      CPUArchState *env;
-@@ -6837,6 +6928,20 @@ static inline int target_to_host_mlockall_arg(int arg)
+@@ -5938,6 +6030,7 @@ static void *clone_func(void *arg)
+     CPUArchState *env;
+     CPUState *cpu;
+     TaskState *ts;
++    sigset_t child_sigmask;
+ 
+     rcu_register_thread();
+     tcg_register_thread();
+@@ -5952,8 +6045,11 @@ static void *clone_func(void *arg)
+     if (info->parent_tidptr)
+         put_user_u32(info->tid, info->parent_tidptr);
+     qemu_guest_random_seed_thread_part2(cpu->random_seed);
+-    /* Enable signals.  */
+-    sigprocmask(SIG_SETMASK, &info->sigmask, NULL);
++    /* Do not inherit a temporary all-blocked host handler mask. In that
++       state a guest GC suspend signal stays pending forever, while the
++       collector waits for this new thread to acknowledge it. */
++    clbb_clone_signal_mask(&ts->signal_mask, &child_sigmask);
++    sigprocmask(SIG_SETMASK, &child_sigmask, NULL);
+     /* Signal to the parent that we're ready.  */
+     pthread_mutex_lock(&info->mutex);
+     pthread_cond_broadcast(&info->cond);
+@@ -6837,6 +6933,20 @@ static inline int target_to_host_mlockall_arg(int arg)
  #if (defined(TARGET_NR_stat64) || defined(TARGET_NR_lstat64) ||     \
       defined(TARGET_NR_fstat64) || defined(TARGET_NR_fstatat64) ||  \
       defined(TARGET_NR_newfstatat))
@@ -901,7 +931,7 @@ index c1b79ed..0bc1b26 100644
  static inline abi_long host_to_target_stat64(void *cpu_env,
                                               abi_ulong target_addr,
                                               struct stat *host_st)
-@@ -6879,8 +6984,14 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
+@@ -6879,8 +6989,14 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
          struct target_stat *target_st;
  #endif
  
@@ -916,7 +946,7 @@ index c1b79ed..0bc1b26 100644
          memset(target_st, 0, sizeof(*target_st));
          __put_user(host_st->st_dev, &target_st->st_dev);
          __put_user(host_st->st_ino, &target_st->st_ino);
-@@ -6904,7 +7015,12 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
+@@ -6904,7 +7020,12 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
          __put_user(host_st->st_mtim.tv_nsec, &target_st->target_st_mtime_nsec);
          __put_user(host_st->st_ctim.tv_nsec, &target_st->target_st_ctime_nsec);
  #endif
@@ -929,7 +959,7 @@ index c1b79ed..0bc1b26 100644
      }
  
      return 0;
-@@ -7636,6 +7752,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+@@ -7636,6 +7757,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
  {
      CPUState *cpu = env_cpu(cpu_env);
      abi_long ret;
@@ -937,7 +967,7 @@ index c1b79ed..0bc1b26 100644
  #if defined(TARGET_NR_stat) || defined(TARGET_NR_stat64) \
      || defined(TARGET_NR_lstat) || defined(TARGET_NR_lstat64) \
      || defined(TARGET_NR_fstat) || defined(TARGET_NR_fstat64) \
-@@ -7659,6 +7776,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+@@ -7659,6 +7781,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
              return -TARGET_ERESTARTSYS;
          }
  
@@ -947,7 +977,7 @@ index c1b79ed..0bc1b26 100644
          cpu_list_lock();
  
          if (CPU_NEXT(first_cpu)) {
-@@ -7676,7 +7796,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+@@ -7676,7 +7801,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                            NULL, NULL, 0);
              }
              thread_cpu = NULL;
@@ -956,7 +986,7 @@ index c1b79ed..0bc1b26 100644
              g_free(ts);
              rcu_unregister_thread();
              pthread_exit(NULL);
-@@ -7693,9 +7813,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+@@ -7693,9 +7818,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
              if (!(p = lock_user(VERIFY_WRITE, arg2, arg3, 0)))
                  return -TARGET_EFAULT;
              ret = get_errno(safe_read(arg1, p, arg3));
@@ -971,7 +1001,7 @@ index c1b79ed..0bc1b26 100644
              }
              unlock_user(p, arg2, ret);
          }
-@@ -7706,10 +7828,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+@@ -7706,10 +7833,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
          }
          if (!(p = lock_user(VERIFY_READ, arg2, arg3, 1)))
              return -TARGET_EFAULT;
@@ -985,7 +1015,7 @@ index c1b79ed..0bc1b26 100644
              if (ret >= 0) {
                  ret = get_errno(safe_write(arg1, copy, ret));
              }
-@@ -9505,6 +9628,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+@@ -9505,6 +9633,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
          do_stat:
  #endif
              if (!is_error(ret)) {
@@ -998,7 +1028,7 @@ index c1b79ed..0bc1b26 100644
                  struct target_stat *target_st;
  
                  if (!lock_user_struct(VERIFY_WRITE, target_st, arg2, 0))
-@@ -9533,6 +9662,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+@@ -9533,6 +9667,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                             &target_st->target_st_ctime_nsec);
  #endif
                  unlock_user_struct(target_st, arg2, 1);
@@ -1551,4 +1581,27 @@ index 0000000..7e96938
 +    assert(128 <= a && a < 512);
 +    return 256 + clbb_rsqrt_estimate_minus_256[a - 128];
 +}
++#endif
+diff --git a/linux-user/clone-signal-mask.h b/linux-user/clone-signal-mask.h
+new file mode 100644
+index 0000000..1e23b99
+--- /dev/null
++++ b/linux-user/clone-signal-mask.h
+@@ -0,0 +1,17 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef CLBB_CLONE_SIGNAL_MASK_H
++#define CLBB_CLONE_SIGNAL_MASK_H
++
++#include <signal.h>
++
++/* A host signal handler can temporarily block every signal while the guest
++ * mask remains unchanged. A new guest thread inherits the latter, never that
++ * transient host mask. Match process_pending_signals()'s exception policy. */
++static inline void clbb_clone_signal_mask(const sigset_t *guest, sigset_t *host)
++{
++    *host = *guest;
++    sigdelset(host, SIGSEGV);
++    sigdelset(host, SIGBUS);
++}
++
 +#endif
