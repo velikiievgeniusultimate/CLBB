@@ -275,6 +275,12 @@ pub(crate) fn skill_button_class<M: Memory>(r: &mut Reflection<M>, class: &crate
     Ok(control_kind(false, &ancestry) == "skill")
 }
 
+// An idle miss must not suppress classification of the indicator that is
+// actually being held now. Keep retries bounded while native forms rebind.
+fn behavior_retry_due(now:i64,deadline:i64,active:bool)->bool {
+    now>=deadline || (active && deadline.saturating_sub(now)>4_000_000)
+}
+fn behavior_retry_delay(active:bool)->i64 {if active {4_000_000}else{1_000_000_000}}
 fn held_indicator_behavior_id(base:i32, future:i32, actual:i32, charge:bool, held_slot:bool)->i32 {
     // The future release changes during charging, while the owned active
     // indicator can still be the base. Classify the indicator actually held,
@@ -333,6 +339,17 @@ fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
 
 #[cfg(test)]
 mod control_kind_tests {
+    #[test]
+    fn held_native_form_does_not_inherit_idle_discovery_backoff() {
+        use super::{behavior_retry_due,behavior_retry_delay};
+        let now=10_000_000;
+        assert!(!behavior_retry_due(now,now+1_000_000_000,false));
+        assert!(behavior_retry_due(now,now+1_000_000_000,true));
+        let next=now+behavior_retry_delay(true);
+        assert!(!behavior_retry_due(now+1_000_000,next,true));
+        assert!(behavior_retry_due(next,next,true));
+        assert_eq!(behavior_retry_delay(false),1_000_000_000);
+    }
     use super::{control_kind, held_indicator_behavior_id};
     #[test]
     fn held_charge_keeps_base_indicator_template_but_other_variants_do_not() {
@@ -1386,9 +1403,10 @@ impl<M: Memory> Source<M> {
             if plan.behaviors.get(&id).is_some_and(|(c,_)|check(r,c).is_err()) {
                 plan.behaviors.remove(&id);plan.behavior_retry.remove(&id);
             }
-            if !plan.behaviors.contains_key(&id) && now>=*plan.behavior_retry.get(&id).unwrap_or(&0) {
+            let held_current=ui.active_slot.as_str()==entry.slot.as_str() && skill==id;
+            if !plan.behaviors.contains_key(&id) && behavior_retry_due(now,*plan.behavior_retry.get(&id).unwrap_or(&0),held_current) {
                 if let Ok(value)=crate::aim::MotionPlan::discover_behavior(r,plan.indicator,id) {plan.behaviors.insert(id,value);}
-                else {plan.behavior_retry.insert(id,now+1_000_000_000);}
+                else {plan.behavior_retry.insert(id,now.saturating_add(behavior_retry_delay(held_current)));}
             }
             if let Some((checks,kind))=plan.behaviors.get(&id) {
                 consumed.extend(checks.iter().cloned());

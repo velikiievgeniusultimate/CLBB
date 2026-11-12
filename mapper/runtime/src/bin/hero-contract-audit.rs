@@ -507,6 +507,7 @@ fn main() -> Result<()> {
             "attack_preview":MotionPlan::audit_attack_preview(&mut source.reflection,sample.indicator,skill,frame.ui.buttons.iter().take(frame.ui.button_count.min(32)as usize).find(|b|b.slot.as_str()=="attack").map(|b|b.skill_id.int()).unwrap_or(0)),
             "values":MotionPlan::audit_registry_values(&mut source.reflection,sample.indicator,skill),
             "configuration":config_values(&mut source.reflection,sample.indicator,skill),
+            "behavior":MotionPlan::discover_behavior(&mut source.reflection,sample.indicator,skill).map(|(_,kind)|kind),
             "drag_gate":MotionPlan::discover(&mut source.reflection,sample.indicator,skill)
                 .and_then(|plan|plan.audit_drag_gate(&mut source.reflection)),
             "end_ns":now_ns(),
