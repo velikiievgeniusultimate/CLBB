@@ -21,6 +21,7 @@ typedef struct {
   int fallback;
   gboolean dependent;
   gboolean battle_spell_mode;
+  gboolean plain_spell_mode;
   char *override_key;
   GtkWidget *override_widget;
 } Control;
@@ -430,7 +431,7 @@ static void changed_mode(GObject *object, GParamSpec *param, gpointer data) {
   Control *c = data;
   int selected = (int)gtk_drop_down_get_selected(GTK_DROP_DOWN(object));
   static const int spell_modes[] = {2, 0, 1, 3};
-  if (c->battle_spell_mode && selected >= 0 && selected < 4)
+  if (c->battle_spell_mode && !c->plain_spell_mode && selected >= 0 && selected < 4)
     selected = spell_modes[selected];
   if (write_int(c->owner, c->key, selected) &&
       !strcmp(c->key, "movement.click_mode"))
@@ -1318,6 +1319,21 @@ void clbb_settings_refresh(ClbbSettings *s) {
       break;
     case CONTROL_MODE:
       if (c->battle_spell_mode) {
+        gboolean plain = read_int(s, "common.battle_spell_id", 0) == 20080;
+        if (plain != c->plain_spell_mode) {
+          const char *const plain_modes[] = {"При отпускании", "Моментальное нажатие", NULL};
+          const char *const aimed_modes[] = {"Моментальное прожатие", "Обычный навык", "Моментальный с наведением", "Прожатие с удержанием", NULL};
+          GtkStringList *model = gtk_string_list_new(plain ? plain_modes : aimed_modes);
+          gtk_drop_down_set_model(GTK_DROP_DOWN(c->widget), G_LIST_MODEL(model));
+          g_object_unref(model);
+          gboolean personal = g_str_has_prefix(c->key, "hero.");
+          g_free(c->key);
+          c->key = g_strdup_printf("%s.bindings.%s.cast_mode", personal ? "hero" : "common", plain ? "extra:2:20080" : "extra:2");
+          c->plain_spell_mode = plain;
+        }
+        n = read_int(s, c->key, c->fallback);
+      }
+      if (c->battle_spell_mode && !c->plain_spell_mode) {
         static const guint spell_indices[] = {1, 2, 0, 3};
         gtk_drop_down_set_selected(GTK_DROP_DOWN(c->widget), spell_indices[CLAMP(n, 0, 3)]);
       } else {

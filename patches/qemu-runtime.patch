@@ -642,7 +642,7 @@ index 836efb8..0db6ecb 100644
  {
      TaskState *ts = (TaskState *)thread_cpu->opaque;
 diff --git a/linux-user/syscall.c b/linux-user/syscall.c
-index c1b79ed..0eee1d7 100644
+index c1b79ed..0bc1b26 100644
 --- a/linux-user/syscall.c
 +++ b/linux-user/syscall.c
 @@ -1200,9 +1200,72 @@ static inline abi_long copy_from_user_timeval(struct timeval *tv,
@@ -985,6 +985,27 @@ index c1b79ed..0eee1d7 100644
              if (ret >= 0) {
                  ret = get_errno(safe_write(arg1, copy, ret));
              }
+@@ -9505,6 +9628,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+         do_stat:
+ #endif
+             if (!is_error(ret)) {
++#if defined(TARGET_AARCH64) && !defined(TARGET_ABI32)
++                /* AArch64 fstat uses the same 128-byte layout as newfstatat.
++                 * Its guest output still needs the kernel-checked copy: the
++                 * Android access_ok() path validates only address bounds. */
++                return host_to_target_stat64(cpu_env, arg2, &st);
++#else
+                 struct target_stat *target_st;
+ 
+                 if (!lock_user_struct(VERIFY_WRITE, target_st, arg2, 0))
+@@ -9533,6 +9662,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+                            &target_st->target_st_ctime_nsec);
+ #endif
+                 unlock_user_struct(target_st, arg2, 1);
++#endif
+             }
+         }
+         return ret;
 diff --git a/target/arm/cpu.h b/target/arm/cpu.h
 index 4c0e3f8..6d8e88a 100644
 --- a/target/arm/cpu.h

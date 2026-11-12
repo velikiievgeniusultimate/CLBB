@@ -479,6 +479,10 @@ impl Host for Adapter {
         if let Some(sample)=self.fresh().filter(|s|s.frame.hero_id.int()==hero) {
             binding.aim_type=*sample.control_types.get(&button.slot).unwrap_or(&0);
         }
+        if config == "extra:2" && button.skillId == 20080 {
+            let prefix = if self.settings.boolean("hero.bindings.extra:2.override", hero) { "hero" } else { "common" };
+            binding.cast_mode = self.settings.integer(&format!("{prefix}.bindings.extra:2:20080.cast_mode"), hero);
+        }
         binding
     }
     fn cancel_key(&mut self, hero: i32) -> i32 {
@@ -1036,6 +1040,7 @@ impl Runtime {
                     "capability_controls": sample.frame.ui.capability_controls.iter().take(sample.frame.ui.capability_count.min(32) as usize).map(native).collect::<Vec<_>>(),
                 }).to_string()
             }).unwrap_or_else(|| "{\"ready\":false}".into()),
+            "common.battle_spell_id"=>self.host.fresh().and_then(|s|s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize).find(|b|b.kind.as_str()=="extra"&&b.slot.as_str()=="extra:2")).map(|b|b.skill_id.int()).unwrap_or(0).to_string(),
             "hero.linked_controls"=>if self.host.fresh().is_some_and(|s|s.linked.is_some()) {"1".into()}else{"0".into()},
             "hero.skill0_type"|"hero.skill1_type"|"hero.skill2_type"|"hero.skill3_type"=>{
                 let slot=format!("skill:{}",key.as_bytes()[10]as char);

@@ -135,7 +135,7 @@ impl Settings {
             if let Some((slot, field)) = tail.rsplit_once('.') {
                 if !(slot.starts_with("skill:") || slot.starts_with("combo:"))
                     && field != "override"
-                    && !self.boolean(&format!("hero.bindings.{slot}.override"), hero)
+                    && !self.boolean(&format!("hero.bindings.{}.override", if slot == "extra:2:20080" { "extra:2" } else { slot }), hero)
                 {
                     return self.get(&format!("common.bindings.{slot}.{field}"), hero);
                 }
@@ -221,6 +221,7 @@ impl Settings {
             return "false".into();
         }
         if field == "cast_mode" {
+            if slot == "extra:2:20080" { return "1".into(); }
             if scope == "hero" && slot != "skill:1:2521" {
                 if self.native_charge_slots.get(&hero).is_some_and(|slots| slots.contains(slot)) {
                     return "0".into();
@@ -778,5 +779,22 @@ mod tests {
         s.import_legacy("[common]\nbuttons\\extra%3A2\\key=70\n[heroes]\n25\\buttons\\skill%3A1%3A2521\\castMode=1\n[movement]\nholdMs=150");
         assert_eq!(s.binding(25, "extra:2").key, 70);
         assert_eq!(s.get("movement.hold_ms", 25), "150");
+    }
+}
+
+#[cfg(test)]
+mod purify_settings_tests {
+    use super::*;
+    #[test]
+    fn purify_mode_is_shared_without_changing_aimed_spells() {
+        let mut s=Settings::default();
+        assert_eq!(s.integer("common.bindings.extra:2:20080.cast_mode",73),1);
+        s.values.insert("common.bindings.extra:2:20080.cast_mode".into(),"0".into());
+        s.values.insert("common.bindings.extra:2.cast_mode".into(),"3".into());
+        for hero in [25,73] {assert_eq!(s.integer("hero.bindings.extra:2:20080.cast_mode",hero),0);assert_eq!(s.binding(hero,"extra:2").cast_mode,3);}
+        s.values.insert("heroes.73.bindings.extra:2.override".into(),"true".into());
+        s.values.insert("heroes.73.bindings.extra:2:20080.cast_mode".into(),"1".into());
+        assert_eq!(s.integer("hero.bindings.extra:2:20080.cast_mode",73),1);
+        assert_eq!(s.integer("hero.bindings.extra:2:20080.cast_mode",25),0);
     }
 }

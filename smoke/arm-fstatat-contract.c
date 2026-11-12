@@ -1,6 +1,7 @@
-/* Self-authored raw AArch64 syscall 79 write-access regression fixture. */
+/* Self-authored raw AArch64 syscall 79/80 write-access regression fixture. */
 #include <jni.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,9 +22,25 @@ static long raw_newfstatat(void *output) {
     return x0; /* Raw Linux negative errno, not libc's -1/errno conversion. */
 }
 
-JNIEXPORT jlong JNICALL Java_CLBBArmFstatatContract_run(JNIEnv *env, jclass klass, jint scenario) {
+static long raw_fstat(int fd, void *output) {
+    register long x0 __asm__("x0") = fd;
+    register long x1 __asm__("x1") = (long)output;
+    register long x8 __asm__("x8") = 80; /* __NR_fstat */
+    __asm__ volatile("svc #0" : "+r"(x0)
+                     : "r"(x1), "r"(x8) : "memory", "cc");
+    return x0;
+}
+
+JNIEXPORT jlong JNICALL Java_CLBBArmFstatatContract_run(JNIEnv *env, jclass klass,
+                                                      jint scenario, jint operation) {
     (void)env; (void)klass;
-    if (scenario < 0 || scenario > 6) return -1001;
+    if (scenario < 0 || scenario > 7) return -1001;
+    if (operation != 79 && operation != 80) return -1020;
+    int fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1021;
+    struct stat reference;
+    memset(&reference, 0, sizeof(reference));
+    if (raw_newfstatat(&reference) != 0) return -1022;
     long size = sysconf(_SC_PAGESIZE);
     if (size < 4096) return -1002;
     size_t page = (size_t)size;
@@ -52,17 +69,21 @@ JNIEXPORT jlong JNICALL Java_CLBBArmFstatatContract_run(JNIEnv *env, jclass klas
     if (scenario == 1 && mprotect(middle, page, PROT_READ)) return -1005;
     if (scenario == 2 && munmap(middle, page)) return -1006;
     if (scenario == 3) output = middle + page - sizeof(struct stat) / 2;
-    printf("CLBB_FSTATAT_ENTER_CASE=%d\nCLBB_FSTATAT_OUTPUT_BYTES=%zu\n", scenario, sizeof(struct stat));
+    if (scenario == 7) output = NULL;
+    printf("CLBB_FSTATAT_ENTER_CASE=%d\nCLBB_FSTATAT_SYSCALL=%d\nCLBB_FSTATAT_OUTPUT_BYTES=%zu\n",
+           scenario, operation, sizeof(struct stat));
     fflush(stdout);
-    long result = raw_newfstatat(output);
+    long result = operation == 79 ? raw_newfstatat(output) : raw_fstat(fd, output);
     if (scenario == 4 && mprotect(middle, page, PROT_READ | PROT_WRITE)) return -1013;
     /* Successful copies retain the ABI layout and exact output length. */
-    if ((scenario == 0 || scenario >= 4) && result == 0) {
+    if ((scenario == 0 || (scenario >= 4 && scenario <= 6)) && result == 0) {
         struct stat *converted = output;
         if (!S_ISCHR(converted->st_mode) || converted->st_size != 0) result = -1007;
+        if (memcmp(converted, &reference, sizeof(reference)) != 0) result = -1023;
         if (((unsigned char *)output)[sizeof(struct stat)] != 0xa5) result = -1014;
         if (smc_probe && smc_probe() != 11) result = -1015;
     }
+    if (close(fd)) return -1024;
     if (munmap(region, 3 * page)) return -1008;
     return (jlong)result;
 }

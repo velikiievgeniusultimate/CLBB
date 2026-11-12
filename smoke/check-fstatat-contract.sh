@@ -23,19 +23,22 @@ printf '%s\n' 'CLBB_ARM64_FSTATAT_CONTRACT_BUILT=1'
 if [[ "${1:-}" != --run ]]; then exit 0; fi
 ulimit -c 0
 : > "$FSTATAT_OUT/status.tsv"
-FSTATAT_NAMES=(valid_rw readonly unmapped cross_page write_only valid_cross_page tracked_smc)
-for FSTATAT_CASE in 0 1 2 3 4 5 6; do
+FSTATAT_NAMES=(valid_rw readonly unmapped cross_page write_only valid_cross_page tracked_smc null_output)
+for FSTATAT_OPERATION in 79 80; do
+for FSTATAT_CASE in 0 1 2 3 4 5 6 7; do
     FSTATAT_NAME="${FSTATAT_NAMES[$FSTATAT_CASE]}"
+    FSTATAT_LOG="${FSTATAT_OPERATION}_${FSTATAT_NAME}.log"
     # Preserve the failure status and complete crash log; continue with the
     # remaining cases. Core dumps are disabled to avoid large unrelated files.
     set +e
     NB_QEMU_SYSROOT="$CLBB_ATL_PREFIX/share/libnb-qemu-guest" \
       timeout -k 1s 8s dalvikvm -Xforce-nb-testing -XX:NativeBridge="$CLBB_ATL_PREFIX/lib/libnb-qemu.so" \
-      -cp "$FSTATAT_OUT/test.jar" CLBBArmFstatatContract "$FSTATAT_OUT/libclbb-arm-fstatat-contract.so" "$FSTATAT_CASE" \
-      > "$FSTATAT_OUT/$FSTATAT_NAME.log" 2>&1
+      -cp "$FSTATAT_OUT/test.jar" CLBBArmFstatatContract "$FSTATAT_OUT/libclbb-arm-fstatat-contract.so" "$FSTATAT_CASE" "$FSTATAT_OPERATION" \
+      > "$FSTATAT_OUT/$FSTATAT_LOG" 2>&1
     FSTATAT_STATUS=$?
     set -e
-    printf '%s\t%s\n' "$FSTATAT_NAME" "$FSTATAT_STATUS" >> "$FSTATAT_OUT/status.tsv"
+    printf '%s\t%s\t%s\n' "$FSTATAT_OPERATION" "$FSTATAT_NAME" "$FSTATAT_STATUS" >> "$FSTATAT_OUT/status.tsv"
+done
 done
 python - "$FSTATAT_OUT" <<'PY'
 import json
@@ -45,22 +48,28 @@ import sys
 out = Path(sys.argv[1])
 rows = []
 for line in (out / 'status.tsv').read_text().splitlines():
-    name, exit_code = line.split('\t')
-    text = (out / (name + '.log')).read_text(errors='replace').replace('\0', '')
+    operation, name, exit_code = line.split('\t')
+    log = out / (operation + '_' + name + '.log')
+    text = log.read_text(errors='replace').replace('\0', '')
     result = re.findall(r'^CLBB_FSTATAT_RESULT=(-?\d+)$', text, re.M)
     result = int(result[-1]) if result else None
-    expected = -14 if name in ('readonly', 'unmapped', 'cross_page') else 0
+    expected = -14 if name in ('readonly', 'unmapped', 'cross_page', 'null_output') else 0
+    tested = re.findall(r'^CLBB_FSTATAT_TESTED_SYSCALL=(79|80)$', text, re.M)
+    native = re.findall(r'^CLBB_FSTATAT_SYSCALL=(79|80)$', text, re.M)
+    output_bytes = re.findall(r'^CLBB_FSTATAT_OUTPUT_BYTES=(\d+)$', text, re.M)
     crash = 'Fatal signal' in text or 'Segmentation fault' in text
-    row = dict(case=name, exit_code=int(exit_code), expected_raw_result=expected,
+    row = dict(syscall_number=int(operation), operation='newfstatat' if operation == '79' else 'fstat',
+               case=name, exit_code=int(exit_code), expected_raw_result=expected,
                actual_raw_result=result, crash_reported=crash,
-               passed=int(exit_code) == 0 and result == expected,
-               log=str((out / (name + '.log')).resolve()))
+               passed=int(exit_code) == 0 and result == expected and tested == [operation]
+                      and native == [operation] and output_bytes == ['128'] and not crash,
+               log=str(log.resolve()))
     rows.append(row)
-report = dict(syscall_number=79, operation='newfstatat', fixture_stat_bytes=128,
-              scenarios=rows, passed=all(row['passed'] for row in rows))
+report = dict(syscall_numbers=[79, 80], operations=['newfstatat', 'fstat'], fixture_stat_bytes=128,
+              scenarios=rows, passed=len(rows) == 16 and all(row['passed'] for row in rows))
 (out / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
 for row in rows:
-    print('CLBB_FSTATAT_CASE=' + row['case'] + ' EXIT=' + str(row['exit_code']) +
+    print('CLBB_FSTATAT_SYSCALL=' + str(row['syscall_number']) + ' CASE=' + row['case'] + ' EXIT=' + str(row['exit_code']) +
           ' RESULT=' + str(row['actual_raw_result']) + ' EXPECTED=' + str(row['expected_raw_result']) +
           ' CRASH=' + str(int(row['crash_reported'])) + ' PASS=' + str(int(row['passed'])))
 print('CLBB_FSTATAT_CONTRACT_OK=' + str(int(report['passed'])))
