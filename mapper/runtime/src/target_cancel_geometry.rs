@@ -522,4 +522,22 @@ mod tests {
         real(&mut r.memory.0.borrow_mut(), MATRIX + 12 * 4, 0.1);
         assert!(check(&r, &c).is_err());
     }
+    #[test]
+    fn owned_widget_refreshes_both_ways_across_container_reparenting() {
+        let mut r=fixture();let mut w=unity::Widget::new(&mut r,SPRITE).unwrap();
+        let(view,projection)=unity::matrices(&r.read(MATRIX,128).unwrap()).unwrap();
+        close(w.geometry(&r,&view,&projection,true).unwrap().0,[0.55,0.4]);
+        {
+            let mut b=r.memory.0.borrow_mut();i32put(&mut b,PARENTS,1);i32put(&mut b,PARENTS+4,-1);
+            real(&mut b,TRS+48,2.);real(&mut b,TRS+48+28,1.);
+            for i in 8..=10{real(&mut b,TRS+48+i*4,1.);}
+        }
+        assert!(w.path.validate(&r).is_err());w.refresh_path(&mut r).unwrap();
+        close(w.geometry(&r,&view,&projection,true).unwrap().0,[0.65,0.4]);
+        i32put(&mut r.memory.0.borrow_mut(),PARENTS,-1);w.refresh_path(&mut r).unwrap();
+        close(w.geometry(&r,&view,&projection,true).unwrap().0,[0.55,0.4]);
+        u64put(&mut r.memory.0.borrow_mut(),SPRITE+16,0);
+        assert!(w.refresh_path(&mut r).is_err(),"destroyed widgets remain rejected");
+    }
+
 }

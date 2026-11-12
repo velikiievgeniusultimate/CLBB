@@ -135,6 +135,12 @@ pub struct Widget {
     pub region: Option<u64>,
 }
 impl Widget {
+    /// A widget may legitimately move between native UI containers. The caller
+    /// must still validate its managed ownership before refreshing this path.
+    pub fn refresh_path<M:Memory>(&mut self,r:&mut Reflection<M>)->Result<()> {
+        if self.path.validate(r).is_err(){*self=Self::new(r,self.object)?;}
+        Ok(())
+    }
     pub fn new<M: Memory>(r: &mut Reflection<M>, object: u64) -> Result<Self> {
         Ok(Self {
             object,

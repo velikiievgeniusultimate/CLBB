@@ -10,8 +10,8 @@ use std::{
 };
 fn run() -> Result<(), String> {
     let a = std::env::args().collect::<Vec<_>>();
-    if a.len() != 3 {
-        return Err("usage: portrait-picker-audit PID OUTPUT".into());
+    if !matches!(a.len(), 3 | 4) || (a.len() == 4 && a[3] != "--continuous") {
+        return Err("usage: portrait-picker-audit PID OUTPUT [--continuous]".into());
     }
     let pid: u32 = a[1].parse().map_err(|_| "invalid pid")?;
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -28,7 +28,9 @@ fn run() -> Result<(), String> {
         ProcessMemory::diagnostic(pid)?,
         format!("portrait-watch:{pid}"),
     )?;
-    let end = Instant::now() + Duration::from_secs(180);
+    let continuous = a.len() == 4;
+    let end = Instant::now() + Duration::from_secs(if continuous { 40 } else { 180 });
+    let mut last_error = String::new();
     let mut ready = false;
     let mut maximum = 0;
     let mut print_at = Instant::now();
@@ -41,7 +43,8 @@ fn run() -> Result<(), String> {
                 std::fs::write(format!("{}.ready", a[2]), b"ready").map_err(|e| e.to_string())?;
                 ready = true;
             }
-            if print_at.elapsed() > Duration::from_secs(2) {
+            if print_at.elapsed() > Duration::from_secs(2) || last_error != source.portrait_error {
+                last_error = source.portrait_error.clone();
                 eprintln!("native={:?} error={}", s.portrait, source.portrait_error);
                 print_at = Instant::now();
             }
@@ -52,7 +55,7 @@ fn run() -> Result<(), String> {
                     std::fs::write(&a[2], serde_json::to_vec_pretty(&value).unwrap())
                         .map_err(|e| e.to_string())?;
                 }
-                if maximum == 5 {
+                if maximum == 5 && !continuous {
                     println!("captured all five portraits: {}", a[2]);
                     return Ok(());
                 }

@@ -214,7 +214,12 @@ impl Plan {
         let entities = array(r, self.entities, "ShowEntity", consumed)?;
         let (view, projection) = unity::matrices(&capture(r, consumed, matrix, 128)?)?;
         let mut portraits = Vec::new();
-        for (index, i) in self.icons.iter().enumerate().filter(|_| current == active) {
+        for (index, i) in self
+            .icons
+            .iter_mut()
+            .enumerate()
+            .filter(|_| current == active)
+        {
             check(r, &i.checks)?;
             consumed.extend(i.checks.iter().cloned());
             if !boolean(r, consumed, i.active)?
@@ -237,6 +242,11 @@ impl Plan {
             if portraits.iter().any(|p: &Portrait| p.guid == id) {
                 return Err("portrait_duplicate_recipient".into());
             }
+            // Opening/closing SimpleLock reparents the same owned portrait
+            // between its preview and expanded containers. Rebuild its path,
+            // never revoke an otherwise valid target for the entire hold.
+            i.widget.refresh_path(r)?;
+            consumed.extend(i.widget.path.checks.iter().cloned());
             if !i.widget.visible(r)? {
                 continue;
             }
