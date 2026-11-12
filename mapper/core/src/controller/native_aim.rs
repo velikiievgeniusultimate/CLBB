@@ -3,7 +3,7 @@
 use super::snapshot::{Frame, Number, Vector2, Vector3};
 use super::{
     Button, Controller, DirectRange, DirectStartup, Host, SkillBehavior, SkillVariant, distance,
-    finite,
+    finite, MAX_SKILL_ID,
 };
 use crate::{AngularRadialSolver, Point};
 use std::collections::BTreeSet;
@@ -98,9 +98,9 @@ impl Controller {
                 || base.value != base.int() as f64
                 || active.value != active.int() as f64
                 || base.int() <= 0
-                || base.int() > 1_000_000
+                || base.int() > MAX_SKILL_ID
                 || active.int() < 0
-                || active.int() > 1_000_000
+                || active.int() > MAX_SKILL_ID
             {
                 return;
             }
@@ -152,6 +152,36 @@ impl Controller {
             }
         }
         SkillBehavior::AwaitVariant
+    }
+    /// A held button can switch its future cast/release variant while its
+    /// owned aiming indicator still belongs to the base skill. Geometry may
+    /// authorize the first MOVE before native unit-direction feedback exists;
+    /// sample_direction_input separately requires the full receipt contract.
+    pub(crate) fn direction_geometry_skill_id(&self, button: &Button, frame: &Frame) -> i32 {
+        if button.aimType != 2 || button.kind != "skill" {
+            return self.measured_direction_skill_id(button);
+        }
+        let actual = frame.skill_id;
+        let variant = self.active_variant(button);
+        if self.skillTouch_ < 0
+            || self.skillBehavior_ != SkillBehavior::Direction
+            || self.frameActiveSlot_ != self.activeSlot_
+            || frame.ui.active_slot.as_str() != self.activeSlot_
+            || button.slot != self.activeSlot_
+            || variant <= 0
+            || !actual.is_number()
+            || actual.value != actual.int() as f64
+            || actual.int() <= 0
+            || actual.int() != self.coreSkill_
+            || (actual.int() != button.skillId && actual.int() != variant)
+            || frame.token.as_str() != self.frameEpoch_
+            || frame.hero_id.int() != self.heroId_
+            || frame.ui.hero_id.int() != self.heroId_
+            || self.frameCoreSampleStartNs_ < self.castStartedNs_
+        {
+            return 0;
+        }
+        actual.int()
     }
     pub(crate) fn direction_point(&mut self, host: &mut impl Host) -> Option<Point> {
         if !self.frameCameraReady_ {
@@ -322,7 +352,7 @@ impl Controller {
         self.directionMatchedSequence_ = 0;
         let expected = self
             .find_button(&self.activeSlot_)
-            .map_or(0, |button| self.measured_direction_skill_id(button));
+            .map_or(0, |button| self.direction_geometry_skill_id(button, frame));
         if self.skillTouch_ < 0 {return;}
         if !self.directionGeometryFresh_ {reject!("geometry_not_fresh");}
         if expected<=0 {reject!("no_measured_direction_contract");}
@@ -537,66 +567,85 @@ impl Controller {
             && (self.aimSkillId_ == 2510 || self.aimSkillId_ == 2511)
             || (self.heroId_ == 84 && self.aimSkillId_ == 8425
                 && self.logicalSource_ == POINT_SOURCE);
+        // Newly authorized fixed ranges are witnesses for this coherent
+        // sample only. Charge policy can change on the next sample, so a
+        // generic native range must never survive as an unqualified cache or
+        // provisional startup prediction. Historical fixed Kagura/Ling paths
+        // keep their already validated cache behavior.
+        if !native_q {
+            self.directRanges_.retain(|entry| {
+                !(entry.hero == self.heroId_
+                    && entry.skill == self.aimSkillId_
+                    && entry.slot == self.activeSlot_
+                    && entry.source == self.logicalSource_
+                    && entry.resolution == self.androidSize_
+                    && entry.native)
+            });
+            self.directStartups_.retain(|entry| entry.slot != self.activeSlot_);
+        }
         let cached = self.directRanges_.iter().position(|entry| {
             entry.hero == self.heroId_
                 && entry.skill == self.aimSkillId_
                 && entry.slot == self.activeSlot_
                 && entry.source == self.logicalSource_
                 && entry.resolution == self.androidSize_
-                && (!native_q || entry.native)
+                && entry.native == native_q
         });
-        if let Some(i) = cached {
-            range = self.directRanges_[i].range;
-        }
         if native_q {
-            if !logical.world_range.missing()
-                || logical.world_range_source_present.get()
-                || !logical.world_range_source.missing()
-            {
+            if let Some(i) = cached {
+                range = self.directRanges_[i].range;
+            }
+        }
+        let witness_fields = !logical.world_range.missing()
+            || logical.world_range_source_present.get()
+            || !logical.world_range_source.missing();
+        if !logical.world_range_source_present.missing()
+            && !logical.world_range_source_present.is_bool()
+        {
+            self.trace(host, "direct_metadata_rejected", "invalid_configuration_range_presence");
+            return;
+        }
+        if native_q || witness_fields {
+            if witness_fields {
                 if logical.world_range_source.as_str() != RANGE_SOURCE
+                    || (!native_q && !logical.world_range_source_present.get())
                     || !logical.world_range.is_number()
                     || !logical.world_range.value.is_finite()
                     || logical.world_range.value < 1e-4
                     || logical.world_range.value > 1e4
                 {
-                    self.trace(
-                        host,
-                        "direct_metadata_rejected",
-                        "invalid_configuration_range",
-                    );
+                    self.trace(host, "direct_metadata_rejected", "invalid_configuration_range");
                     return;
                 }
                 range = logical.world_range.value;
                 native_fresh = true;
-                if let Some(i) = cached {
-                    self.directRanges_[i].range = range;
-                } else {
-                    if self.directRanges_.len() >= 32 {
-                        self.directRanges_.remove(0);
+                if native_q {
+                    if let Some(i) = cached {
+                        self.directRanges_[i].range = range;
+                    } else {
+                        if self.directRanges_.len() >= 32 {
+                            self.directRanges_.remove(0);
+                        }
+                        self.directRanges_.push(DirectRange {
+                            hero: self.heroId_, skill: self.aimSkillId_,
+                            slot: self.activeSlot_.clone(), source: self.logicalSource_.clone(),
+                            resolution: self.androidSize_, range, native: true,
+                        });
                     }
-                    self.directRanges_.push(DirectRange {
-                        hero: self.heroId_,
-                        skill: self.aimSkillId_,
-                        slot: self.activeSlot_.clone(),
-                        source: self.logicalSource_.clone(),
-                        resolution: self.androidSize_,
-                        range,
-                        native: true,
-                    });
                 }
             }
             if range <= 0. {
-                self.trace(
-                    host,
-                    "direct_metadata_rejected",
-                    "await_native_configuration_range",
-                );
+                self.trace(host, "direct_metadata_rejected", "await_native_configuration_range");
                 return;
             }
             self.directRangeSource_ = RANGE_SOURCE.into();
         } else {
             let observed = self.logicalObserved_.length();
-            if logical.drag_ratio.is_number()
+            // A protected/first-drag sample may retain an older processed
+            // offset. It can bootstrap from a fresh authorized native range,
+            // but cannot estimate today's range from yesterday's offset.
+            if self.logicalSampleFresh_
+                && logical.drag_ratio.is_number()
                 && ratio.is_finite()
                 && ratio >= 1e-4
                 && ratio <= 1.001
@@ -613,13 +662,9 @@ impl Controller {
                             self.directRanges_.remove(0);
                         }
                         self.directRanges_.push(DirectRange {
-                            hero: self.heroId_,
-                            skill: self.aimSkillId_,
-                            slot: self.activeSlot_.clone(),
-                            source: self.logicalSource_.clone(),
-                            resolution: self.androidSize_,
-                            range,
-                            native: false,
+                            hero: self.heroId_, skill: self.aimSkillId_,
+                            slot: self.activeSlot_.clone(), source: self.logicalSource_.clone(),
+                            resolution: self.androidSize_, range, native: false,
                         });
                     }
                 }
@@ -652,7 +697,8 @@ impl Controller {
             }
             let plane = logical.visual_plane_y;
             if let Some(button) = self.find_button(&self.activeSlot_).cloned() {
-                if !self.frameEpoch_.is_empty()
+                if (native_q || !native_fresh)
+                    && !self.frameEpoch_.is_empty()
                     && frame.token_nonempty.get()
                     && plane.is_number()
                     && plane.value.is_finite()
@@ -682,7 +728,7 @@ impl Controller {
             self.trace(
                 host,
                 "direct_metadata",
-                if native_q {
+                if native_q || native_fresh {
                     if native_fresh {
                         "native_configuration_range"
                     } else {
@@ -1048,6 +1094,7 @@ mod tests {
         plane_world: Option<Point>,
         skill_world: Option<Point>,
         released: Vec<u64>,
+        binding_aim_type: u8,
     }
     impl Host for TestHost {
         fn begin(&mut self, _: Point) -> i32 {
@@ -1087,8 +1134,8 @@ mod tests {
         fn navigation(&mut self, _: Point, _: Point, _: bool) -> Result<Vec<Point>, String> {
             Ok(vec![])
         }
-        fn binding(&mut self, _: i32, _: &Button, _: &str) -> Binding {
-            Binding::default()
+        fn binding(&mut self, _: i32, button: &Button, _: &str) -> Binding {
+            Binding { key: button.key, aim_type: self.binding_aim_type, ..Binding::default() }
         }
         fn cancel_key(&mut self, _: i32) -> i32 {
             84
@@ -1326,6 +1373,122 @@ mod tests {
             "only native valid raw receipt ends the bootstrap"
         );
     }
+    fn generic_point_range_fixture(hero: i32, skill: i32) -> (Controller, Frame, TestHost) {
+        let (mut c, mut f, h) = setup();
+        c.heroId_ = hero;
+        c.coreSkill_ = skill;
+        c.aimSkillId_ = skill;
+        c.aimReady_ = false;
+        c.buttons_[0].skillId = skill;
+        f.hero_id = n(hero as f64);
+        f.skill_id = n(skill as f64);
+        f.logical.skill_id = f.skill_id;
+        f.logical.source = text(POINT_SOURCE);
+        f.logical.ready = flag(false);
+        f.logical.input_ready = flag(true);
+        f.logical.valid_drag = flag(false);
+        f.logical.first_drag = flag(true);
+        f.logical.offset_xz = Default::default();
+        f.logical.target_render_xyz = Default::default();
+        f.logical.drag_ratio = Number::default();
+        f.logical.world_range = n(3.);
+        (c, f, h)
+    }
+    #[test]
+    fn generic_authorized_native_range_bootstraps_before_processed_offset_exists() {
+        for (hero, skill) in [(118, 11810), (937, 93760)] {
+            let (mut c, f, mut h) = generic_point_range_fixture(hero, skill);
+            c.select_logical_coordinates(&mut h, &f);
+            assert!(c.logicalInputFresh_ && !c.logicalSampleFresh_);
+            c.configure_direct(&mut h, &f);
+            assert!(c.directGeometryFresh_);
+            assert_eq!(c.direct_.ready, 1);
+            assert_eq!(c.direct_.world_range, 3.);
+            assert_eq!(c.directRangeSource_, RANGE_SOURCE);
+            assert!(c.directRanges_.is_empty(), "generic fixed metadata is a current witness, not a reusable fixed-range cache");
+            assert!(c.directStartups_.is_empty(), "a later unknown charge policy must not reuse provisional fixed metadata");
+        }
+    }
+    #[test]
+    fn generic_native_range_malformed_or_unauthorized_witness_never_falls_back() {
+        for case in 0..10 {
+            let (mut c, mut f, mut h) = generic_point_range_fixture(118, 11810);
+            // Even a plausible current observed range must not conceal an
+            // explicitly malformed or contradictory native witness.
+            f.logical.ready = flag(true);
+            f.logical.valid_drag = flag(true);
+            f.logical.first_drag = flag(false);
+            f.logical.offset_xz = v2(1., 2.);
+            f.logical.target_render_xyz = v3(11., 0.1, 22.);
+            f.logical.drag_ratio = n(0.5);
+            match case {
+                0 => f.logical.world_range = Number { kind: 2, value: 3. },
+                1 => f.logical.world_range = n(f64::NAN),
+                2 => f.logical.world_range = n(-1.),
+                3 => f.logical.world_range = n(0.),
+                4 => f.logical.world_range = n(10_001.),
+                5 => f.logical.world_range_source = text("UnknownRangeSource"),
+                6 => f.logical.world_range_source_present = flag(false),
+                7 => f.logical.world_range_source_present = Flag::default(),
+                8 => f.logical.world_range_source_present.value = 2,
+                _ => f.logical.world_range_source = Text::default(),
+            }
+            c.select_logical_coordinates(&mut h, &f);
+            assert!(c.logicalSampleFresh_);
+            c.configure_direct(&mut h, &f);
+            assert_eq!(c.direct_.ready, 0, "case {case}: malformed fixed metadata cannot silently become a ratio/cache model");
+            assert!(c.directRanges_.is_empty());
+        }
+    }
+    #[test]
+    fn revoked_generic_fixed_range_cannot_reuse_native_or_stale_observed_cache() {
+        for permission in [Flag::default(), flag(false)] {
+            let (mut c, mut f, mut h) = generic_point_range_fixture(118, 11810);
+            c.select_logical_coordinates(&mut h, &f);
+            c.configure_direct(&mut h, &f);
+            assert_eq!(c.direct_.world_range, 3.);
+            for (native, range) in [(true, 3.), (false, 9.)] {
+                c.directRanges_.push(DirectRange {
+                    hero: c.heroId_, skill: c.aimSkillId_, slot: c.activeSlot_.clone(),
+                    source: c.logicalSource_.clone(), resolution: c.androidSize_, range, native,
+                });
+            }
+            c.directStartups_.push(DirectStartup { slot: c.activeSlot_.clone(), range: 3., ..Default::default() });
+            f.logical.world_range = Number::default();
+            f.logical.world_range_source = Text::default();
+            f.logical.world_range_source_present = permission;
+            f.logical.drag_ratio = n(0.5);
+            c.logicalObserved_ = Point::new(300., 400.);
+            c.configure_direct(&mut h, &f);
+            assert_eq!(c.direct_.ready, 0, "protected input cannot turn stale processed offsets or old fixed metadata into today's range");
+            assert!(c.directRanges_.iter().all(|entry| !entry.native));
+            assert!(c.directStartups_.is_empty());
+            f.logical.ready = flag(true);
+            f.logical.valid_drag = flag(true);
+            f.logical.first_drag = flag(false);
+            f.logical.offset_xz = v2(1., 2.);
+            f.logical.target_render_xyz = v3(11., 0.1, 22.);
+            c.select_logical_coordinates(&mut h, &f);
+            assert!(c.logicalSampleFresh_);
+            c.configure_direct(&mut h, &f);
+            assert_eq!(c.direct_.ready, 1);
+            assert!((c.direct_.world_range - 5f64.sqrt() / 0.5).abs() < 1e-12);
+            assert_eq!(c.directRangeSource_, "offset_over_drag_ratio");
+            assert!(c.directRanges_.iter().all(|entry| !entry.native));
+        }
+    }
+    #[test]
+    fn generic_native_range_requires_a_fresh_same_cast_logical_witness() {
+        let (mut c, mut f, mut h) = generic_point_range_fixture(118, 11810);
+        f.logical.sample_start_ns = n(1_500_000_000.);
+        f.logical.sample_end_ns = n(1_501_000_000.);
+        f.logical.joystick.sample_start_ns = f.logical.sample_start_ns;
+        f.logical.joystick.sample_end_ns = f.logical.sample_end_ns;
+        c.select_logical_coordinates(&mut h, &f);
+        assert!(!c.logicalInputFresh_);
+        c.configure_direct(&mut h, &f);
+        assert_eq!(c.direct_.ready, 0);
+    }
     #[test]
     fn native_q_never_learns_poisoned_processed_offset_ratio() {
         let (mut c, mut f, mut h) = setup();
@@ -1432,6 +1595,72 @@ mod tests {
         assert!(c.skillVariants_.is_empty());
     }
     #[test]
+    fn seven_digit_native_variants_preserve_integer_bounds_and_match_ownership() {
+        let (mut c,mut f,_)=setup();c.heroId_=131;
+        let mut state=super::super::snapshot::VariantState {
+            ready:flag(true),source:text("ShowSkillData.m_TranID"),token:text("token"),hero_id:n(131.),
+            sample_start_ns:n(1_990_000_000.),sample_end_ns:n(1_995_000_000.),count:1,..Default::default()
+        };
+        state.buttons[0].slot=text("skill:0");
+        for (base,active,accepted) in [(1_013_110.,2_013_110.,true),(10_000_000.,10_000_000.,true),
+            (1_013_110.,0.,true),(0.,2_013_110.,false),(-1.,2_013_110.,false),
+            (10_000_001.,2_013_110.,false),(1_013_110.,10_000_001.,false),
+            (1_013_110.,-1.,false),(1_013_110.5,2_013_110.,false),(1_013_110.,f64::NAN,false)] {
+            state.buttons[0].base_skill_id=n(base);state.buttons[0].active_skill_id=n(active);
+            f.skill_state=state;c.ingest_skill_variants(&f);
+            assert_eq!(c.skillVariants_.len(),usize::from(accepted),"base={base}, active={active}");
+            if accepted {assert_eq!(c.skillVariants_[0].active,active as i32);}
+        }
+        state.buttons[0].base_skill_id=n(1_013_110.);state.buttons[0].active_skill_id=n(2_013_110.);
+        for case in ["base_type","active_type","hero","epoch","duplicate"] {
+            f.skill_state=state;
+            match case {
+                "base_type"=>f.skill_state.buttons[0].base_skill_id.kind=2,
+                "active_type"=>f.skill_state.buttons[0].active_skill_id.kind=0,
+                "hero"=>f.skill_state.hero_id=n(130.),
+                "epoch"=>f.skill_state.token=text("different-match"),
+                "duplicate"=>{f.skill_state.count=2;f.skill_state.buttons[1]=f.skill_state.buttons[0];},
+                _=>unreachable!(),
+            }
+            c.ingest_skill_variants(&f);assert!(c.skillVariants_.is_empty(),"{case}");
+        }
+    }
+    #[test]
+    fn seven_digit_cooldown_ids_use_the_same_bound_without_bypassing_typed_owner_checks() {
+        let (mut c,_,_)=setup();c.heroId_=131;c.cooldownSeen_=true;
+        let button=Button {slot:"skill:0".into(),kind:"skill".into(),skillId:1_013_110,..Default::default()};
+        let mut state=super::super::snapshot::CooldownState {
+            present:flag(true),ready:flag(true),coherent:flag(true),source:text("VirtualButton.m_CdCoolDown"),
+            token:text("token"),hero_id:n(131.),sample_start_ns:n(1_990_000_000.),sample_end_ns:n(1_995_000_000.),count:1,..Default::default()
+        };
+        state.buttons[0]=super::super::snapshot::CooldownRow {
+            slot:text("skill:0"),base_skill_id:n(1_013_110.),active_skill_id:n(2_013_110.),ready:flag(true),on_cooldown:flag(false)
+        };
+        for active in [1_013_110.,2_013_110.,10_000_000.] {
+            state.buttons[0].active_skill_id=n(active);c.cooldownState_=state;
+            assert_eq!(c.cooldown_block(&button,0),"");
+            c.cooldownState_.buttons[0].on_cooldown=flag(true);
+            assert_eq!(c.cooldown_block(&button,0),"active");
+        }
+        state.buttons[0].active_skill_id=n(2_013_110.);
+        for case in ["zero","negative","over_bound","fraction","type","base","hero","epoch","duplicate"] {
+            c.cooldownState_=state;
+            match case {
+                "zero"=>c.cooldownState_.buttons[0].active_skill_id=n(0.),
+                "negative"=>c.cooldownState_.buttons[0].active_skill_id=n(-1.),
+                "over_bound"=>c.cooldownState_.buttons[0].active_skill_id=n(10_000_001.),
+                "fraction"=>c.cooldownState_.buttons[0].active_skill_id=n(2_013_110.5),
+                "type"=>c.cooldownState_.buttons[0].active_skill_id.kind=2,
+                "base"=>c.cooldownState_.buttons[0].base_skill_id=n(0.),
+                "hero"=>c.cooldownState_.hero_id=n(130.),
+                "epoch"=>c.cooldownState_.token=text("different-match"),
+                "duplicate"=>{c.cooldownState_.count=2;c.cooldownState_.buttons[1]=c.cooldownState_.buttons[0];},
+                _=>unreachable!(),
+            }
+            assert_eq!(c.cooldown_block(&button,0),"unknown","{case}");
+        }
+    }
+    #[test]
     fn empty_process_identity_never_warms_startup_geometry() {
         let (mut c, mut f, mut h) = setup();
         f.token_nonempty = flag(false);
@@ -1465,6 +1694,219 @@ mod tests {
         assert_eq!(c.direct_.ready, 0);
     }
 
+    fn held_variant_direction_fixture() -> (Controller, Frame, TestHost) {
+        let mut c = Controller::new();
+        c.enabled_ = true;
+        c.ready_ = true;
+        c.now_ = 1_980_000_000;
+        c.castStartedNs_ = 1_900_000_000;
+        c.heroId_ = 126;
+        c.traceEnabled_ = true;
+        c.frameEpoch_ = "token".into();
+        c.skillTouch_ = 3;
+        c.skillKey_ = 81;
+        c.skillKeyHeld_ = true;
+        c.skillBehavior_ = SkillBehavior::Direction;
+        c.activeSlot_ = "skill:0".into();
+        c.androidSize_ = Point::new(1000., 1000.);
+        c.skillPoint_ = Point::new(0.6005, 0.5005);
+        c.record_skill_touch(c.skillPoint_, false, false);
+        c.buttons_.push(Button { slot: "skill:0".into(), kind: "skill".into(),
+            skillId: 12610, key: 81, aimType: 2, available: true, ..Button::default() });
+        let mut f = Frame::default();
+        f.ready = flag(true);
+        f.token = text("token");
+        f.token_string = flag(true);
+        f.token_nonempty = flag(true);
+        f.hero_id = n(126.);
+        f.time_ns = n(2_000_000_000.);
+        f.sample_duration_ms = n(1.);
+        f.skill_id = n(12610.);
+        f.hero_render_xyz = v3(0., 0., 0.);
+        f.view_matrix = Vector16 { values: [n(0.); 16], count: 16 };
+        f.view_matrix.values[0] = n(1.);
+        f.view_matrix.values[9] = n(-1.);
+        f.ui.ready = flag(true);
+        f.ui.hero_id = n(126.);
+        f.ui.time_ns = f.time_ns;
+        f.ui.active_slot = text("skill:0");
+        f.ui.resolution_px = v2(1000., 1000.);
+        f.ui.button_count = 1;
+        f.ui.buttons[0] = super::super::snapshot::Button {
+            slot: text("skill:0"), kind: text("skill"), skill_id: n(12610.),
+            index: n(0.), active: flag(true), press_uv: v2(0.5, 0.5),
+            center_uv: v2(0.5, 0.5), radius_uv: v2(0.1, 0.1),
+            ..Default::default()
+        };
+        f.skill_state.ready = flag(true);
+        f.skill_state.source = text("ShowSkillData.m_TranID");
+        f.skill_state.token = f.token;
+        f.skill_state.hero_id = f.hero_id;
+        f.skill_state.sample_start_ns = n(1_998_000_000.);
+        f.skill_state.sample_end_ns = n(1_999_000_000.);
+        f.skill_state.count = 1;
+        f.skill_state.buttons[0].slot = text("skill:0");
+        f.skill_state.buttons[0].base_skill_id = n(12610.);
+        f.skill_state.buttons[0].active_skill_id = n(12610.);
+        f.active_joystick = super::super::snapshot::Geometry {
+            ready: flag(true), source: text("active_widget_transform"),
+            slot: text("skill:0"), skill_id: n(12610.),
+            sample_start_ns: n(1_998_000_000.), sample_end_ns: n(1_999_000_000.),
+            center_uv: v2(0.5, 0.5), radius_uv: v2(0.1, 0.1),
+        };
+        f.direction_input.ready = flag(true);
+        f.direction_input.coherent = flag(true);
+        f.direction_input.source = text("IndicatorMotionRot.m_vDragResult");
+        f.direction_input.token = f.token;
+        f.direction_input.hero_id = f.hero_id;
+        f.direction_input.slot = text("skill:0");
+        f.direction_input.skill_id = f.skill_id;
+        f.direction_input.sample_start_ns = f.active_joystick.sample_start_ns;
+        f.direction_input.sample_end_ns = f.active_joystick.sample_end_ns;
+        f.direction_input.raw_touch_xyz = v3(599.4, 500.5, 0.);
+        let mut model = AngularRadialSolver::default();
+        assert!(model.configure(Point::new(500., 500.), 100., [1., 0., 0., 1.], 1., c.androidSize_));
+        let observed = model.forward(Point::new(600., 500.)).unwrap();
+        let observed = observed / observed.length();
+        f.direction_input.direction_xz = v2(observed.x, observed.y);
+        c.now_ = 2_000_000_000;
+        (c, f, TestHost { world: Some(Point::new(1., 0.)), binding_aim_type: 2, ..Default::default() })
+    }
+    #[test]
+    fn held_direction_rotates_when_release_variant_changes_but_indicator_stays_base() {
+        let (mut c, mut f, mut h) = held_variant_direction_fixture();
+        for (step, variant, desired) in [
+            (0, 12610, Point::new(1., 0.)),
+            (1, 12611, Point::new(0., 1.)),
+            (2, 12611, Point::new(-1., 0.)),
+        ] {
+            let now = 2_000_000_000 + step * 30_000_000;
+            c.now_ = now;
+            f.time_ns = n(now as f64);
+            f.ui.time_ns = f.time_ns;
+            f.skill_state.sample_start_ns = n((now - 2_000_000) as f64);
+            f.skill_state.sample_end_ns = n((now - 1_000_000) as f64);
+            f.skill_state.buttons[0].active_skill_id = n(variant as f64);
+            f.active_joystick.sample_start_ns = f.skill_state.sample_start_ns;
+            f.active_joystick.sample_end_ns = f.skill_state.sample_end_ns;
+            f.direction_input.sample_start_ns = f.active_joystick.sample_start_ns;
+            f.direction_input.sample_end_ns = f.active_joystick.sample_end_ns;
+            let actual = cell(c.pixels(c.skillPoint_));
+            f.direction_input.raw_touch_xyz = v3(actual.x * 999. / 1000., 1000. - actual.y * 999. / 1000., 0.);
+            let mut model = AngularRadialSolver::default();
+            assert!(model.configure(Point::new(500., 500.), 100., [1., 0., 0., 1.], 1., c.androidSize_));
+            let observed = model.forward(actual).unwrap();
+            let observed = observed / observed.length();
+            f.direction_input.direction_xz = v2(observed.x, observed.y);
+            h.world = Some(desired);
+            c.ingest_frame(&mut h, &f);
+            assert!(c.directionGeometryFresh_, "current base indicator must remain live after variant switch");
+            assert!(c.directionAccepted_, "the same current-cast raw receipt remains valid");
+            assert_eq!(c.skillTouch_, 3);
+            assert!(c.skillKeyHeld_);
+        }
+        assert!(h.moves.len() >= 2, "held cursor changes must reach the joystick after the charge transition");
+        assert!(h.edges.iter().all(|edge| edge.0 != "up"));
+    }
+    #[test]
+    fn direction_indicator_may_belong_to_fresh_active_variant() {
+        let (mut c, mut f, mut h) = held_variant_direction_fixture();
+        f.skill_state.buttons[0].active_skill_id = n(12611.);
+        f.skill_id = n(12611.);
+        f.active_joystick.skill_id = f.skill_id;
+        f.direction_input.skill_id = f.skill_id;
+        c.ingest_frame(&mut h, &f);
+        assert!(c.directionGeometryFresh_, "geometry rejected: {:?}", h.traces);
+        assert!(c.directionAccepted_, "receipt rejected: {:?}", h.traces);
+    }
+    #[test]
+    fn direction_identity_rejects_unrelated_or_stale_owned_geometry() {
+        for case in 0..9 {
+            let (mut c, mut f, mut h) = held_variant_direction_fixture();
+            f.skill_state.buttons[0].active_skill_id = n(12611.);
+            match case {
+                0 => { f.skill_id = n(777.); f.active_joystick.skill_id = f.skill_id; f.direction_input.skill_id = f.skill_id; }
+                1 => f.ui.active_slot = text("skill:1"),
+                2 => { f.skill_state.buttons[0].active_skill_id = n(12612.); f.skill_id = n(12611.); f.active_joystick.skill_id = f.skill_id; f.direction_input.skill_id = f.skill_id; }
+                3 => f.skill_state.ready = flag(false),
+                4 => h.binding_aim_type = 3,
+                5 => f.active_joystick.slot = text("skill:1"),
+                6 => f.active_joystick.source = text("UnverifiedGeometry"),
+                7 => { f.active_joystick.sample_start_ns = n(1_799_000_000.); f.active_joystick.sample_end_ns = n(1_800_000_000.); }
+                _ => f.token = text("different-owner-epoch"),
+            }
+            c.ingest_frame(&mut h, &f);
+            assert!(!c.directionGeometryFresh_, "case {case} must not borrow another direction contract");
+            assert!(!c.directionAccepted_, "case {case} must not acknowledge a cast");
+            assert!(h.moves.is_empty(), "case {case} must not send held-direction input from invalid geometry");
+        }
+    }
+    #[test]
+    fn direction_feedback_cannot_ack_foreign_or_missing_input_but_owned_geometry_can_bootstrap() {
+        for case in 0..6 {
+            let (mut c, mut f, mut h) = held_variant_direction_fixture();
+            f.skill_state.buttons[0].active_skill_id = n(12611.);
+            h.world = Some(Point::new(0., 1.));
+            match case {
+                0 => f.direction_input.slot = text("skill:1"),
+                1 => f.direction_input.token = text("previous-match"),
+                2 => f.direction_input.hero_id = n(84.),
+                3 => f.direction_input.source = text("UnverifiedDirection"),
+                4 => { f.direction_input.sample_end_ns = n(1_800_000_000.); f.direction_input.sample_start_ns = n(1_799_000_000.); }
+                _ => f.direction_input = Default::default(),
+            }
+            c.ingest_frame(&mut h, &f);
+            assert!(c.directionGeometryFresh_, "case {case}: feedback availability must not revoke independently owned geometry");
+            assert!(!c.directionAccepted_, "case {case}: geometry identity alone must not acknowledge a cast");
+            assert!(!h.moves.is_empty(), "case {case}: the first MOVE must not require the ACK it creates");
+            assert!(h.edges.iter().all(|edge| edge.0 != "up"));
+        }
+    }
+    #[test]
+    fn cold_direction_first_move_precedes_unit_feedback_then_exact_receipt_is_accepted() {
+        let (mut c, mut f, mut h) = held_variant_direction_fixture();
+        f.skill_state.buttons[0].active_skill_id = n(12611.);
+        let contract = f.direction_input;
+        f.direction_input = Default::default();
+        h.world = Some(Point::new(0., 1.));
+        c.ingest_frame(&mut h, &f);
+        assert!(c.directionGeometryFresh_);
+        assert!(!c.directionAccepted_);
+        assert!(!h.moves.is_empty());
+        let sent_sequence = c.touchSequence_;
+        assert!(sent_sequence > 1);
+        c.now_ += 30_000_000;
+        f.time_ns = n(c.now_ as f64);
+        f.ui.time_ns = f.time_ns;
+        f.skill_state.sample_start_ns = n((c.now_ - 2_000_000) as f64);
+        f.skill_state.sample_end_ns = n((c.now_ - 1_000_000) as f64);
+        f.active_joystick.sample_start_ns = f.skill_state.sample_start_ns;
+        f.active_joystick.sample_end_ns = f.skill_state.sample_end_ns;
+        f.direction_input = contract;
+        f.direction_input.sample_start_ns = f.active_joystick.sample_start_ns;
+        f.direction_input.sample_end_ns = f.active_joystick.sample_end_ns;
+        let actual = cell(c.pixels(c.skillPoint_));
+        f.direction_input.raw_touch_xyz = v3(actual.x * 999. / 1000., 1000. - actual.y * 999. / 1000., 0.);
+        let mut model = AngularRadialSolver::default();
+        assert!(model.configure(Point::new(500., 500.), 100., [1., 0., 0., 1.], 1., c.androidSize_));
+        let observed = model.forward(actual).unwrap();
+        let observed = observed / observed.length();
+        f.direction_input.direction_xz = v2(observed.x, observed.y);
+        c.ingest_frame(&mut h, &f);
+        assert!(c.directionGeometryFresh_ && c.directionAccepted_);
+        assert_eq!(c.directionMatchedSequence_, sent_sequence);
+        assert_eq!(c.skillTouch_, 3);
+        assert!(h.edges.iter().all(|edge| edge.0 != "up"));
+    }
+    #[test]
+    fn charge_variant_base_indicator_still_requires_exact_sent_raw_provenance() {
+        let (mut c, mut f, mut h) = held_variant_direction_fixture();
+        f.skill_state.buttons[0].active_skill_id = n(12611.);
+        f.direction_input.raw_touch_xyz = v3(619.4, 500.5, 0.);
+        c.ingest_frame(&mut h, &f);
+        assert!(c.directionGeometryFresh_);
+        assert!(!c.directionAccepted_, "identity alone must not turn unrelated raw input into a receipt");
+    }
     fn buffered_direction_fixture() -> (Controller,TestHost) {
         let (mut c,_,h)=setup();
         c.enabled_=true;c.ready_=true;c.traceEnabled_=true;c.heroId_=84;

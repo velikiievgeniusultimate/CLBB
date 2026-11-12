@@ -1,6 +1,6 @@
 //! CLBB-owned settings. JSON is used only for persistence and menu edits.
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf};
 pub const MOUSE: i32 = 0x02000000;
 pub const F7: i32 = 0x01000036;
 pub const F11: i32 = 0x0100003a;
@@ -11,6 +11,11 @@ pub struct Settings {
     pub values: BTreeMap<String, String>,
     #[serde(skip)]
     pub path: PathBuf,
+    /// Verified current native templates are runtime defaults, not user choices.
+    #[serde(skip)]
+    native_skill_types: BTreeMap<i32, BTreeMap<String, u8>>,
+    #[serde(skip)]
+    native_charge_slots: BTreeMap<i32, BTreeSet<String>>,
 }
 impl Settings {
     pub fn load() -> Self {
@@ -216,6 +221,16 @@ impl Settings {
             return "false".into();
         }
         if field == "cast_mode" {
+            if scope == "hero" && slot != "skill:1:2521" {
+                if self.native_charge_slots.get(&hero).is_some_and(|slots| slots.contains(slot)) {
+                    return "0".into();
+                }
+                match self.native_skill_types.get(&hero).and_then(|types| types.get(slot)) {
+                    Some(1) => return "1".into(),
+                    Some(2 | 3) => return "0".into(),
+                    _ => {},
+                }
+            }
             return if slot == "skill:1:2521" || slot == "skill:2" || tap_only(slot) {
                 "1"
             } else {
@@ -246,6 +261,41 @@ impl Settings {
             _ => 0,
         };
         code.to_string()
+    }
+    pub fn observe_native_templates(&mut self, hero: i32, types: &BTreeMap<String, u8>) {
+        if !(1..=10000).contains(&hero) {
+            return;
+        }
+        let verified = || types.iter().filter(|(slot, kind)| {
+            native_skill_slot(slot) && matches!(**kind, 1..=3)
+        });
+        let count = verified().count();
+        if self.native_skill_types.get(&hero).is_some_and(|cached| {
+            cached.len() == count && verified().all(|(slot, kind)| cached.get(slot) == Some(kind))
+        }) {
+            return;
+        }
+        if count == 0 {
+            self.native_skill_types.remove(&hero);
+        } else {
+            self.native_skill_types.insert(hero, verified().map(|(slot, kind)| (slot.clone(), *kind)).collect());
+        }
+    }
+    pub fn observe_native_holds(&mut self, hero: i32, holds: &BTreeMap<String, bool>) {
+        if !(1..=10000).contains(&hero) { return; }
+        let charged = || holds.iter().filter(|(slot, hold)| **hold && native_skill_slot(slot)).map(|(slot, _)| slot);
+        let count = charged().count();
+        if self.native_charge_slots.get(&hero).is_some_and(|cached| {
+            cached.len() == count && charged().all(|slot| cached.contains(slot))
+        }) { return; }
+        if count == 0 {
+            self.native_charge_slots.remove(&hero);
+        } else {
+            self.native_charge_slots.insert(hero, charged().cloned().collect());
+        }
+    }
+    pub fn clear_native_holds(&mut self) {
+        self.native_charge_slots.clear();
     }
     pub fn integer(&self, key: &str, hero: i32) -> i32 {
         self.get(key, hero).parse().unwrap_or(0)
@@ -427,9 +477,131 @@ pub fn tap_only(slot: &str) -> bool {
         || slot == "shop:quick"
         || ["extra:0", "extra:1"].contains(&slot)
 }
+fn native_skill_slot(slot: &str) -> bool {
+    slot.strip_prefix("skill:")
+        .is_some_and(|index| !index.is_empty() && index.bytes().all(|v| v.is_ascii_digit())
+            && index.parse::<u8>().is_ok())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_skill_templates_share_cast_defaults_between_menu_and_bindings() {
+        let mut s = Settings::default();
+        s.observe_native_templates(30, &BTreeMap::from([
+            ("skill:0".into(), 1), ("skill:1".into(), 2), ("skill:2".into(), 3),
+        ]));
+        for (slot, expected) in [("skill:0", 1), ("skill:1", 0), ("skill:2", 0)] {
+            assert_eq!(s.integer(&format!("hero.bindings.{slot}.cast_mode"), 30), expected);
+            assert_eq!(s.binding(30, slot).cast_mode, expected);
+        }
+        assert!(s.values.is_empty());
+        let saved = serde_json::to_string(&s).unwrap();
+        assert_eq!(saved, "{\"values\":{}}");
+        let restored: Settings = serde_json::from_str(&saved).unwrap();
+        assert_eq!(restored.binding(30, "skill:2").cast_mode, 1);
+    }
+    #[test]
+    fn native_template_updates_preserve_explicit_modes_keys_and_form_settings() {
+        let mut s = Settings::default();
+        s.set("hero.bindings.skill:0.cast_mode", "0", 30).unwrap();
+        s.set("hero.bindings.skill:2.cast_mode", "1", 30).unwrap();
+        s.set("hero.bindings.skill:0.key", "88", 30).unwrap();
+        s.set("hero.bindings.skill:2.stop_movement", "true", 30).unwrap();
+        s.set("hero.bindings.skill:1:2521.cast_mode", "0", 25).unwrap();
+        let explicit = s.values.clone();
+        for types in [
+            BTreeMap::from([("skill:0".into(), 1), ("skill:2".into(), 3)]),
+            BTreeMap::from([("skill:0".into(), 3), ("skill:2".into(), 1)]),
+            BTreeMap::new(),
+        ] {
+            s.observe_native_templates(30, &types);
+            assert_eq!(s.binding(30, "skill:0").cast_mode, 0);
+            assert_eq!(s.binding(30, "skill:2").cast_mode, 1);
+            assert_eq!(s.binding(30, "skill:0").key, 88);
+            assert!(s.binding(30, "skill:2").stop_movement);
+            assert_eq!(s.binding(25, "skill:1:2521").cast_mode, 0);
+            assert_eq!(s.values, explicit);
+        }
+    }
+    #[test]
+    fn native_defaults_follow_current_hero_type_and_unknown_returns_to_fallback() {
+        let mut s = Settings::default();
+        s.observe_native_templates(30, &BTreeMap::from([("skill:2".into(), 3)]));
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
+        assert_eq!(s.binding(31, "skill:2").cast_mode, 1);
+        s.observe_native_templates(31, &BTreeMap::from([("skill:2".into(), 2)]));
+        assert_eq!(s.binding(31, "skill:2").cast_mode, 0);
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
+        s.observe_native_templates(30, &BTreeMap::from([("skill:2".into(), 1)]));
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 1);
+        s.observe_native_templates(30, &BTreeMap::from([("skill:2".into(), 3)]));
+        s.observe_native_templates(30, &BTreeMap::from([("skill:2".into(), 0)]));
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 1);
+        s.observe_native_templates(30, &BTreeMap::from([("skill:0".into(), 1)]));
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
+        s.observe_native_templates(30, &BTreeMap::new());
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 0);
+    }
+    #[test]
+    fn native_skill_defaults_never_change_common_controls_or_kagura_away_form() {
+        let mut s = Settings::default();
+        s.observe_native_templates(25, &BTreeMap::from([
+            ("skill:1".into(), 2), ("skill:1:2521".into(), 3),
+            ("combo:0".into(), 1), ("extra:2".into(), 1), ("attack".into(), 3),
+        ]));
+        assert_eq!(s.binding(25, "skill:1:2521").cast_mode, 1);
+        assert_eq!(s.binding(25, "combo:0").cast_mode, 0);
+        assert_eq!(s.binding(25, "extra:2").cast_mode, 0);
+        assert_eq!(s.binding(25, "attack").cast_mode, 1);
+        assert_eq!(s.integer("common.bindings.skill:1.cast_mode", 25), 0);
+        s.set("common.bindings.extra:2.cast_mode", "3", 25).unwrap();
+        s.observe_native_templates(25, &BTreeMap::from([("extra:2".into(), 1)]));
+        assert_eq!(s.binding(25, "extra:2").cast_mode, 3);
+    }
+    #[test]
+    fn native_charge_is_independent_of_tap_geometry_and_unknown_reverts_to_template() {
+        let mut s = Settings::default();
+        s.observe_native_templates(30, &BTreeMap::from([("skill:0".into(), 1)]));
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
+        s.observe_native_holds(30, &BTreeMap::from([("skill:0".into(), true), ("skill:2".into(), true)]));
+        for slot in ["skill:0", "skill:2"] {
+            assert_eq!(s.binding(30, slot).cast_mode, 0);
+            assert_eq!(s.integer(&format!("hero.bindings.{slot}.cast_mode"), 30), 0);
+        }
+        s.observe_native_holds(30, &BTreeMap::from([("skill:0".into(), false)]));
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 1);
+        s.observe_native_holds(30, &BTreeMap::from([("skill:0".into(), true)]));
+        s.observe_native_holds(30, &BTreeMap::new());
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
+        assert!(s.values.is_empty());
+    }
+    #[test]
+    fn native_charge_never_overrides_saved_choices_other_heroes_or_common_buttons() {
+        let mut s = Settings::default();
+        s.set("hero.bindings.skill:0.cast_mode", "1", 30).unwrap();
+        s.set("hero.bindings.skill:1.cast_mode", "0", 30).unwrap();
+        let saved = s.values.clone();
+        s.observe_native_templates(30, &BTreeMap::from([("skill:0".into(), 1), ("skill:1".into(), 1)]));
+        s.observe_native_holds(30, &BTreeMap::from([
+            ("skill:0".into(), true), ("skill:1".into(), true), ("skill:2".into(), true),
+            ("extra:2".into(), true), ("attack".into(), true), ("combo:0".into(), true),
+        ]));
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
+        assert_eq!(s.binding(30, "skill:1").cast_mode, 0);
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
+        assert_eq!(s.binding(31, "skill:2").cast_mode, 1);
+        assert_eq!(s.binding(30, "extra:2").cast_mode, 0);
+        assert_eq!(s.binding(30, "attack").cast_mode, 1);
+        assert_eq!(s.binding(30, "combo:0").cast_mode, 0);
+        s.clear_native_holds();
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 1);
+        assert_eq!(s.values, saved);
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(restored.values, saved);
+        assert_eq!(restored.binding(30, "skill:0").cast_mode, 1);
+    }
     #[test]
     fn mapper_is_always_enabled_even_with_legacy_disabled_setting() {
         let mut s=Settings::default();s.values.insert("enabled".into(),"false".into());

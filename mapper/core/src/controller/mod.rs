@@ -21,6 +21,9 @@ mod rejection_tests;
 use crate::{AimSolver, AngularRadialSolver, Point};
 use host::{Host, Timer};
 use std::collections::{BTreeMap, BTreeSet};
+/// Native skill/config IDs are not hero IDs; owned alternate forms may use
+/// seven digits. This bound never replaces typed owner/epoch validation.
+pub const MAX_SKILL_ID: i32 = 10_000_000;
 #[derive(Clone, Default, Debug)]
 pub struct Button {
     pub slot: String,

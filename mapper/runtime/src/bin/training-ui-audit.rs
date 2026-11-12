@@ -44,6 +44,44 @@ fn widget(r: &mut Reflection<ProcessMemory>, object: u64) -> Option<Value> {
     let (center,radius)=w.geometry(r,&view,&projection,pivot).ok()?;
     Some(json!({"visible":visible,"center_uv":center,"radius_uv":radius,"onscreen":unity::onscreen(center)}))
 }
+// Named GameObject buttons may have an offset rendered widget. Use the
+// actual UIButton.mWidget, with reciprocal native/managed ownership checks,
+// instead of treating the GameObject anchor as its clickable image center.
+fn button_widget(r: &mut Reflection<ProcessMemory>, object:u64)->Option<Value> {
+    if r.class(r.pointer(object).ok()?).ok()?.name!="GameObject" {return None;}
+    let cached=r.field(object,"m_CachedPtr").ok()?;
+    let native=r.pointer(cached).ok()?;
+    if r.pointer(native+40).ok()?!=object {return None;}
+    let table=r.pointer(native+48).ok()?;
+    let count=r.pointer(native+64).ok()?;
+    if count==0||count>32 {return None;}
+    let entries=r.read(table,count as usize*16).ok()?;
+    let mut result=None;
+    for entry in entries.chunks_exact(16) {
+        let component=clbb_mapper::reflection::u64_at(entry,8);
+        if component==0||r.pointer(component+48).ok()?!=native {return None;}
+        let managed=r.pointer(component+40).ok()?;
+        if managed==0 {continue;}
+        let mut class=r.class(r.pointer(managed).ok()?).ok()?;
+        let actual=class.name.clone();
+        let mut button=false;
+        for _ in 0..16 {
+            if class.name=="UIButton" {button=true;break;}
+            if class.parent==0 {break;}
+            class=r.class(class.parent).ok()?;
+        }
+        if !button {continue;}
+        if r.link(managed,"m_CachedPtr").ok()?!=component {return None;}
+        let child=r.link(managed,"mWidget").ok()?;
+        let geometry=widget(r,child)?;
+        if result.is_some() {return None;}
+        result=Some(json!({"component_class":actual,"widget_object":child,"geometry":geometry}));
+    }
+    if r.pointer(cached).ok()?!=native||r.pointer(native+40).ok()?!=object
+        ||r.pointer(native+48).ok()?!=table||r.pointer(native+64).ok()?!=count
+        ||r.read(table,entries.len()).ok()?!=entries {return None;}
+    result
+}
 fn interesting(name:&str)->bool {
     let name=name.to_ascii_lowercase();
     ["hero","item","label","text","button","info","sprite","scroll","grid","cell","choose","select","title","name","content","train","list","tog","ok","confirm","model"].iter().any(|part|name.contains(part))
@@ -103,6 +141,7 @@ fn run()->Result<()> {
         let Ok((name,fields))=schema(&mut r,object) else{continue};
         let mut values=serde_json::Map::new();
         let geometry=widget(&mut r,object);
+        let button_geometry=button_widget(&mut r,object);
         for (key,field) in fields {
             if field.is_static||field.offset>65536||(!interesting(&key)&&depth>0){continue;}
             let address=object+field.offset;
@@ -134,7 +173,7 @@ fn run()->Result<()> {
             let position=Path::new(&mut r,object,component).ok()?.position(&r).ok()?;
             math::project(view,projection,position,false)
         });
-        objects.push(json!({"path":path,"object":object,"class":name,"values":values,"widget":geometry,"anchor_uv":anchor}));
+        objects.push(json!({"path":path,"object":object,"class":name,"values":values,"widget":geometry,"button_widget":button_geometry,"anchor_uv":anchor}));
     }
     if birth(pid)?!=initial_birth||std::fs::read_link(format!("/proc/{pid}/exe")).map_err(|e|e.to_string())?!=executable{return Err("runtime identity changed".into());}
     let topology_unchanged=r.pointer(at)?==list&&r.list(list)?==frames;

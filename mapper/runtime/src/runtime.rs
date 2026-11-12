@@ -117,6 +117,7 @@ impl Worker {
                                     "start_ns": f.time_ns.value-f.sample_duration_ms.value*1e6,"end_ns":f.time_ns.value,
                                     "clock_ms":sample.game_clock_ms,"epoch":f.token.as_str(),"revision":sample.plan_revision,
                                     "linked":sample.linked,"cancel_uv_valid":f.ui.cancel_uv.valid(),"cancel_uv":f.ui.cancel_uv.values.map(|v|v.value),
+                                    "control_types":sample.control_types,"control_holds":sample.control_holds,
                                     "buttons":f.ui.buttons.iter().take(f.ui.button_count.min(32) as usize).map(|b|serde_json::json!({"slot":b.slot.as_str(),"kind":b.kind.as_str(),"skill":b.skill_id.int(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>(),
                                     "hero":f.hero_id.int(),"hero_render":f.hero_render_xyz.values.map(|v|v.value),"hero_logic":sample.logic,"direction_visual":sample.direction_visual,"direction_source":f.direction_input.source.as_str(),
                                     "skill":f.skill_id.int(),"slot":f.ui.active_slot.as_str(),"resolution":f.ui.resolution_px.values.map(|v|v.value),"native_source":f.logical.source.as_str(),"view":f.view_matrix.values.map(|v|v.value),"projection":sample.projection,
@@ -394,6 +395,7 @@ impl Host for Adapter {
         }
     }
     fn binding(&mut self, hero: i32, button: &Button, config: &str) -> Binding {
+        if self.fresh().is_none() { self.settings.clear_native_holds(); }
         let mut binding=self.settings.binding(hero,config);
         if config == "extra:2" && !matches!(button.skillId, 20020 | 20150) {
             binding.cast_mode = match binding.cast_mode {
@@ -573,6 +575,10 @@ impl Runtime {
             let view = sample.frame.view_matrix.values.map(|v| v.value);
             self.host.inverse = projection::inverse_product(&sample.projection, &view);
             self.host.sample = Some(sample.clone());
+            if self.host.fresh().is_some() {
+                self.host.settings.observe_native_templates(sample.frame.hero_id.int(), &sample.control_types);
+                self.host.settings.observe_native_holds(sample.frame.hero_id.int(), &sample.control_holds);
+            }
             let skill = sample.frame.skill_id.int();
             self.core.update_observation(
                 sample.aim.is_some(),
@@ -594,6 +600,7 @@ impl Runtime {
                 },
             });
         }
+        if self.host.fresh().is_none() { self.host.settings.clear_native_holds(); }
         let now = now_ns();
         for i in 0..5 {
             if self.host.timers[i].is_some_and(|at| now >= at) {
@@ -785,6 +792,7 @@ impl Runtime {
         })
     }
     fn read(&mut self, key: &str) -> *const c_char {
+        if self.host.fresh().is_none() { self.host.settings.clear_native_holds(); }
         let view = self.core.inspect();
         let hero = view.heroId_;
         let v=match key {
@@ -816,7 +824,29 @@ impl Runtime {
                 let name=if state.hero_id.int()==84 {match form {8420=>"ground",8425=>"wall",_=>"unknown"}} else {"unknown"};
                 serde_json::json!({"hero":state.hero_id.int(),"state":name,"form":form,"source":"owned skill:1 active form","epoch":state.token.as_str(),"sample_start_ns":state.sample_start_ns.value,"sample_end_ns":state.sample_end_ns.value}).to_string()
             }).unwrap_or_else(||"{\"state\":\"unknown\"}".into()),
-            "diagnostics.templates"=>self.host.fresh().map(|s|serde_json::json!({"hero":s.frame.hero_id.int(),"types":s.control_types}).to_string()).unwrap_or_else(||"{}".into()),
+            "diagnostics.templates"=>self.host.fresh().map(|s|serde_json::json!({"hero":s.frame.hero_id.int(),"types":s.control_types,"holds":s.control_holds}).to_string()).unwrap_or_else(||"{}".into()),
+            "diagnostics.controls" => self.host.fresh().filter(|s| s.frame.hero_id.int() == view.heroId_).map(|sample| {
+                let native = |b: &clbb_moba_core::controller::snapshot::Button| serde_json::json!({
+                    "slot": b.slot.as_str(), "kind": b.kind.as_str(), "index": b.index.int(),
+                    "skill_id": b.skill_id.int(), "available": b.active.get(),
+                    "press_valid": b.press_uv.valid(), "press": b.press_uv.values.map(|n| n.value),
+                    "geometry_source": b.geometry_source.as_str(),
+                });
+                let buttons: Vec<_> = view.buttons.iter().take(view.button_count.min(32) as usize).map(|b| serde_json::json!({
+                    "slot": b.slot.as_str(), "kind": b.kind.as_str(), "index": b.index,
+                    "skill_id": b.skill_id, "key": b.key, "cast_mode": b.cast_mode,
+                    "available": b.available != 0, "press": [b.press.x, b.press.y],
+                    "geometry_source": b.geometry_source.as_str(),
+                })).collect();
+                serde_json::json!({
+                    "ready": view.ready_ != 0, "hero": sample.frame.hero_id.int(), "epoch": sample.frame.token.as_str(),
+                    "sample_start_ns": sample.frame.time_ns.value - sample.frame.sample_duration_ms.value * 1e6,
+                    "sample_end_ns": sample.frame.time_ns.value,
+                    "types": sample.control_types, "holds": sample.control_holds, "buttons": buttons,
+                    "native_buttons": sample.frame.ui.buttons.iter().take(sample.frame.ui.button_count.min(32) as usize).map(native).collect::<Vec<_>>(),
+                    "capability_controls": sample.frame.ui.capability_controls.iter().take(sample.frame.ui.capability_count.min(32) as usize).map(native).collect::<Vec<_>>(),
+                }).to_string()
+            }).unwrap_or_else(|| "{\"ready\":false}".into()),
             "hero.linked_controls"=>if self.host.fresh().is_some_and(|s|s.linked.is_some()) {"1".into()}else{"0".into()},
             "hero.skill0_type"=>self.host.fresh().and_then(|s|s.control_types.get("skill:0")).unwrap_or(&0).to_string(),
             "diagnostics.gestures"=>serde_json::json!({"active":self.gestures.active,"ignored":self.gestures.ignored_keys(),"linked":self.host.fresh().and_then(|s|s.linked.as_ref()),"cancel_uv":self.host.fresh().map(|s|serde_json::json!({"valid":s.frame.ui.cancel_uv.valid(),"point":s.frame.ui.cancel_uv.values.map(|v|v.value)})),"buttons":self.host.fresh().map(|s|s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill").map(|b|serde_json::json!({"slot":b.slot.as_str(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>())}).to_string(),
@@ -1031,6 +1061,122 @@ mod tests {
             error: String::new(),
             recorder, debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0, debug_route_reason:"initial", debug_full_state_at:0, debug_state_key:(0,-1,0,0),
         }
+    }
+    fn template_sample(hero: i32, kind: u8, at: i64) -> Sample {
+        use crate::source::{flag, number, text, v2};
+        let mut frame = clbb_moba_core::controller::snapshot::Frame::default();
+        frame.ready = flag(true);
+        frame.hero_id = number(hero as f64);
+        frame.token = text("native-template-test");
+        frame.token_string = flag(true);
+        frame.token_nonempty = flag(true);
+        frame.ui.ready = flag(true);
+        frame.ui.hero_id = number(hero as f64);
+        frame.ui.resolution_px = v2([1280., 720.]);
+        frame.ui.button_count = 1;
+        let button = &mut frame.ui.buttons[0];
+        button.slot = text("skill:2");
+        button.kind = text("skill");
+        button.index = number(2.);
+        button.skill_id = number((hero * 100 + 30) as f64);
+        button.active = flag(true);
+        button.press_uv = v2([0.8, 0.8]);
+        button.center_uv = button.press_uv;
+        button.radius_uv = v2([0.1, 0.1]);
+        frame.time_ns = number(at as f64);
+        frame.sample_duration_ms = number(0.001);
+        frame.ui.time_ns = frame.time_ns;
+        Sample {
+            plan_revision: 1, game_clock_ms: 1, match_owners: [1, 2, 3, 4], frame,
+            projection: [0.; 16], logic: [0.; 2], indicator: 0,
+            aim: None, direction_visual: None,
+            control_types: BTreeMap::from([("skill:2".into(), kind)]), control_holds: BTreeMap::new(), linked: None,
+        }
+    }
+    #[test]
+    fn polling_installs_native_defaults_before_core_binding_and_menu_reads() {
+        let mut events = Vec::new();
+        let mut runtime = fixture(&mut events);
+        for (kind, mode) in [(3, 0), (1, 1), (2, 0), (0, 1)] {
+            runtime.worker.shared.lock().unwrap().sample = Some(Arc::new(template_sample(30, kind, now_ns())));
+            runtime.poll(1280., 720.);
+            let view = runtime.core.inspect();
+            assert_eq!(view.button_count, 1);
+            assert_eq!(view.buttons[0].cast_mode, mode);
+            assert_eq!(runtime.host.settings.integer("hero.bindings.skill:2.cast_mode", 30), mode);
+            let button = Button { slot: "skill:2".into(), kind: "skill".into(), skillId: 3030, ..Default::default() };
+            let binding = runtime.host.binding(30, &button, "skill:2");
+            assert_eq!(binding.cast_mode, mode);
+            assert_eq!(binding.aim_type, kind);
+        }
+        assert!(runtime.host.settings.values.is_empty());
+    }
+    #[test]
+    fn stale_sample_cannot_install_a_new_native_cast_default() {
+        let mut events = Vec::new();
+        let mut runtime = fixture(&mut events);
+        runtime.worker.shared.lock().unwrap().sample = Some(Arc::new(template_sample(30, 3, now_ns() - 500_000_000)));
+        runtime.poll(1280., 720.);
+        assert_eq!(runtime.host.settings.binding(30, "skill:2").cast_mode, 1);
+    }
+    #[test]
+    fn native_charge_overrides_only_the_unsaved_tap_default_before_core_and_menu_read() {
+        let mut events = Vec::new(); let mut runtime = fixture(&mut events);
+        for charge in [Some(true), Some(false), None] {
+            let mut sample = template_sample(30, 1, now_ns());
+            if let Some(charge) = charge { sample.control_holds.insert("skill:2".into(), charge); }
+            runtime.worker.shared.lock().unwrap().sample = Some(Arc::new(sample));
+            runtime.poll(1280., 720.);
+            let expected = if charge == Some(true) { 0 } else { 1 };
+            assert_eq!(runtime.core.inspect().buttons[0].cast_mode, expected);
+            assert_eq!(runtime.host.settings.integer("hero.bindings.skill:2.cast_mode", 30), expected);
+        }
+        runtime.host.settings.set("hero.bindings.skill:2.cast_mode", "1", 30).unwrap();
+        let mut sample = template_sample(30, 1, now_ns());
+        sample.control_holds.insert("skill:2".into(), true);
+        runtime.worker.shared.lock().unwrap().sample = Some(Arc::new(sample));
+        runtime.poll(1280., 720.);
+        assert_eq!(runtime.core.inspect().buttons[0].cast_mode, 1);
+    }
+    #[test]
+    fn stale_charge_observation_is_revoked_for_both_binding_and_menu() {
+        let mut events = Vec::new(); let mut runtime = fixture(&mut events);
+        let mut sample = template_sample(30, 1, now_ns());
+        sample.control_holds.insert("skill:2".into(), true);
+        runtime.worker.shared.lock().unwrap().sample = Some(Arc::new(sample));
+        runtime.poll(1280., 720.);
+        assert_eq!(runtime.host.settings.binding(30, "skill:2").cast_mode, 0);
+        runtime.host.sample = Some(Arc::new(template_sample(30, 1, now_ns() - 500_000_000)));
+        let button = Button { slot: "skill:2".into(), kind: "skill".into(), skillId: 3030, ..Default::default() };
+        assert_eq!(runtime.host.binding(30, &button, "skill:2").cast_mode, 1);
+        assert_eq!(runtime.host.settings.integer("hero.bindings.skill:2.cast_mode", 30), 1);
+        runtime.host.settings.observe_native_holds(30, &BTreeMap::from([("skill:2".into(), true)]));
+        let value = runtime.read("hero.bindings.skill:2.cast_mode");
+        assert_eq!(unsafe { CStr::from_ptr(value) }.to_str().unwrap(), "1");
+    }
+    #[test]
+    fn control_diagnostics_show_current_native_and_mapped_state_but_never_stale_cache() {
+        let mut events = Vec::new(); let mut runtime = fixture(&mut events);
+        let mut sample = template_sample(30, 1, now_ns());
+        sample.control_holds.insert("skill:2".into(), true);
+        let cap = &mut sample.frame.ui.capability_controls[0];
+        cap.slot = crate::source::text("upgrade:2"); cap.kind = crate::source::text("upgrade");
+        cap.index = crate::source::number(2.); cap.active = crate::source::flag(false);
+        sample.frame.ui.capability_count = 1;
+        runtime.worker.shared.lock().unwrap().sample = Some(Arc::new(sample)); runtime.poll(1280., 720.);
+        let pointer = runtime.read("diagnostics.controls");
+        let current: serde_json::Value = serde_json::from_str(unsafe { CStr::from_ptr(pointer) }.to_str().unwrap()).unwrap();
+        assert_eq!(current["ready"], true); assert_eq!(current["hero"], 30);
+        assert_eq!(current["types"]["skill:2"], 1); assert_eq!(current["holds"]["skill:2"], true);
+        assert_eq!(current["buttons"][0]["slot"], "skill:2");
+        assert_eq!(current["buttons"][0]["key"], 69); assert_eq!(current["buttons"][0]["cast_mode"], 0);
+        assert_eq!(current["native_buttons"][0]["skill_id"], 3030);
+        assert_eq!(current["capability_controls"][0]["slot"], "upgrade:2");
+        assert_eq!(current["capability_controls"][0]["available"], false);
+        runtime.host.sample = Some(Arc::new(template_sample(30, 1, now_ns() - 500_000_000)));
+        let pointer = runtime.read("diagnostics.controls");
+        let stale: serde_json::Value = serde_json::from_str(unsafe { CStr::from_ptr(pointer) }.to_str().unwrap()).unwrap();
+        assert_eq!(stale, serde_json::json!({"ready": false}));
     }
     #[test]
     fn resetting_an_unknown_cancel_contact_cancels_the_native_context_without_casting() {

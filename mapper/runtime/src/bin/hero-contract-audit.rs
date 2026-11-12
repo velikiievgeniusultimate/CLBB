@@ -52,6 +52,174 @@ fn primitive(kind: u8, raw: &[u8]) -> Result<Value> {
     })
 }
 
+fn charge_cache<M: Memory>(r: &mut Reflection<M>, ui: u64) -> Result<Value> {
+    r.discover(&["UIChargeSkillInfo"])?;
+    let expected_class=r.named["UIChargeSkillInfo"];
+    let info=r.class(expected_class)?;
+    if info.fields.len()!=2 {return Err("Charge info field layout changed".into());}
+    let charge=info.fields.get("m_bIsChargeSkill").ok_or("Missing charge flag")?;
+    let effect=info.fields.get("m_iChargeEffectId").ok_or("Missing charge effect")?;
+    if charge.is_static||charge.kind!=2||effect.is_static||effect.kind!=8
+        ||charge.offset!=16||effect.offset!=20 {
+        return Err("Charge info primitive types/layout changed".into());
+    }
+    let mut checks=Vec::new();
+    let dictionary=ptr(r,&mut checks,ui,"m_dictCachedChargeSkillInfos")?;
+    if dictionary==0 {return Ok(json!({"present":false,"entries":[],"note":"not populated is unknown, not non-charge"}));}
+    let class=u64_at(&capture(r,&mut checks,dictionary,8)?,0);
+    if r.class(class)?.name!="Dictionary`2" {return Err("Unexpected charge cache collection".into());}
+    let count_at=r.field(dictionary,"count")?;
+    let count=i32_at(&capture(r,&mut checks,count_at,4)?,0);
+    if !(0..=256).contains(&count) {return Err("Charge cache count exceeds audit bound".into());}
+    let array=ptr(r,&mut checks,dictionary,"entries")?;
+    if array==0 {
+        if count!=0 {return Err("Charge cache entries absent".into());}
+        check(r,&checks)?;
+        return Ok(json!({"present":true,"count":0,"entries":[],"note":"empty cache is unknown, not non-charge"}));
+    }
+    let header=capture(r,&mut checks,array,32)?;
+    let capacity=u64_at(&header,24);
+    if capacity<count as u64||capacity>1024 {return Err("Charge cache capacity exceeds audit bound".into());}
+    let array_class=u64_at(&header,0);
+    let element=u64_at(&capture(r,&mut checks,array_class+0x40,8)?,0);
+    let entry=r.class(element)?;
+    let expected=[("hashCode",8,16),("next",8,20),("key",8,24),("value",17,28)];
+    if entry.fields.len()!=4||expected.iter().any(|(name,kind,offset)|entry.fields.get(*name).is_none_or(|f|f.kind!=*kind||f.is_static||f.offset!=*offset)) {
+        return Err("Charge cache inline entry layout changed".into());
+    }
+    // Prove the generic entry's inline value is precisely UIChargeSkillInfo.
+    // Il2CppClass.byval_arg is the same validated layout used by Reflection;
+    // compare type data and kind, ignoring per-field attribute bits.
+    let field_table=u64_at(&capture(r,&mut checks,element+0x78,8)?,0);
+    let fields=capture(r,&mut checks,field_table,entry.fields.len()*32)?;
+    let mut value_type=None;
+    for field in fields.chunks_exact(32) {
+        if u64_at(field,16)!=element {return Err("Charge cache field owner changed".into());}
+        if r.cstring(u64_at(field,0))?=="value" {
+            value_type=Some(capture(r,&mut checks,u64_at(field,8),16)?);
+        }
+    }
+    let value_type=value_type.ok_or("Charge cache value type absent")?;
+    let expected_type=capture(r,&mut checks,expected_class+32,16)?;
+    if u64_at(&value_type,0)!=u64_at(&expected_type,0)
+        ||((u32::from_le_bytes(value_type[8..12].try_into().unwrap())>>16)&255)!=17
+        ||((u32::from_le_bytes(expected_type[8..12].try_into().unwrap())>>16)&255)!=17 {
+        return Err("Charge cache value is not typed UIChargeSkillInfo".into());
+    }
+    // Three Int32 fields followed by the verified 8-byte inline value: 20 bytes.
+    let raw=capture(r,&mut checks,array+32,count as usize*20)?;
+    let mut rows=Vec::new();let mut seen=BTreeSet::new();
+    for row in raw.chunks_exact(20) {
+        if i32_at(row,0)<0 {continue;}
+        let skill=i32_at(row,8);let charged=row[12];
+        if !(1..=10_000_000).contains(&skill)||charged>1||!seen.insert(skill) {
+            return Err("Invalid/duplicate charge cache row".into());
+        }
+        rows.push(json!({"skill":skill,"is_charge_skill":charged!=0,"charge_effect_id":i32_at(row,16)}));
+    }
+    check(r,&checks)?;
+    Ok(json!({"present":true,"count":count,"entries":rows,"value_class":"UIChargeSkillInfo","value_type_verified":true,"coherent":true,"note":"absence of a skill is unknown, not non-charge"}))
+}
+
+fn charge_attack_controller<M:Memory>(r:&mut Reflection<M>,ui:u64)->Result<Value> {
+    let mut checks=Vec::new();let object=ptr(r,&mut checks,ui,"m_KeySKillATK")?;
+    if object==0{return Ok(Value::Null);}
+    let class=u64_at(&capture(r,&mut checks,object,8)?,0);
+    let mut current=r.class(class)?;let actual=current.name.clone();let mut fields=BTreeMap::new();let mut charge=false;
+    for _ in 0..16 {
+        if current.name=="CommonAttackPressCharge" {charge=true;}
+        for (name,field)in current.fields {fields.entry(name).or_insert(field);}
+        if current.parent==0 {break;}current=r.class(current.parent)?;
+    }
+    if !charge {check(r,&checks)?;return Ok(json!({"class":actual,"charge_controller":false}));}
+    let mut values=serde_json::Map::new();
+    for (name,field)in &fields {
+        if field.is_static||field.offset>65536 {continue;}
+        let size=match field.kind {2=>1,8|9|12=>4,10|11|13=>8,_=>continue};
+        let raw=capture(r,&mut checks,object+field.offset,size)?;
+        values.insert(name.clone(),json!({"kind":field.kind,"value":primitive(field.kind,&raw)?}));
+        if values.len()>128 {return Err("Charge controller fields exceed bound".into());}
+    }
+    let mut skill_links=serde_json::Map::new();
+    for name in ["keyDownSkillData","keyTimeChangeSkillData"] {
+        let Some(field)=fields.get(name) else {continue};
+        if field.kind!=18||field.is_static||field.offset>65536 {return Err("Charge controller skill link type changed".into());}
+        let child=u64_at(&capture(r,&mut checks,object+field.offset,8)?,0);
+        if child==0 {skill_links.insert(name.into(),Value::Null);continue;}
+        let class=u64_at(&capture(r,&mut checks,child,8)?,0);let name_class=r.class(class)?.name;
+        if name_class!="ShowSkillData" {return Err("Charge controller skill data class changed".into());}
+        let mut row=serde_json::Map::new();
+        for name in ["m_InitSkillID","m_TranID"] {
+            let at=r.field(child,name)?;row.insert(name.into(),json!(i32_at(&capture(r,&mut checks,at,4)?,0)));
+        }
+        skill_links.insert(name.into(),json!({"class":name_class,"values":row}));
+    }
+    check(r,&checks)?;
+    Ok(json!({"class":actual,"charge_controller":true,"numeric":values,"skill_links":skill_links,"coherent":true}))
+}
+
+fn button_charge_flags<M:Memory>(r:&mut Reflection<M>,ui:u64,local_show:u64)->Result<Value> {
+    let mut checks=Vec::new();let list=ptr(r,&mut checks,ui,"statusKeySkillList")?;
+    let header=capture(r,&mut checks,list+16,16)?;
+    let array=u64_at(&header,0);let count=i32_at(&header,8);
+    if !(0..=64).contains(&count)||array==0 {return Err("Charge button list outside audit bounds".into());}
+    let raw=capture(r,&mut checks,array+32,count as usize*8)?;
+    let mut objects:Vec<_>=raw.chunks_exact(8).map(|v|u64_at(v,0)).filter(|v|*v!=0).collect();
+    let attack=ptr(r,&mut checks,ui,"m_KeySKillATK")?;
+    if attack!=0&&!objects.contains(&attack){objects.push(attack);}
+    let mut rows=Vec::new();let mut seen=BTreeSet::new();
+    for object in objects {
+        if !seen.insert(object){continue;}
+        let class=u64_at(&capture(r,&mut checks,object,8)?,0);
+        let class_name=r.class(class)?.name;
+        let data=ptr(r,&mut checks,object,"m_SkillData")?;
+        if data==0 {continue;}
+        let local=clbb_mapper::source::skill_result_is_local(r,local_show,data,&mut checks)?;
+        if !local {continue;}
+        let data_class=r.class(r.pointer(data)?)?;
+        let mut values=serde_json::Map::new();
+        for (name,kind)in [("m_InitSkillID",8),("m_TranID",8),("m_bChargeSkill",2),("m_iCancelChargeSkill",8)] {
+            let Some(field)=data_class.fields.get(name)else{continue};
+            if field.is_static||field.kind!=kind||field.offset>65536 {return Err(format!("Charge skill field type changed: {name}"));}
+            let bytes=capture(r,&mut checks,data+field.offset,if kind==2 {1}else{4})?;
+            values.insert(name.into(),primitive(kind,&bytes)?);
+        }
+        let index_at=r.field(object,"m_iIndex")?;
+        let index=i32_at(&capture(r,&mut checks,index_at,4)?,0);
+        rows.push(json!({"index":index,"attack":object==attack,"button_class":class_name,"data_class":"ShowSkillData","local_skill_comp":true,"values":values}));
+    }
+    check(r,&checks)?;
+    Ok(json!({"buttons":rows,"coherent":true,"source":"owned VirtualButton.m_SkillData -> ShowSkillData.m_bChargeSkill"}))
+}
+
+fn charge_lifecycle<M:Memory>(r:&mut Reflection<M>,local_show:u64)->Result<Value> {
+    let target=*r.named.get("UIKeySkill").ok_or("UI controls class not owned by Source")?;
+    let mut base=r.class(target)?;
+    for _ in 0..16 {if base.name=="BaseFrame" {break;}if base.parent==0 {return Err("UI frame inheritance changed".into());}base=r.class(base.parent)?;}
+    if base.name!="BaseFrame" {return Err("UI BaseFrame unavailable".into());}
+    let list_field=base.fields.get("m_ActiveFrameList").ok_or("UI frame list absent")?;
+    if !list_field.is_static||base.statics==0 {return Err("UI frame list is not a static owner".into());}
+    let mut checks=Vec::new();let frames=u64_at(&capture(r,&mut checks,base.statics+list_field.offset,8)?,0);
+    let header=capture(r,&mut checks,frames+16,16)?;
+    let array=u64_at(&header,0);let count=i32_at(&header,8);
+    if !(0..=256).contains(&count)||array==0 {return Err("UI frame list exceeds bounds".into());}
+    let values=capture(r,&mut checks,array+32,count as usize*8)?;
+    let controls:Vec<_>=values.chunks_exact(8).map(|v|u64_at(v,0)).filter(|v|*v!=0&&r.pointer(*v).ok()==Some(target)).collect();
+    if controls.len()!=1 {return Err("UI controls absent or ambiguous".into());}
+    let ui=controls[0];checks.push((ui,target.to_le_bytes().to_vec()));
+    let attack=ptr(r,&mut checks,ui,"m_KeySKillATK")?;
+    if attack==0 {return Err("UI attack control absent".into());}
+    let data=ptr(r,&mut checks,attack,"m_SkillData")?;
+    if data==0||!clbb_mapper::source::skill_result_is_local(r,local_show,data,&mut checks)? {
+        return Err("UI charge skill data belongs to another local hero".into());
+    }
+    let cache=charge_cache(r,ui);
+    let attack_controller=charge_attack_controller(r,ui);
+    let button_flags=button_charge_flags(r,ui,local_show);
+    check(r,&checks)?;
+    Ok(json!({"cache":cache,"attack_controller":attack_controller,"button_flags":button_flags,"ui_owner_verified":true,"scope":"read-only owned UI charge cache; no lifecycle authorization"}))
+}
+
 /// Values only from the exact skill's own configuration. This is deliberately
 /// independent of production MotionPlan's supported-motion allowlist: observing
 /// an unknown configuration does not make that class a usable mapper template.
@@ -166,10 +334,13 @@ fn main() -> Result<()> {
             "identity":MotionPlan::audit_registry_identity(&mut source.reflection,sample.indicator,skill),
             "values":MotionPlan::audit_registry_values(&mut source.reflection,sample.indicator,skill),
             "configuration":config_values(&mut source.reflection,sample.indicator,skill),
+            "drag_gate":MotionPlan::discover(&mut source.reflection,sample.indicator,skill)
+                .and_then(|plan|plan.audit_drag_gate(&mut source.reflection)),
             "end_ns":now_ns(),
         }));
     }
     let controls=source.audit_control_state();let ui=source.audit_ui_input();
+    let charge_lifecycle=charge_lifecycle(&mut source.reflection,sample.match_owners[2]);
     let final_sample=source.sample(now_ns(),size);
     let same_match=final_sample.as_ref().is_ok_and(|value|value.match_owners==sample.match_owners&&value.indicator==sample.indicator&&value.frame.hero_id.int()==hero);
     if process_identity(pid)?!=identity {return Err("Runtime identity changed during audit".into());}
@@ -178,7 +349,7 @@ fn main() -> Result<()> {
         "start_ns":start_ns,"end_ns":now_ns(),"hero":hero,"epoch":frame.token.as_str(),"resolution":size,
         "sample_ns":frame.time_ns.value,"active_skill":frame.skill_id.int(),"active_slot":frame.ui.active_slot.as_str(),
         "read_ms":frame.sample_duration_ms.value,"types":sample.control_types,"buttons":buttons,"variants":variants,
-        "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"sample_rejections":errors,
+        "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"sample_rejections":errors,
         "same_match_at_end":same_match,"final_sample_error":final_sample.err(),
         "scope":"read-only owned gameplay controls/configuration; no memory writes, input or production template authorization",
     });

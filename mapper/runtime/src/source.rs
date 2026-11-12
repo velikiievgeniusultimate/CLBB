@@ -195,6 +195,8 @@ pub struct ButtonPlan {
     pub variant: Option<u64>,
     pub cast_lock: Option<u64>,
     pub state_forbid: Option<u64>,
+    pub(crate) charge: Option<crate::control_audit::ChargePlan>,
+    charge_retry: i64,
     pub timer: Option<u64>,
     pub widget: Option<Widget>,
 }
@@ -360,6 +362,11 @@ impl UiPlan {
             } else {
                 None
             };
+            let charge = if kind == "skill" {
+                crate::control_audit::ChargePlan::discover(r, button, data, local_show).ok()
+            } else {
+                None
+            };
             checks.push((button, class.address.to_le_bytes().to_vec()));
             checks.push((at, index.to_le_bytes().to_vec()));
             buttons.push(ButtonPlan {
@@ -373,6 +380,8 @@ impl UiPlan {
                 variant,
                 cast_lock,
                 state_forbid,
+                charge,
+                charge_retry: 0,
                 timer,
                 widget: None,
             });
@@ -733,6 +742,8 @@ pub struct Sample {
     pub aim: Option<[f64; 3]>,
     pub direction_visual: Option<crate::projection::DirectionVisual>,
     pub control_types: std::collections::BTreeMap<String,u8>,
+    /// Current coherent charge lifecycle observations; absence is unknown.
+    pub control_holds: std::collections::BTreeMap<String, bool>,
     pub linked: Option<crate::linked_gesture::Observation>,
 }
 struct Plan {
@@ -1117,6 +1128,16 @@ impl<M: Memory> Source<M> {
             }
             consumed.extend(c);Some(v)} else {None};
         let mut control_types=std::collections::BTreeMap::new();
+        let mut control_holds = std::collections::BTreeMap::new();
+        for button in plan.ui.buttons.iter_mut().filter(|button| button.kind == "skill") {
+            if button.charge.is_none() && now >= button.charge_retry {
+                button.charge = crate::control_audit::ChargePlan::discover(r, button.object, button.data, plan.match_owners[2]).ok();
+                button.charge_retry = now.saturating_add(1_000_000_000);
+            }
+            if let Some(value) = button.charge.as_ref().and_then(|charge| charge.sample(r, &mut consumed)) {
+                control_holds.insert(button.slot.clone(), value);
+            }
+        }
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill" || b.kind.as_str()=="extra") {
             let id=skill_state.buttons.iter().take(skill_state.count.min(32) as usize)
                 .find(|v|v.slot.as_str()==entry.slot.as_str() && v.base_skill_id.int()==entry.skill_id.int())
@@ -1270,7 +1291,8 @@ impl<M: Memory> Source<M> {
             }
             if let Some(m) = plan.motions.get_mut(&skill) {
                 m.refresh_visual(r);
-                match m.sample_bracketed(r, &mut frame, &mut consumed) {
+                let allow_fixed_range=control_holds.get(frame.ui.active_slot.as_str())==Some(&false);
+                match m.sample_bracketed_with_fixed_range(r, &mut frame, &mut consumed,allow_fixed_range) {
                     Ok(p) => aim = p,
                     Err(_) => {
                         m.unavailable(&mut frame);
@@ -1281,6 +1303,14 @@ impl<M: Memory> Source<M> {
                 }
             }
         }
+        // A verified direction joystick may need its first MOVE before the
+        // motion publishes a unit vector. UI ownership/geometry are sampled
+        // independently; missing feedback must not erase that bootstrap path.
+        let direction_motion = plan.motions.get(&skill).is_some_and(|motion| {
+            matches!(motion.name.as_str(), "IndicatorMotionRot" | "IndicatorLieShaMotion" | "IndicatorMotionArcSurface")
+                && motion.validate(r).is_ok()
+        });
+        attach_owned_direction_geometry(&mut frame, &control_types, direction_motion);
         if skill==8410 && frame.direction_input.ready.get() {
             let query=plan.ui.buttons.iter().find(|b|b.slot=="skill:0").and_then(|q| {
                 let at=r.field(q.object,"currentDirect").ok()?;
@@ -1309,6 +1339,7 @@ impl<M: Memory> Source<M> {
             aim,
             direction_visual,
             control_types,
+            control_holds,
             linked,
         })
     }
@@ -1317,6 +1348,74 @@ impl<M: Memory> Source<M> {
 /// All native receipts and the exact geometry used to interpret them share one
 /// phase. Controller freshness/causality must see real boundaries, never a
 /// fabricated zero-duration bracket or a pre-read end timestamp.
+/// Authorize a geometry handoff from this sample's already owned UI button.
+/// The caller proves the actual native motion's Direction family and retains
+/// its owner checks in the Source coherence fence. This creates no input ACK.
+fn attach_owned_direction_geometry(
+    frame: &mut s::Frame,
+    types: &std::collections::BTreeMap<String, u8>,
+    direction_motion_verified: bool,
+) {
+    let slot = frame.ui.active_slot.as_str();
+    let actual = frame.skill_id;
+    let g = frame.ui.joystick;
+    let now = frame.time_ns;
+    if !direction_motion_verified || types.get(slot) != Some(&2)
+        || !frame.ready.get() || !frame.ui.ready.get()
+        || !frame.token_string.get() || !frame.token_nonempty.get()
+        || frame.token.as_str().is_empty() || slot.is_empty()
+        || !frame.hero_id.is_number() || frame.hero_id.int() <= 0
+        || frame.ui.hero_id.int() != frame.hero_id.int()
+        || !actual.is_number() || actual.int() <= 0
+        || !now.is_number() || !now.value.is_finite()
+        || frame.ui.time_ns.kind != now.kind || frame.ui.time_ns.value != now.value
+        || !g.ready.get() || g.source.as_str() != "active_widget_transform"
+        || g.slot.as_str() != slot || !g.center_uv.valid() || !g.radius_uv.valid()
+        || g.center_uv.values.iter().any(|v| !v.value.is_finite() || !(0. ..=1.).contains(&v.value))
+        || g.radius_uv.values.iter().any(|v| !v.value.is_finite() || v.value <= 0. || v.value > 1.)
+        || g.sample_start_ns.kind != now.kind || g.sample_start_ns.value != now.value
+        || g.sample_end_ns.kind != now.kind || g.sample_end_ns.value != now.value
+        || frame.ui.button_count > 32
+    {
+        return;
+    }
+    let mut buttons = frame.ui.buttons[..frame.ui.button_count as usize].iter()
+        .filter(|button| button.slot.as_str() == slot);
+    let Some(button) = buttons.next() else { return };
+    if buttons.next().is_some() || !button.active.get()
+        || !button.skill_id.is_number() || button.skill_id.int() <= 0
+        || !g.skill_id.is_number() || g.skill_id.value != button.skill_id.value
+    {
+        return;
+    }
+    let actual_owned = match button.kind.as_str() {
+        "skill" => {
+            let state = &frame.skill_state;
+            if !state.ready.get() || state.count > 32
+                || state.source.as_str() != "ShowSkillData.m_TranID"
+                || state.token.as_str() != frame.token.as_str()
+                || state.hero_id.int() != frame.hero_id.int()
+                || state.sample_start_ns.kind != now.kind || state.sample_start_ns.value != now.value
+                || state.sample_end_ns.kind != now.kind || state.sample_end_ns.value != now.value
+            {
+                return;
+            }
+            let mut rows = state.buttons[..state.count as usize].iter()
+                .filter(|row| row.slot.as_str() == slot);
+            let Some(row) = rows.next() else { return };
+            rows.next().is_none() && row.base_skill_id.is_number()
+                && row.base_skill_id.value == button.skill_id.value
+                && row.active_skill_id.is_number() && row.active_skill_id.int() > 0
+                && (actual.value == button.skill_id.value || actual.value == row.active_skill_id.value)
+        }
+        "extra" => actual.value == button.skill_id.value,
+        _ => false,
+    };
+    if actual_owned {
+        frame.active_joystick = s::Geometry { skill_id: actual, ..g };
+    }
+}
+
 fn stamp_frame(frame: &mut s::Frame, begin: i64, end: i64) {
     let start = number(begin as f64);
     let finish = number(end as f64);
@@ -1389,6 +1488,74 @@ mod tests {
             r.memory.0.borrow_mut()[address as usize] = (!expected) as u8;
             assert!(check(&r, &reads).is_err());
             r.memory.0.borrow_mut()[address as usize] = expected as u8;
+        }
+    }
+    fn cold_direction_geometry_fixture() -> (s::Frame, std::collections::BTreeMap<String, u8>) {
+        let mut f = s::Frame::default();
+        f.ready = flag(true); f.token = text("owned-match");
+        f.token_string = flag(true); f.token_nonempty = flag(true);
+        f.hero_id = number(126.); f.skill_id = number(12610.); f.time_ns = number(1000.);
+        f.ui.ready = flag(true); f.ui.hero_id = f.hero_id; f.ui.time_ns = f.time_ns;
+        f.ui.active_slot = text("skill:0"); f.ui.button_count = 1;
+        f.ui.buttons[0] = s::Button {
+            slot: text("skill:0"), kind: text("skill"), skill_id: number(12610.),
+            active: flag(true), ..Default::default()
+        };
+        f.ui.joystick = s::Geometry {
+            ready: flag(true), source: text("active_widget_transform"), slot: text("skill:0"),
+            skill_id: number(12610.), sample_start_ns: f.time_ns, sample_end_ns: f.time_ns,
+            center_uv: v2([0.8, 0.8]), radius_uv: v2([0.1, 0.1]),
+        };
+        f.skill_state = s::VariantState {
+            ready: flag(true), source: text("ShowSkillData.m_TranID"), token: f.token,
+            hero_id: f.hero_id, sample_start_ns: f.time_ns, sample_end_ns: f.time_ns,
+            count: 1, ..Default::default()
+        };
+        f.skill_state.buttons[0] = s::Variant {
+            slot: text("skill:0"), base_skill_id: number(12610.), active_skill_id: number(12611.),
+            ..Default::default()
+        };
+        (f, [("skill:0".into(), 2)].into_iter().collect())
+    }
+    #[test]
+    fn owned_direction_ui_geometry_survives_missing_native_unit_feedback_without_ack() {
+        for actual in [12610., 12611.] {
+            let (mut f, types) = cold_direction_geometry_fixture();
+            f.skill_id = number(actual);
+            attach_owned_direction_geometry(&mut f, &types, true);
+            assert!(f.active_joystick.ready.get());
+            assert_eq!(f.active_joystick.skill_id.value, actual);
+            assert!(f.direction_input.ready.missing(), "geometry handoff must not fabricate a native receipt");
+            assert!(f.direction_input.raw_touch_xyz.values.iter().all(|v| v.missing()));
+            stamp_frame(&mut f, 1000, 1200);
+            assert_eq!(f.active_joystick.sample_start_ns.value, 1000.);
+            assert_eq!(f.active_joystick.sample_end_ns.value, 1200.);
+        }
+    }
+    #[test]
+    fn cold_direction_geometry_requires_current_motion_slot_form_and_source_ownership() {
+        for case in 0..14 {
+            let (mut f, mut types) = cold_direction_geometry_fixture();
+            let mut motion_verified = true;
+            match case {
+                0 => motion_verified = false,
+                1 => { types.insert("skill:0".into(), 3); }
+                2 => f.ui.active_slot = text("skill:1"),
+                3 => f.ui.joystick.slot = text("skill:1"),
+                4 => f.ui.joystick.skill_id = number(12630.),
+                5 => f.skill_id = number(777.),
+                6 => f.skill_state.token = text("previous-match"),
+                7 => f.ui.hero_id = number(25.),
+                8 => f.ui.joystick.sample_start_ns = number(999.),
+                9 => f.ui.joystick.source = text("estimated_widget"),
+                10 => { f.ui.buttons[1] = f.ui.buttons[0]; f.ui.button_count = 2; }
+                11 => { f.skill_state.buttons[1] = f.skill_state.buttons[0]; f.skill_state.count = 2; }
+                12 => f.ui.buttons[0].active = flag(false),
+                _ => f.ui.joystick.radius_uv.values[0] = number(f64::NAN),
+            }
+            attach_owned_direction_geometry(&mut f, &types, motion_verified);
+            assert!(!f.active_joystick.ready.get(), "case {case}: unowned/stale/Range geometry must not bootstrap Direction");
+            assert!(!f.direction_input.ready.get());
         }
     }
     #[test]

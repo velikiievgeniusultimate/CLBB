@@ -18,6 +18,8 @@ pub struct MotionPlan {
     circle_field: Option<u64>,
     circle_owner: u64,
     range: Option<u64>,
+    range_shape: Option<f64>,
+    legacy_range: bool,
     protect: Option<(u64, u64, u64)>,
     direction_visual: Option<(u64,u64,u64)>,
     direction_arrow_field: Option<u64>,
@@ -36,9 +38,12 @@ fn owner<M: Memory>(
     Ok(v)
 }
 fn typed_field<M:Memory>(r:&mut Reflection<M>,object:u64,name:&str,kind:u8)->Result<u64> {
+    typed_value_field(r,object,name,kind,false)
+}
+fn typed_value_field<M:Memory>(r:&mut Reflection<M>,object:u64,name:&str,kind:u8,allow_static:bool)->Result<u64> {
     let at=r.field(object,name)?;let mut class=r.class(r.pointer(object)?)?;
     for _ in 0..16 {
-        if let Some(f)=class.fields.get(name) {if f.kind!=kind||f.is_static{return Err("Native visual field type changed".into());}return Ok(at);}
+        if let Some(f)=class.fields.get(name) {if f.kind!=kind||(f.is_static&&!allow_static){return Err("Native visual field type changed".into());}return Ok(at);}
         if class.parent==0{break}class=r.class(class.parent)?;
     }
     Err("Native visual field absent".into())
@@ -64,6 +69,55 @@ fn movement_driven_template(motion:&str,package:&str,rect:i32,params:&[f64])->bo
         && rect==11 && params.len()>=2 && params[0]==27.
         && params[1].is_finite() && params[1]>0. && params[1]<1e4
 }
+fn fixed_part_direction_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
+    motion=="IndicatorMotionRot" && package=="IndicatorPackage_JianTou_OtherFixedPart"
+        && rect==11 && params.len()>=2 && params[0]==15.
+        && params[1].is_finite() && params[1]>0. && params[1]<1e4
+}
+fn native_range_shape(motion:&str,package:&str)->Option<f64> {
+    match (motion,package) {
+        ("IndicatorMotionRotAndPosRot"|"IndicatorMotionFaTiaoQiu2","IndicatorPackage_JianTou_Yuan")=>Some(8.),
+        ("IndicatorMotionPos","IndicatorPackageEasy_Yuan")=>Some(3.),
+        _=>None,
+    }
+}
+fn point_visual_fallback(motion:&str,package:&str)->bool {
+    motion=="IndicatorMotionPos"&&package=="IndicatorPackageEasy_Yuan"
+}
+fn valid_native_range(shape:f64,values:[f64;2])->bool {
+    values[0]==shape && values[1].is_finite() && values[1]>0. && values[1]<=1e4
+}
+/// A configuration radius is meaningful only within these measured families.
+/// Keep distance bytes out of the persistent identity fence: buffs may replace
+/// the distance while preserving the same typed configuration/array owner.
+fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
+    motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<(u64,f64)>> {
+    let Some(shape)=native_range_shape(motion_name,package_name)else{return Ok(None)};
+    let mut config=0;
+    for object in [comp,motion,package] {
+        let at=typed_field(r,object,"m_Config",17)?;
+        let linked=u64_at(&capture(r,checks,at,8)?,0);
+        if linked==0||(config!=0&&linked!=config){return Err("Native range owners differ".into());}
+        config=linked;
+    }
+    let owner=u64_at(&capture(r,checks,config,8)?,0);
+    if r.class(owner)?.name!="CData_Skill_Element"{return Err("Native range configuration type changed".into());}
+    let id_at=typed_field(r,config,"m_SkillID",8)?;
+    if i32_at(&capture(r,checks,id_at,4)?,0)!=skill{return Err("Native range belongs to another skill".into());}
+    let params_at=typed_field(r,config,"m_ShowRectPara",29)?;
+    let params=u64_at(&capture(r,checks,params_at,8)?,0);
+    let header=capture(r,checks,params,32)?;let count=u64_at(&header,24);
+    if !(4..=64).contains(&count){return Err("Native range array changed".into());}
+    let array=capture(r,checks,u64_at(&header,0),0x50)?;
+    if r.cstring(u64_at(&array,16))?!="Single[]"||r.class(u64_at(&array,0x40))?.name!="Single" {
+        return Err("Native range array type changed".into());
+    }
+    let address=params+32;let raw=r.read(address,8)?;
+    if !valid_native_range(shape,[f32_at(&raw,0),f32_at(&raw,4)]) {return Err("Invalid native world range".into());}
+    checks.push((address,raw[..4].to_vec()));
+    if r.read(address,8)?!=raw{return Err("Native range changed during discovery".into());}
+    Ok(Some((address,shape)))
+}
 fn native_rect_config<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,checks:&mut Checks)->Result<(i32,[f64;2])> {
     let config=owner(r,comp,"m_Config",checks)?;
     let class=r.class(r.pointer(config)?)?;
@@ -87,6 +141,16 @@ fn native_rect_config<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,checks:&
     let raw=capture(r,checks,params+32,8)?;
     Ok((ints[1],[f32_at(&raw,0),f32_at(&raw,4)]))
 }
+fn fixed_part_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,motion:&str,package:&str,checks:&mut Checks)->Result<bool> {
+    if motion!="IndicatorMotionRot" || package!="IndicatorPackage_JianTou_OtherFixedPart" {
+        return Ok(false);
+    }
+    let (rect,params)=native_rect_config(r,comp,skill,checks)?;
+    if !fixed_part_direction_template(motion,package,rect,&params) {
+        return Err("Unverified fixed-part direction configuration".into());
+    }
+    Ok(true)
+}
 impl MotionPlan {
     /// Separate read-only diagnostic bracket; does not alter live acknowledgement rules.
     pub fn audit_drag_gate<M: Memory>(&self, r: &mut Reflection<M>) -> Result<serde_json::Value> {
@@ -103,6 +167,13 @@ impl MotionPlan {
                     return Err("Unexpected diagnostic drag protector class".into());
                 }
                 consumed.push((child, owner.to_le_bytes().to_vec()));
+                let owner_field=typed_field(r,child,"m_Owner",18)?;
+                let motion=u64_at(&capture(r,&mut consumed,owner_field,8)?,0);
+                values.insert("protector.owner_matches_motion".into(),serde_json::json!(motion==self.motion));
+                if motion!=0 {
+                    let class=u64_at(&capture(r,&mut consumed,motion,8)?,0);
+                    values.insert("protector.owner_class".into(),serde_json::json!(r.class(class)?.name));
+                }
                 objects.push(("protector", child));
             }
         }
@@ -392,7 +463,11 @@ impl MotionPlan {
     }
     pub fn discover_behavior<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -> Result<(Checks,u8)> {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
-        let kind=if let Some(kind)=native_template(&mc.name,&pc.name) {kind}
+        let kind=if let Some(kind)=native_template(&mc.name,&pc.name) {
+            if kind==3 {native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Unverified native range family")?;}
+            kind
+        }
+        else if fixed_part_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)? {2}
         else if mc.name=="IndicatorMotionPos" && pc.name=="IndicatorPackage_TwoPartAndPos_Direction" {
             let (rect,params)=native_rect_config(r,comp,skill,&mut checks)?;
             if !zero_extent_template(&mc.name,&pc.name,rect,&params) {return Err("Unverified nonzero point template".into());}
@@ -412,6 +487,8 @@ impl MotionPlan {
     pub fn discover<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -> Result<Self> {
         let (mut checks,comp,motion,package,motion_class,package_class)=Self::registry_owner(r,indicator,skill)?;
         let name=motion_class.name.clone();
+        let range_contract=native_range_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
+        let fixed_part_direction=fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
         let expected = match skill {
             2510 => Some((
                 "IndicatorMotionRotAndPosRot",
@@ -422,7 +499,7 @@ impl MotionPlan {
             20150 => Some(("IndicatorMotionRot", "IndicatorPackageEasy_ShanXing_Normal")),
             20020 => Some(("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal")),
             8430 => Some(("IndicatorMotionRot", "IndicatorPackageEasy")),
-            _ if matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
+            _ if fixed_part_direction || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
             _ => None,
         };
         if expected.is_none_or(|(motion, package)| name != motion || package_class.name != package)
@@ -458,8 +535,9 @@ impl MotionPlan {
              Some(typed_field(r,package,"_dragArrow",18)?),
              Some((typed_field(r,motion,"m_dragged",2)?,typed_field(r,motion,"m_bVaildDraged",2)?)))
         }else{(None,None,None)};
-        let circle_field = r.field(package, "m_gYuan").ok().or_else(|| {
-            (skill == 8425).then(||r.field(package,"<m_gMain>k__BackingField").ok()).flatten()
+        let circle_field = typed_field(r,package, "m_gYuan",18).ok().or_else(|| {
+            point_visual_fallback(&name,&package_class.name)
+                .then(||typed_field(r,package,"<m_gMain>k__BackingField",18).ok()).flatten()
         });
         let circle_owner = circle_field.and_then(|a| r.pointer(a).ok()).unwrap_or(0);
         let circle = if let Some(a) = circle_field {
@@ -472,54 +550,27 @@ impl MotionPlan {
         } else {
             None
         };
-        let mut range = None;
+        let range = range_contract.map(|(address,_)|address);
+        let range_shape = range_contract.map(|(_,shape)|shape);
+        let legacy_range=matches!(skill,2510|2511|8425);
         let mut protect = None;
-        if [2510, 2511, 8425].contains(&skill) {
-            let config = owner(r, comp, "m_Config", &mut checks)?;
-            if owner(r, motion, "m_Config", &mut checks)? != config
-                || owner(r, package, "m_Config", &mut checks)? != config
-            {
-                return Err("Native range owners differ".into());
-            }
-            let id = r.field(config, "m_SkillID")?;
-            if r.integer(id)? != skill {
-                return Err("Native range belongs to another skill".into());
-            }
-            checks.push((id, skill.to_le_bytes().to_vec()));
-            let params = owner(r, config, "m_ShowRectPara", &mut checks)?;
-            let array_class = r.pointer(params)?;
-            let array_header = r.read(array_class, 0x118)?;
-            if r.cstring(u64_at(&array_header, 16))? != "Single[]" {
-                return Err("Native range is not a float array".into());
-            }
-            let element = u64_at(&array_header, 0x40);
-            if r.class(element)?.name != "Single" {
-                return Err("Native range element changed type".into());
-            }
-            checks.extend([
-                (config, r.pointer(config)?.to_le_bytes().to_vec()),
-                (params, array_class.to_le_bytes().to_vec()),
-                (array_class + 0x40, element.to_le_bytes().to_vec()),
-            ]);
-            let count = r.pointer(params + 24)?;
-            if !(4..=64).contains(&count) {
-                return Err("Native range array changed".into());
-            }
-            checks.push((params + 24, count.to_le_bytes().to_vec()));
-            range = Some(params + 32);
+        if range_contract.is_some() {
             for n in ["m_dragged", "m_bVaildDraged"] {
-                fields.insert(n.into(), r.field(motion, n)?);
+                fields.insert(n.into(), typed_field(r,motion,n,2)?);
             }
-            let p = owner(r, motion, "m_DragProtectComp", &mut checks)?;
+            let at=typed_field(r,motion,"m_DragProtectComp",18)?;
+            let p=u64_at(&capture(r,&mut checks,at,8)?,0);
             let cls = r.class(r.pointer(p)?)?;
             if cls.name != "DragProtectComp" {
                 return Err("Native drag protector changed type".into());
             }
             checks.push((p, cls.address.to_le_bytes().to_vec()));
+            let owner_at=typed_field(r,p,"m_Owner",18)?;
+            if u64_at(&capture(r,&mut checks,owner_at,8)?,0)!=motion {return Err("Native drag protector belongs to another motion".into());}
             protect = Some((
-                r.field(p, "m_vFirstPress")?,
-                r.field(p, "bInFirstDrag")?,
-                r.field(p, "m_fSkillDeadZone")?,
+                typed_field(r,p,"m_vFirstPress",17)?,
+                typed_field(r,p,"bInFirstDrag",2)?,
+                typed_value_field(r,p,"m_fSkillDeadZone",12,true)?,
             ));
         }
         check(r, &checks)?;
@@ -533,6 +584,8 @@ impl MotionPlan {
             circle_field,
             circle_owner,
             range,
+            range_shape,
+            legacy_range,
             protect,
             direction_visual,
             direction_arrow_field,
@@ -638,6 +691,14 @@ impl MotionPlan {
         frame: &mut s::Frame,
         consumed: &mut Checks,
     ) -> Result<Option<[f64; 3]>> {
+        self.sample_bracketed_with_fixed_range(r,frame,consumed,false)
+    }
+    /// A new family receives fixed-range metadata only after the caller's
+    /// coherent local skill-data observation proves this is not a charge skill.
+    /// The old entry point preserves established Kagura/Ling behavior.
+    pub fn sample_bracketed_with_fixed_range<M: Memory>(
+        &self,r:&Reflection<M>,frame:&mut s::Frame,consumed:&mut Checks,allow_fixed_range:bool,
+    )->Result<Option<[f64;3]>> {
         check(r, &self.checks)?;
         consumed.extend(self.checks.iter().cloned());
         let low = *self
@@ -727,21 +788,24 @@ impl MotionPlan {
                 ..Default::default()
             };
             if let Some(a) = self.range {
-                let values = capture(r, consumed, a, 8)?;
-                let distance = f32_at(&values, 4);
-                let shape = if self.skill == 8425 { 3. } else { 8. };
-                if f32_at(&values, 0) != shape
-                    || !distance.is_finite()
-                    || distance <= 0.
-                    || distance > 1e4
-                {
-                    return Err("Invalid native world range".into());
-                }
-                logical.world_range = number(distance);
-                logical.world_range_source = text("CData_Skill_Element.m_ShowRectPara[1]");
-                logical.world_range_source_present = flag(true);
-                if r.read(a, 8)? != values {
-                    return Err("Native range changed during sample".into());
+                if self.legacy_range||allow_fixed_range {
+                    let values = capture(r, consumed, a, 8)?;
+                    let distance = f32_at(&values, 4);
+                    let shape=self.range_shape.ok_or("Native range shape missing")?;
+                    if !valid_native_range(shape,[f32_at(&values,0),distance]) {
+                        return Err("Invalid native world range".into());
+                    }
+                    logical.world_range = number(distance);
+                    logical.world_range_source = text("CData_Skill_Element.m_ShowRectPara[1]");
+                    logical.world_range_source_present = flag(true);
+                    if r.read(a, 8)? != values {
+                        return Err("Native range changed during sample".into());
+                    }
+                } else {
+                    // The fixed configuration value is not an observation of
+                    // a charged/growing range. Revoke only this metadata while
+                    // retaining current drag readiness and the visual marker.
+                    logical.world_range_source_present=flag(false);
                 }
             }
             if let Some((first, active, dead_zone)) = self.protect {
@@ -797,7 +861,7 @@ mod tests {
     struct MutableMemory(RefCell<Vec<u8>>);
     impl Memory for MutableMemory {
         fn regions(&self) -> Result<Vec<crate::platform::Region>> {
-            Ok(vec![])
+            Ok(vec![crate::platform::Region {start:0,end:self.0.borrow().len()as u64,readable:true,writable:true,name:"test-owned".into()}])
         }
         fn read(&self, address: u64, length: usize) -> Result<Vec<u8>> {
             self.0
@@ -850,6 +914,8 @@ mod tests {
             circle_field: None,
             circle_owner: 0,
             range: Some(800),
+            range_shape:Some(8.),
+            legacy_range:true,
             protect: Some((1024, 1036, 1040)),
             direction_visual: None,
             direction_arrow_field:None,
@@ -973,6 +1039,90 @@ mod tests {
         assert!(!frame.logical.first_drag.get());
     }
     #[test]
+    fn generic_point_fixed_range_requires_non_charge_policy_and_revokes_without_losing_drag() {
+        let (r,mut plan)=q_fixture();
+        plan.skill=11810;plan.name="IndicatorMotionPos".into();plan.range_shape=Some(3.);plan.legacy_range=false;
+        r.memory.0.borrow_mut()[800..804].copy_from_slice(&3f32.to_le_bytes());
+        r.memory.0.borrow_mut()[804..808].copy_from_slice(&3f32.to_le_bytes());
+        r.memory.0.borrow_mut()[581]=1;r.memory.0.borrow_mut()[1036]=0;
+        plan.checks.push((800,3f32.to_le_bytes().to_vec()));
+        let mut frame=s::Frame::default();let mut reads=Vec::new();
+        plan.sample_bracketed_with_fixed_range(&r,&mut frame,&mut reads,true).unwrap();
+        assert_eq!(frame.logical.world_range.value,3.);
+        assert!(frame.logical.world_range_source_present.get());
+        assert_eq!(frame.logical.world_range_source.as_str(),"CData_Skill_Element.m_ShowRectPara[1]");
+        // Unknown/charged share the explicit false policy. Even a nonsensical
+        // static distance must not suppress unrelated current input feedback.
+        r.memory.0.borrow_mut()[804..808].copy_from_slice(&f32::NAN.to_le_bytes());
+        reads.clear();
+        plan.sample_bracketed_with_fixed_range(&r,&mut frame,&mut reads,false).unwrap();
+        assert!(frame.logical.world_range.missing());
+        assert!(frame.logical.world_range_source.missing());
+        assert!(frame.logical.world_range_source_present.is_bool());
+        assert!(!frame.logical.world_range_source_present.get());
+        assert!(frame.logical.ready.get()&&frame.logical.input_ready.get());
+        assert!(frame.logical.valid_drag.get()&&!frame.logical.first_drag.get());
+        assert!(plan.sample_bracketed_with_fixed_range(&r,&mut frame,&mut Vec::new(),true).is_err());
+        // The compatibility entry point cannot silently authorize a new family.
+        plan.sample(&r,&mut frame).unwrap();assert!(frame.logical.world_range.missing());
+        // A changed shape revokes the cached contract even without permission
+        // to read the distance itself.
+        r.memory.0.borrow_mut()[800..804].copy_from_slice(&8f32.to_le_bytes());
+        assert!(plan.sample(&r,&mut frame).is_err());
+    }
+    #[test]
+    fn known_range_retains_legacy_metadata_and_generic_owner_replacement_revokes_sample() {
+        let (r,mut plan)=q_fixture();let mut frame=s::Frame::default();
+        plan.sample_bracketed_with_fixed_range(&r,&mut frame,&mut Vec::new(),false).unwrap();
+        assert_eq!(frame.logical.world_range.value,10.);
+        plan.skill=11810;plan.name="IndicatorMotionPos".into();plan.range_shape=Some(3.);plan.legacy_range=false;
+        r.memory.0.borrow_mut()[800..804].copy_from_slice(&3f32.to_le_bytes());
+        plan.circle_field=Some(1200);plan.circle_owner=1400;
+        r.memory.0.borrow_mut()[1200..1208].copy_from_slice(&1400u64.to_le_bytes());
+        let mut reads=Vec::new();plan.sample_bracketed_with_fixed_range(&r,&mut frame,&mut reads,false).unwrap();
+        r.memory.0.borrow_mut()[1200..1208].copy_from_slice(&1500u64.to_le_bytes());
+        assert!(check(&r,&reads).is_err());
+        assert!(plan.sample(&r,&mut frame).is_err());
+    }
+    #[test]
+    fn native_range_shapes_and_visual_fallback_are_exact_families() {
+        for (motion,package,shape)in [
+            ("IndicatorMotionPos","IndicatorPackageEasy_Yuan",3.),
+            ("IndicatorMotionRotAndPosRot","IndicatorPackage_JianTou_Yuan",8.),
+            ("IndicatorMotionFaTiaoQiu2","IndicatorPackage_JianTou_Yuan",8.),
+        ] {
+            assert_eq!(native_range_shape(motion,package),Some(shape));
+            assert!(valid_native_range(shape,[shape,3.]));
+            for values in [[shape+1.,3.],[shape,0.],[shape,-1.],[shape,f64::NAN],[shape,f64::INFINITY],[shape,10001.]] {
+                assert!(!valid_native_range(shape,values));
+            }
+        }
+        assert_eq!(native_range_shape("IndicatorMotionPos","Unknown"),None);
+        assert_eq!(native_range_shape("Unknown","IndicatorPackageEasy_Yuan"),None);
+        assert_eq!(native_range_shape("IndicatorMotionRot","IndicatorPackageEasy_Yuan"),None);
+        assert!(point_visual_fallback("IndicatorMotionPos","IndicatorPackageEasy_Yuan"));
+        assert!(!point_visual_fallback("IndicatorMotionPos","IndicatorPackage_TwoPartAndPos_Direction"));
+        assert!(!point_visual_fallback("IndicatorMotionRot","IndicatorPackageEasy_Yuan"));
+    }
+    #[test]
+    fn typed_range_field_rejects_wrong_kind_and_only_explicitly_allows_static_deadzone() {
+        let mut bytes=vec![0u8;4096];let object=512u64;let class=1024u64;
+        bytes[512..520].copy_from_slice(&class.to_le_bytes());
+        for (at,value)in [(1040,1400u64),(1088,class),(1096,class),(1144,1600),(1192,2200)] {bytes[at..at+8].copy_from_slice(&value.to_le_bytes());}
+        bytes[1284..1286].copy_from_slice(&1u16.to_le_bytes());
+        bytes[1400..1405].copy_from_slice(b"Test\0");
+        bytes[1600..1608].copy_from_slice(&1800u64.to_le_bytes());
+        bytes[1608..1616].copy_from_slice(&1900u64.to_le_bytes());
+        bytes[1616..1624].copy_from_slice(&class.to_le_bytes());
+        bytes[1624..1628].copy_from_slice(&32u32.to_le_bytes());
+        bytes[1800..1806].copy_from_slice(b"value\0");
+        bytes[1908..1912].copy_from_slice(&((12u32<<16)|16).to_le_bytes());
+        let mut r=Reflection::new(MutableMemory(RefCell::new(bytes))).unwrap();
+        assert!(typed_field(&mut r,object,"value",12).is_err());
+        assert_eq!(typed_value_field(&mut r,object,"value",12,true).unwrap(),2232);
+        assert!(typed_value_field(&mut r,object,"value",2,true).is_err());
+    }
+    #[test]
     fn first_press_and_dead_zone_participate_in_the_outer_receipt_bracket() {
         let (r, plan) = q_fixture();
         let mut frame = s::Frame::default();
@@ -1035,6 +1185,24 @@ mod tests {
         assert!(!movement_driven_template("Unknown",p,11,&[27.,3.]));
         assert!(!movement_driven_template(m,"Unknown",11,&[27.,3.]));
         assert!(!movement_driven_template(m,p,2,&[27.,3.]));
+    }
+
+    #[test]
+    fn fixed_part_direction_requires_exact_pair_and_native_shape() {
+        let m="IndicatorMotionRot";let p="IndicatorPackage_JianTou_OtherFixedPart";
+        assert!(fixed_part_direction_template(m,p,11,&[15.,3.4]));
+        assert!(fixed_part_direction_template(m,p,11,&[15.,7.5,12658.]));
+        for params in [&[2.,3.4][..],&[15.,0.][..],&[15.,-1.][..],&[15.,1e4][..],
+                       &[15.,f64::NAN][..],&[15.,f64::INFINITY][..],&[f64::NAN,3.4][..],&[15.][..],&[][..]] {
+            assert!(!fixed_part_direction_template(m,p,11,params));
+        }
+        assert!(!fixed_part_direction_template("IndicatorMotionPos",p,11,&[15.,3.4]));
+        assert!(!fixed_part_direction_template("Unknown",p,11,&[15.,3.4]));
+        assert!(!fixed_part_direction_template(m,"IndicatorPackageEasy_JianTou",11,&[15.,3.4]));
+        assert!(!fixed_part_direction_template(m,p,0,&[15.,3.4]));
+        // No broad Rot/package allowlist entry: both discovery paths must go
+        // through the same typed, owner-checked configuration contract.
+        assert_eq!(native_template(m,p),None);
     }
 
 }

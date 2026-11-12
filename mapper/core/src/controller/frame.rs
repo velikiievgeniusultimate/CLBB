@@ -271,7 +271,7 @@ impl Controller {
         let ge = g.sample_end_ns.get(-1.);
         let expected = self
             .find_button(&self.activeSlot_)
-            .map(|b| self.measured_direction_skill_id(b))
+            .map(|b| self.direction_geometry_skill_id(b, f))
             .unwrap_or(0);
         if self.skillTouch_ >= 0
             && g.ready.get()

@@ -259,7 +259,7 @@ impl Controller {
             || !r.active_skill_id.is_number()
             || r.active_skill_id.value != r.active_skill_id.int() as f64
             || r.active_skill_id.int() <= 0
-            || r.active_skill_id.int() > 1_000_000
+            || r.active_skill_id.int() > MAX_SKILL_ID
         {
             return "unknown";
         }
