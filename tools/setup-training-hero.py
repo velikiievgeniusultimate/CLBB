@@ -71,6 +71,35 @@ def validate_controls(data, hero, epoch=None, now_ns=None):
     return token
 
 
+def validate_hero_level(data, hero, pid, birth, required_level=15, now_ns=None, expected_executable=None):
+    if (not isinstance(data, dict) or data.get('pid') != pid or str(data.get('birth')) != str(birth)
+            or data.get('hero') != hero or data.get('same_match_at_end') is not True):
+        raise ObservationError('hero_level_wrong_owner', 'Native level receipt belongs to another or unstable runtime/hero')
+    if expected_executable is not None and data.get('executable') != str(expected_executable):
+        raise ObservationError('hero_level_wrong_owner', 'Native level executable identity differs')
+    result = data.get('hero_level')
+    level = result.get('Ok') if isinstance(result, dict) else None
+    if not isinstance(level, dict):
+        raise ObservationError('hero_level_unknown', f'No coherent native hero level: {result}')
+    contract = {'hero': hero, 'source': 'EntityBase.<m_Level>k__BackingField', 'declaring_class': 'EntityBase',
+                'field': '<m_Level>k__BackingField', 'kind': 8, 'show_declaring_class': 'ShowEntity',
+                'show_field': 'm_Level', 'show_kind': 8, 'coherent': True, 'local_owner_verified': True}
+    if any(level.get(key) != value or (isinstance(value, bool) and type(level.get(key)) is not bool) for key, value in contract.items()):
+        raise ObservationError('hero_level_unverified_contract', 'Native local Actor/Show level contract is missing or changed')
+    start, end = level.get('start_ns'), level.get('end_ns')
+    if any(type(value) not in (int, float) or not math.isfinite(value) for value in (start, end)):
+        raise ObservationError('hero_level_unknown_clock', 'Missing finite native level timestamps')
+    now = time.monotonic_ns() if now_ns is None else now_ns
+    if start < 0 or end < start or end - start > 100_000_000 or end > now + 10_000_000 or now - end > 250_000_000:
+        raise ObservationError('hero_level_stale', 'Native level receipt is stale or incoherent')
+    value, shown = level.get('value'), level.get('show_level')
+    if type(value) is not int or type(shown) is not int or not 1 <= value <= 100 or value != shown:
+        raise ObservationError('hero_level_disagrees', 'Local Actor and ShowEntity do not agree on one integer hero level')
+    if value != required_level:
+        raise ObservationError('hero_level_not_maximum', f'Expected native hero level{required_level}, observed{value}; no skill learning follows')
+    return level
+
+
 def upgrade_plan(data):
     mapped = {}
     for row in data['buttons']:
@@ -180,6 +209,29 @@ class Setup(Probe):
             raise ObservationError('unstable_gm_topology', 'GM frame changed during native inventory')
         return data
 
+    def verify_level(self, stage, required_level=15):
+        self.identity()
+        self.expected_hero()
+        self.serial += 1
+        path = self.directory / f'{self.serial:03d}-{stage}.hero-level.json'
+        binary = ROOT / 'mapper/runtime/target/debug/hero-contract-audit'
+        result = subprocess.run([str(binary), '--level-only', str(self.pid), str(path)], cwd=ROOT,
+                                capture_output=True, text=True, timeout=20, check=False)
+        self.identity()
+        self.expected_hero()
+        entry = {'stage': stage, 'path': str(path), 'returncode': result.returncode,
+                 'stdout': result.stdout[-4000:], 'stderr': result.stderr[-4000:]}
+        self.report.setdefault('native_level_receipts', []).append(entry)
+        if not path.is_file():
+            raise ObservationError('hero_level_unknown', f'Native level observer produced no report: {entry}')
+        data = json.loads(path.read_text())
+        level = validate_hero_level(data, self.hero, self.pid, self.birth, required_level,
+                                    expected_executable=self.executable)
+        if result.returncode:
+            raise ObservationError('hero_level_observer_failed', f'Native level observer failed; inspect{path}')
+        entry['receipt'] = level
+        return entry
+
     def raw_idle(self):
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
@@ -277,7 +329,9 @@ def run(args, report):
             if args.max_level:
                 session.tap(widget(gm, MAX_LEVEL, require_visible=True)['center_uv'])
                 report['max_level'] = {'requested': True, 'native_max_button_observed': True,
-                                       'level_15_verified': False, 'reason': 'No independent native hero-level field is currently exposed'}
+                                       'level_15_verified': False}
+                receipt = session.verify_level('after-max-level', 15)
+                report['max_level'].update({'level_15_verified': True, 'native_level': 15, 'receipt': receipt})
             session.close_gm(args.gm_close_point)
             report['phases'].append({'name': 'gm_closed', 'ns': time.monotonic_ns()})
         if args.verify_flags and not args.max_level and not args.configure_flags:

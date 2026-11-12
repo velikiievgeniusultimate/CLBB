@@ -1315,9 +1315,54 @@ impl<M: Memory> Source<M> {
         // motion publishes a unit vector. UI ownership/geometry are sampled
         // independently; missing feedback must not erase that bootstrap path.
         let direction_motion = plan.motions.get(&skill).is_some_and(|motion| {
-            matches!(motion.name.as_str(), "IndicatorMotionRot" | "IndicatorLieShaMotion" | "IndicatorMotionArcSurface")
-                && motion.validate(r).is_ok()
+            motion.is_direction_geometry() && motion.validate(r).is_ok()
         });
+        // Covered sub-indicators are authorized by a fresh typed relationship
+        // from this very button's base motion, never by a nearby numeric ID.
+        set_covered_direction_binding(&mut frame, None);
+        if direction_motion && control_types.get(frame.ui.active_slot.as_str()) == Some(&2) {
+            let slot = frame.ui.active_slot.as_str();
+            let button = frame.ui.buttons[..frame.ui.button_count.min(32) as usize].iter()
+                .find(|button| button.slot.as_str() == slot && button.kind.as_str() == "skill" && button.active.get());
+            if let Some(button) = button {
+                let base = button.skill_id.int();
+                let active = frame.skill_state.buttons[..frame.skill_state.count.min(32) as usize].iter()
+                    .find(|row| row.slot.as_str() == slot && row.base_skill_id.int() == base)
+                    .map(|row| row.active_skill_id.int()).unwrap_or(0);
+                if base > 0 && skill > 0 && skill != base && skill != active {
+                    let checkpoint = consumed.len();
+                    let mut denied = "local_button_owner";
+                    let binding = (|| -> Result<bool> {
+                        let native = plan.ui.buttons.iter().find(|button| button.slot == slot && button.kind == "skill")
+                            .ok_or("Covered direction button unavailable")?;
+                        verify_local_covered_button(r, &mut consumed, native.object, native.data, plan.match_owners[2], base)?;
+                        denied = "base_motion_contract";
+                        if plan.motions.get(&base).is_some_and(|motion| motion.validate(r).is_err()) {
+                            plan.motions.remove(&base);
+                        }
+                        if !plan.motions.contains_key(&base) {
+                            let motion = crate::aim::MotionPlan::discover(r, plan.indicator, base)?;
+                            plan.motions.insert(base, motion);
+                        }
+                        denied = "typed_cover_list";
+                        plan.motions.get(&base).ok_or("Covered base motion unavailable")?
+                            .covers_direction_skill(r, skill, &mut consumed)
+                    })();
+                    if binding == Ok(true) {
+                        set_covered_direction_binding(&mut frame, Some((base, skill)));
+                        if !frame.direction_input.covered_binding_ready.get() {
+                            deny_covered_direction_binding(&mut frame, base, skill, "feedback_scope");
+                        }
+                    } else {
+                        // Failed optional binding discovery cannot poison the
+                        // independently valid camera/UI/native feedback sample.
+                        consumed.truncate(checkpoint);
+                        deny_covered_direction_binding(&mut frame, base, skill,
+                            if binding == Ok(false) { "not_in_cover_list" } else { denied });
+                    }
+                }
+            }
+        }
         attach_owned_direction_geometry(&mut frame, &control_types, direction_motion);
         if skill==8410 && frame.direction_input.ready.get() {
             let query=plan.ui.buttons.iter().find(|b|b.slot=="skill:0").and_then(|q| {
@@ -1356,6 +1401,91 @@ impl<M: Memory> Source<M> {
 /// All native receipts and the exact geometry used to interpret them share one
 /// phase. Controller freshness/causality must see real boundaries, never a
 /// fabricated zero-duration bracket or a pre-read end timestamp.
+fn covered_instance_field<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks,
+    object: u64, name: &str, kind: u8) -> Result<u64> {
+    if object == 0 { return Err("Covered direction object absent".into()); }
+    let mut class = u64_at(&capture(r, checks, object, 8)?, 0);
+    for _ in 0..24 {
+        let metadata = r.class(class)?;
+        if let Some(field) = metadata.fields.get(name) {
+            if field.is_static || field.kind != kind || field.offset > 1_048_576 {
+                return Err("Covered direction field type changed".into());
+            }
+            return object.checked_add(field.offset).ok_or("Covered direction address overflow".into());
+        }
+        if metadata.parent == 0 { break; }
+        class = metadata.parent;
+    }
+    Err(format!("Covered direction field absent: {name}"))
+}
+fn verify_local_covered_button<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks,
+    button: u64, data: u64, local_show: u64, base: i32) -> Result<()> {
+    let at = covered_instance_field(r, checks, button, "m_SkillData", 18)?;
+    if data == 0 || u64_at(&capture(r, checks, at, 8)?, 0) != data {
+        return Err("Covered data no longer owned by button".into());
+    }
+    let class = u64_at(&capture(r, checks, data, 8)?, 0);
+    if r.class(class)?.name != "ShowSkillData" { return Err("Covered data type changed".into()); }
+    let at = covered_instance_field(r, checks, data, "m_InitSkillID", 8)?;
+    if i32_at(&capture(r, checks, at, 4)?, 0) != base { return Err("Covered base binding changed".into()); }
+    let at = covered_instance_field(r, checks, local_show, "m_SkillComp", 18)?;
+    let local = u64_at(&capture(r, checks, at, 8)?, 0);
+    let at = covered_instance_field(r, checks, data, "m_SkillComp", 18)?;
+    if local == 0 || u64_at(&capture(r, checks, at, 8)?, 0) != local {
+        return Err("Covered data component is not local".into());
+    }
+    let class = u64_at(&capture(r, checks, local, 8)?, 0);
+    if r.class(class)?.name != "ShowSkillComp" { return Err("Covered local component type changed".into()); }
+    Ok(())
+}
+fn set_covered_direction_binding(frame: &mut s::Frame, binding: Option<(i32, i32)>) {
+    let input = &mut frame.direction_input;
+    input.covered_binding_ready = s::Flag::default();
+    input.covered_base_skill_id = s::Number::default();
+    input.covered_actual_skill_id = s::Number::default();
+    input.covered_source = s::Text::default();
+    if let Some((base, actual)) = binding {
+        if input.ready.get() && (input.token.as_str() != frame.token.as_str()
+            || input.hero_id.int() != frame.hero_id.int()
+            || input.slot.as_str() != frame.ui.active_slot.as_str()
+            || input.skill_id.int() != actual) {
+            return;
+        }
+        input.covered_binding_ready = flag(true);
+        input.covered_base_skill_id = number(base as f64);
+        input.covered_actual_skill_id = number(actual as f64);
+        input.covered_source = text("IndicatorMotionBase.lCoverSkills");
+        // This scope also accompanies geometry when native unit feedback is
+        // not ready. Neither readiness nor raw/direction values are fabricated.
+        input.token = frame.token;
+        input.hero_id = frame.hero_id;
+        input.slot = frame.ui.active_slot;
+        input.skill_id = number(actual as f64);
+        input.sample_start_ns = frame.time_ns;
+        input.sample_end_ns = frame.time_ns;
+    }
+}
+/// Failed optional discovery is diagnostic evidence only. A stable reason code
+/// records the attempted relationship without publishing ownership or input ACK.
+fn deny_covered_direction_binding(frame: &mut s::Frame, base: i32, actual: i32, reason: &str) {
+    let input = &mut frame.direction_input;
+    input.covered_binding_ready = flag(false);
+    input.covered_base_skill_id = number(base as f64);
+    input.covered_actual_skill_id = number(actual as f64);
+    input.covered_source = text(&format!("binding_unavailable:{reason}"));
+}
+fn current_covered_direction_binding(frame: &s::Frame, base: i32, actual: i32) -> bool {
+    let input = &frame.direction_input;
+    input.covered_binding_ready.get()
+        && input.covered_source.as_str() == "IndicatorMotionBase.lCoverSkills"
+        && input.covered_base_skill_id.is_number() && input.covered_base_skill_id.int() == base
+        && input.covered_actual_skill_id.is_number() && input.covered_actual_skill_id.int() == actual
+        && base > 0 && actual > 0
+        && input.token.as_str() == frame.token.as_str() && input.hero_id.int() == frame.hero_id.int()
+        && input.slot.as_str() == frame.ui.active_slot.as_str() && input.skill_id.int() == actual
+        && input.sample_start_ns.kind == frame.time_ns.kind && input.sample_start_ns.value == frame.time_ns.value
+        && input.sample_end_ns.kind == frame.time_ns.kind && input.sample_end_ns.value == frame.time_ns.value
+}
 /// Authorize a geometry handoff from this sample's already owned UI button.
 /// The caller proves the actual native motion's Direction family and retains
 /// its owner checks in the Source coherence fence. This creates no input ACK.
@@ -1414,7 +1544,8 @@ fn attach_owned_direction_geometry(
             rows.next().is_none() && row.base_skill_id.is_number()
                 && row.base_skill_id.value == button.skill_id.value
                 && row.active_skill_id.is_number() && row.active_skill_id.int() > 0
-                && (actual.value == button.skill_id.value || actual.value == row.active_skill_id.value)
+                && (actual.value == button.skill_id.value || actual.value == row.active_skill_id.value
+                    || current_covered_direction_binding(frame, button.skill_id.int(), actual.int()))
         }
         "extra" => actual.value == button.skill_id.value,
         _ => false,
@@ -1565,6 +1696,68 @@ mod tests {
             assert!(!f.active_joystick.ready.get(), "case {case}: unowned/stale/Range geometry must not bootstrap Direction");
             assert!(!f.direction_input.ready.get());
         }
+    }
+    #[test]
+    fn covered_direction_binding_is_independent_of_unit_feedback_and_revoked_per_sample() {
+        let (mut f, types) = cold_direction_geometry_fixture();
+        f.skill_id = number(12612.);
+        set_covered_direction_binding(&mut f, Some((12610, 12612)));
+        attach_owned_direction_geometry(&mut f, &types, true);
+        assert!(f.active_joystick.ready.get());
+        assert_eq!(f.active_joystick.skill_id.int(), 12612);
+        assert!(f.direction_input.covered_binding_ready.get());
+        assert!(!f.direction_input.ready.get(), "cover membership cannot fabricate a unit-vector receipt");
+        assert!(f.direction_input.raw_touch_xyz.values.iter().all(|value| value.missing()));
+        set_covered_direction_binding(&mut f, None);
+        f.active_joystick = Default::default();
+        attach_owned_direction_geometry(&mut f, &types, true);
+        assert!(!f.active_joystick.ready.get());
+        assert!(f.direction_input.covered_binding_ready.missing());
+        assert!(f.direction_input.covered_base_skill_id.missing());
+        assert!(f.direction_input.covered_actual_skill_id.missing());
+        assert!(f.direction_input.covered_source.missing());
+    }
+    #[test]
+    fn covered_source_geometry_does_not_accept_foreign_or_stale_binding_scope() {
+        for case in 0..10 {
+            let (mut f, mut types) = cold_direction_geometry_fixture();
+            f.skill_id = number(12612.);
+            set_covered_direction_binding(&mut f, Some((12610, 12612)));
+            match case {
+                0 => f.direction_input.covered_base_skill_id = number(12630.),
+                1 => f.direction_input.covered_actual_skill_id = number(12699.),
+                2 => f.direction_input.covered_source = text("UnknownCoverList"),
+                3 => f.direction_input.token = text("other-match"),
+                4 => f.direction_input.hero_id = number(84.),
+                5 => f.direction_input.slot = text("skill:1"),
+                6 => f.direction_input.sample_start_ns = number(999.),
+                7 => { types.insert("skill:0".into(),3); }
+                8 => f.direction_input.covered_binding_ready = flag(false),
+                _ => f.direction_input.covered_actual_skill_id.kind = 2,
+            }
+            attach_owned_direction_geometry(&mut f, &types, true);
+            assert!(!f.active_joystick.ready.get(), "case {case}: invalid covered scope cannot retag joystick ownership");
+            assert!(!f.direction_input.ready.get());
+        }
+    }
+    #[test]
+    fn denied_covered_binding_is_diagnostic_only_and_does_not_poison_base_identity() {
+        let (mut f, types) = cold_direction_geometry_fixture();
+        f.skill_id = number(12612.);
+        deny_covered_direction_binding(&mut f, 12610, 12612, "not_in_cover_list");
+        attach_owned_direction_geometry(&mut f, &types, true);
+        assert!(!f.active_joystick.ready.get());
+        assert!(f.direction_input.covered_binding_ready.is_bool());
+        assert!(!f.direction_input.covered_binding_ready.get());
+        assert_eq!(f.direction_input.covered_source.as_str(), "binding_unavailable:not_in_cover_list");
+        assert!(!f.direction_input.ready.get());
+        f.skill_id = number(12610.);
+        attach_owned_direction_geometry(&mut f, &types, true);
+        assert!(f.active_joystick.ready.get(), "optional denied alias must not suppress the owned base indicator");
+        assert!(!f.direction_input.ready.get());
+        set_covered_direction_binding(&mut f, None);
+        assert!(f.direction_input.covered_binding_ready.missing());
+        assert!(f.direction_input.covered_source.missing());
     }
     #[test]
     fn actor_and_ui_bytes_cannot_be_combined_across_game_updates() {

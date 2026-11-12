@@ -93,12 +93,28 @@ impl Controller {
         }
         proof.last_sample_ns = end;
         let g = &frame.ui.joystick;
-        let owned = self.frameActiveSlot_ == proof.slot
-            && g.ready.get() && g.source.as_str() == "active_widget_transform"
+        let own_slot = self.frameActiveSlot_ == proof.slot;
+        let native_identity_owned = self.coreSkill_ == proof.base || self.coreSkill_ == form
+            || (self.coreSkill_ > 0 && self.direction_geometry_skill_id(button, frame) == self.coreSkill_);
+        let own_geometry = g.ready.get() && g.source.as_str() == "active_widget_transform"
             && g.slot.as_str() == proof.slot && g.skill_id.int() == proof.base
             && g.sample_start_ns.is_number()
-            && g.sample_start_ns.value >= self.castStartedNs_ as f64
-            && (self.coreSkill_ == proof.base || self.coreSkill_ == form);
+            && g.sample_start_ns.value >= self.castStartedNs_ as f64;
+        // UI button capture can precede publication of the native indicator
+        // ID (recorded W: own UI at +8ms, core ID at +16ms). This intermediate
+        // state is not foreign ownership and is not evidence of activation or
+        // completion either. Keep waiting for the full owned native receipt.
+        if own_slot && (self.coreSkill_ == 0 || (native_identity_owned && !own_geometry)) {
+            if proof.stage == 5 {
+                self.trace_charge_revoked(host, &proof, "ui_reclaimed_after_end_candidate");
+            } else if proof.future != 0 && form != proof.base && form != proof.future {
+                self.trace_charge_revoked(host, &proof, "charge_future_form_changed");
+            } else {
+                self.chargeGesture_ = Some(proof);
+            }
+            return;
+        }
+        let owned = own_slot && own_geometry && native_identity_owned;
         if owned {
             if proof.stage == 5 {
                 self.trace_charge_revoked(host, &proof, "ui_reclaimed_after_end_candidate");
@@ -335,6 +351,71 @@ mod tests {
         sample(&mut c, &mut h, 40, 12630, false, Some(true), 1004);
         assert_eq!(c.skillTouch_, touch); assert!(c.skillCancelPending_);
         assert!(!auto_completed(&h));
+    }
+    #[test]
+    fn self_ui_capture_before_indicator_id_does_not_revoke_a_new_charge() {
+        let (mut c, mut h, touch) = setup(Some(true));
+        // Exact live ordering: UIKeySkill already owns W, while
+        // SkillIndicatorComp.m_iCurSkillID is still zero for several samples.
+        for elapsed in [4, 6, 8] {
+            let at = 1_000_000_000 + elapsed * 1_000_000;
+            let mut f = frame(at, 12630, true, Some(true), 1001);
+            f.skill_id = n(0.);
+            c.apply_snapshot(&mut h, &f, at);
+            assert_eq!(c.chargeGesture_.as_ref().unwrap().stage, 1);
+            assert_eq!(c.skillTouch_, touch);
+        }
+        owned_future(&mut c, &mut h);
+        sample(&mut c, &mut h, 30, 12630, false, Some(true), 1003);
+        sample(&mut c, &mut h, 40, 12630, false, Some(true), 1004);
+        assert_eq!(c.skillTouch_, -1); assert!(auto_completed(&h));
+    }
+    #[test]
+    fn self_ui_without_native_capture_cannot_complete_and_cannot_reclaim_an_end_candidate() {
+        let (mut c, mut h, touch) = setup(Some(true));
+        for (elapsed, form) in [(10,12630),(20,12631),(30,12630)] {
+            let at = 1_000_000_000 + elapsed * 1_000_000;
+            let mut f = frame(at, form, true, Some(true), 1000 + elapsed as u32);
+            f.skill_id = n(0.);
+            c.apply_snapshot(&mut h, &f, at);
+        }
+        sample(&mut c, &mut h, 40, 12630, false, Some(true), 1040);
+        sample(&mut c, &mut h, 50, 12630, false, Some(true), 1050);
+        assert_eq!(c.skillTouch_, touch); assert!(!auto_completed(&h));
+        let (mut c, mut h, touch) = setup(Some(true));
+        owned_future(&mut c, &mut h);
+        sample(&mut c, &mut h, 30, 12630, false, Some(true), 1003);
+        let mut f = frame(1_040_000_000,12630,true,Some(true),1004);
+        f.skill_id = n(0.);
+        c.apply_snapshot(&mut h, &f,1_040_000_000);
+        assert_eq!(c.skillTouch_, touch); assert!(c.chargeGesture_.is_none());
+        assert!(!auto_completed(&h));
+    }
+    #[test]
+    fn covered_native_phase_preserves_owned_charge_but_revocation_drops_the_proof() {
+        for revoke in [false, true] {
+            let (mut c, mut h, touch) = setup(Some(true));
+            owned_future(&mut c, &mut h);
+            let mut f = frame(1_025_000_000, 12631, true, Some(true), 1003);
+            f.skill_id = n(12632.);
+            f.active_joystick = f.ui.joystick;
+            f.active_joystick.skill_id = f.skill_id;
+            f.direction_input.covered_binding_ready = flag(!revoke);
+            f.direction_input.covered_base_skill_id = n(12630.);
+            f.direction_input.covered_actual_skill_id = f.skill_id;
+            f.direction_input.covered_source = text("IndicatorMotionBase.lCoverSkills");
+            f.direction_input.token = f.token; f.direction_input.hero_id = f.hero_id;
+            f.direction_input.slot = f.ui.active_slot; f.direction_input.skill_id = f.skill_id;
+            f.direction_input.sample_start_ns = f.active_joystick.sample_start_ns;
+            f.direction_input.sample_end_ns = f.active_joystick.sample_end_ns;
+            c.apply_snapshot(&mut h, &f, 1_025_000_000);
+            assert_eq!(c.skillTouch_, touch);
+            assert_eq!(c.chargeGesture_.is_some(), !revoke);
+            sample(&mut c, &mut h, 30, 12630, false, Some(true), 1004);
+            sample(&mut c, &mut h, 40, 12630, false, Some(true), 1005);
+            if revoke { assert_eq!(c.skillTouch_, touch); assert!(!auto_completed(&h)); }
+            else { assert_eq!(c.skillTouch_, -1); assert!(auto_completed(&h)); }
+        }
     }
     #[test]
     fn ordinary_physical_up_before_native_auto_end_keeps_the_existing_commit_path() {

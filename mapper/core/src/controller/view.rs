@@ -154,6 +154,9 @@ pub struct View {
     pub directionMatchedSequence_: u64,
     pub pendingGoalSequence_: u64,
     pub touchSequence_: u64,
+    /// Timestamp of the actual latest same-sequence command in the causal ring.
+    /// Zero means no command; never synthesize this from the clock or goal.
+    pub sentTimeNs_: i64,
     pub verifiedTransportSequence_: u64,
     pub modelClock_: u64,
     pub traceMatchedSequence_: u64,
@@ -371,6 +374,7 @@ impl View {
             directionMatchedSequence_: s.directionMatchedSequence_,
             pendingGoalSequence_: s.pendingGoalSequence_,
             touchSequence_: s.touchSequence_,
+            sentTimeNs_: s.causal_.latest().filter(|touch|touch.sequence>0&&touch.sequence==s.touchSequence_).map_or(0,|touch|touch.time_ns),
             verifiedTransportSequence_: s.verifiedTransportSequence_,
             modelClock_: s.modelClock_,
             traceMatchedSequence_: s.traceMatchedSequence_,
@@ -464,6 +468,32 @@ impl View {
                 .copied()
                 .unwrap_or_default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod send_time_tests {
+    use super::*;
+    #[test]
+    fn send_time_is_actual_causal_command_time_not_current_pointer_or_goal_time() {
+        let mut state=Controller::new();state.androidSize_=Point::new(1000.,1000.);
+        assert_eq!(state.inspect().sentTimeNs_,0);
+        state.now_=100;state.record_skill_touch(Point::new(0.8,0.7),false,false);
+        let first=state.inspect();assert_eq!(first.touchSequence_,1);assert_eq!(first.sentTimeNs_,100);
+        // A new desired pointer can precede the deferred native MOVE. Merely
+        // inspecting a later controller clock or goal must not invent a send.
+        state.now_=200;state.pointer_=Point::new(0.3,0.4);state.pendingGoalTime_=200;
+        assert_eq!(state.inspect().sentTimeNs_,100);
+        state.record_skill_touch(Point::new(0.8,0.7),false,false);
+        assert_eq!(state.inspect().sentTimeNs_,100,"a coalesced no-op is not a new send");
+        state.now_=300;state.record_skill_touch(Point::new(0.7,0.6),false,false);
+        let mut view=first;view.refresh_scalars(&state);
+        assert_eq!(view.touchSequence_,2);assert_eq!(view.sentTimeNs_,300);
+        state.now_=400;state.record_skill_touch(Point::new(0.7,0.6),true,false);
+        view.refresh_scalars(&state);
+        assert_eq!(view.touchSequence_,2);assert_eq!(view.sentTimeNs_,400,"a delivered same-sequence echo has its own actual time");
+        state.reset_accepted_input();view.refresh_scalars(&state);
+        assert_eq!(view.touchSequence_,0);assert_eq!(view.sentTimeNs_,0);
     }
 }
 
@@ -563,6 +593,7 @@ impl View {
         self.directionMatchedSequence_ = s.directionMatchedSequence_;
         self.pendingGoalSequence_ = s.pendingGoalSequence_;
         self.touchSequence_ = s.touchSequence_;
+        self.sentTimeNs_ = s.causal_.latest().filter(|touch|touch.sequence>0&&touch.sequence==s.touchSequence_).map_or(0,|touch|touch.time_ns);
         self.verifiedTransportSequence_ = s.verifiedTransportSequence_;
         self.modelClock_ = s.modelClock_;
         self.traceMatchedSequence_ = s.traceMatchedSequence_;

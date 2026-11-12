@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import ctypes as C
 import json
+import math
 import os
 from pathlib import Path
 import socket
@@ -169,6 +170,18 @@ class OwnedRuntime:
         time.sleep(0.65)
 
 
+def observed_cell_geometry(cell):
+    """Use the rendered UIButton widget, never a missing/stale object anchor."""
+    value = cell.get("button_geometry")
+    if not isinstance(value, dict):
+        return None, False
+    point = value.get("center_uv")
+    if not isinstance(point, (tuple, list)) or len(point) != 2 or any(
+            isinstance(v, bool) or not isinstance(v, (float, int)) or not math.isfinite(v) for v in point):
+        return None, False
+    return point, value.get("visible") is True and value.get("onscreen") is True
+
+
 class Selector:
     def __init__(self, runtime, directory):
         self.runtime = runtime
@@ -240,7 +253,8 @@ class Selector:
             index = start + slot
             if index < len(order):
                 cells.append({"slot": slot, "data_index": index, "hero_id": order[index],
-                              "anchor_uv": cell.get("anchor_uv"), "object": cell["object"]})
+                              "anchor_uv": cell.get("anchor_uv"), "object": cell["object"],
+                              "button_geometry": (cell.get("button_widget") or {}).get("geometry")})
         if reader.i32(reader.field(wrap, "showStartIndex")) != start:
             raise RuntimeError("Hero grid scrolled during snapshot")
         result = {"pid": reader.pid, "birth": reader.birth, "read_ns": time.monotonic_ns(),
@@ -254,15 +268,27 @@ class Selector:
     def choose(self, hero, max_scrolls):
         last_shape = None
         unchanged = 0
-        for step in range(max_scrolls + 1):
+        scrolls = 0
+        geometry_retries = 0
+        while scrolls <= max_scrolls:
             state = self.snapshot()
             if hero not in state["order"]:
                 raise RuntimeError(f"Hero ID{hero} is not in this training picker")
             target_index = state["order"].index(hero)
-            candidates = [c for c in state["cells"] if c["hero_id"] == hero and c["anchor_uv"]
-                          and 0.24 <= c["anchor_uv"][0] <= 0.97 and 0.21 <= c["anchor_uv"][1] <= 0.74]
+            candidates = []
+            points = []
+            target = next((c for c in state["cells"] if c["data_index"] == target_index), None)
+            for cell in state["cells"]:
+                point, visible = observed_cell_geometry(cell)
+                if point is not None:
+                    points.append(point)
+                if cell["hero_id"] == hero and point is not None and visible \
+                        and 0.24 <= point[0] <= 0.97 and 0.21 <= point[1] <= 0.74:
+                    candidates.append(point)
+            if len(candidates) > 1:
+                raise RuntimeError("Multiple rendered native cells claim the requested hero; refusing a click")
             if len(candidates) == 1:
-                self.runtime.tap(candidates[0]["anchor_uv"])
+                self.runtime.tap(candidates[0])
                 deadline = time.monotonic() + 2
                 while time.monotonic() < deadline:
                     selected = self.runtime.i32(self.runtime.field(state["picker_object"], "_selectHeroId"))
@@ -270,16 +296,30 @@ class Selector:
                         return state
                     time.sleep(0.05)
                 raise RuntimeError(f"Clicked cell did not select requested hero ID{hero}; refusing confirmation")
-            shape = state["show_start_index"], tuple(round(c["anchor_uv"][1], 3) for c in state["cells"] if c["anchor_uv"])
+            target_point, _ = observed_cell_geometry(target) if target is not None else (None, False)
+            # Pooled cells can exist before their current rendered geometry is
+            # available. Reobserve without scrolling/clicking; a cold HUD camera
+            # can also leave every GameObject anchor absent even while each
+            # UIButton.mWidget has a valid independent camera and click center.
+            unknown_target = target is not None and (target_point is None or
+                (0.21 <= target_point[1] <= 0.74))
+            if not points or unknown_target:
+                geometry_retries += 1
+                if geometry_retries > 3:
+                    raise RuntimeError("Native hero cell geometry/visibility remains unavailable after three reobservations; no blind click or scroll")
+                time.sleep(.20)
+                continue
+            geometry_retries = 0
+            shape = state["show_start_index"], tuple(round(point[1], 3) for point in points)
             unchanged = unchanged + 1 if shape == last_shape else 0
             if unchanged >= 2:
                 raise RuntimeError("Native grid stopped moving before target became clickable")
             last_shape = shape
-            if step == max_scrolls:
+            if scrolls == max_scrolls:
                 break
-            target = next((c for c in state["cells"] if c["data_index"] == target_index), None)
-            downward = target_index < state["show_start_index"] or (target is not None and target["anchor_uv"][1] < 0.21)
+            downward = target_index < state["show_start_index"] or (target_point is not None and target_point[1] < 0.21)
             self.runtime.swipe(downward)
+            scrolls += 1
         raise RuntimeError("Bounded hero scrolling did not reach the target")
 
     def confirm(self, hero):

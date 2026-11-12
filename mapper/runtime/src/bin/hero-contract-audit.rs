@@ -52,6 +52,85 @@ fn primitive(kind: u8, raw: &[u8]) -> Result<Value> {
     })
 }
 
+fn typed_instance_field<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks, object: u64,
+    name: &str, kinds: &[u8], declaring: Option<&str>) -> Result<(u64, u8, String)> {
+    if object == 0 { return Err(format!("Missing local owner for {name}")); }
+    let mut class = u64_at(&capture(r, checks, object, 8)?, 0);
+    for _ in 0..16 {
+        if class == 0 { break; }
+        let metadata = r.class(class)?;
+        if let Some(field) = metadata.fields.get(name) {
+            if field.is_static || !kinds.contains(&field.kind) || field.offset > 1_048_576
+                || declaring.is_some_and(|expected| expected != metadata.name) {
+                return Err(format!("Local hero field type/declaring class changed: {name}"));
+            }
+            let address = object.checked_add(field.offset).ok_or("Local hero field overflow")?;
+            return Ok((address, field.kind, metadata.name));
+        }
+        class = metadata.parent;
+    }
+    Err(format!("Local hero field absent: {name}"))
+}
+
+fn typed_instance<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks, name: &str) -> Result<u64> {
+    let class = *r.named.get(name).ok_or_else(|| format!("Missing local class {name}"))?;
+    let metadata = r.class(class)?;
+    let field = metadata.fields.get("Instance").ok_or("Local singleton field absent")?;
+    if metadata.name != name || !field.is_static || ![18, 21].contains(&field.kind) || field.offset > 1_048_576 || metadata.statics == 0 {
+        return Err(format!("Local singleton field type changed: {name}"));
+    }
+    let value = u64_at(&capture(r, checks, metadata.statics + field.offset, 8)?, 0);
+    if value == 0 { return Err(format!("Local singleton unavailable: {name}")); }
+    Ok(value)
+}
+
+/// This reads the local Actor's actual level property, not EntityBase._level,
+/// skill levels, experience, UI labels or an inference from upgrade buttons.
+/// The independent local ShowEntity.m_Level must agree in the same bracket.
+fn local_hero_level<M: Memory>(r: &mut Reflection<M>, expected: Option<([u64; 4], i32)>) -> Result<Value> {
+    let start = now_ns();
+    let mut checks = Vec::new();
+    let battle = typed_instance(r, &mut checks, "BattleManager")?;
+    let manager = typed_instance(r, &mut checks, "LogicBattleManager")?;
+    let (show_link, _, _) = typed_instance_field(r, &mut checks, battle, "m_LocalPlayerShow", &[18, 21], None)?;
+    let show = u64_at(&capture(r, &mut checks, show_link, 8)?, 0);
+    let (actor_link, _, _) = typed_instance_field(r, &mut checks, manager, "<m_LocalPlayerLogic>k__BackingField", &[18, 21], None)?;
+    let actor = u64_at(&capture(r, &mut checks, actor_link, 8)?, 0);
+    let owners = [battle, manager, show, actor];
+    if owners.contains(&0) || expected.is_some_and(|(owned, _)| owned != owners) {
+        return Err("Local hero owners changed during level observation".into());
+    }
+    let (hero_at, hero_kind, _) = typed_instance_field(r, &mut checks, actor, "m_ID", &[8, 9], None)?;
+    let hero = primitive(hero_kind, &capture(r, &mut checks, hero_at, 4)?)?.as_i64().ok_or("Invalid local hero ID")?;
+    if !(1..10000).contains(&hero) || expected.is_some_and(|(_, id)| i64::from(id) != hero) {
+        return Err("Local Actor hero changed during level observation".into());
+    }
+    let (level_at, kind, declaring) = typed_instance_field(r, &mut checks, actor,
+        "<m_Level>k__BackingField", &[8], Some("EntityBase"))?;
+    let (show_at, show_kind, show_declaring) = typed_instance_field(r, &mut checks, show,
+        "m_Level", &[8], Some("ShowEntity"))?;
+    let value = i32_at(&capture(r, &mut checks, level_at, 4)?, 0);
+    let show_level = i32_at(&capture(r, &mut checks, show_at, 4)?, 0);
+    if !(1..=100).contains(&value) || value != show_level {
+        return Err("Local Actor/Show hero levels are unavailable or disagree".into());
+    }
+    check(r, &checks)?;
+    let end = now_ns();
+    if end - start > 100_000_000 { return Err("Local hero level bracket exceeded100ms".into()); }
+    Ok(json!({"hero":hero,"value":value,"show_level":show_level,
+        "source":"EntityBase.<m_Level>k__BackingField","declaring_class":declaring,
+        "field":"<m_Level>k__BackingField","kind":kind,"show_declaring_class":show_declaring,
+        "show_field":"m_Level","show_kind":show_kind,"coherent":true,"local_owner_verified":true,
+        "start_ns":start,"end_ns":end}))
+}
+
+fn write_output(path: &str, value: &Value) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?;
+    if bytes.len() > 4 * 1024 * 1024 { return Err("Audit output exceeds4MiB bound".into()); }
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path).map_err(|e|e.to_string())?;
+    file.write_all(&bytes).and_then(|_|file.write_all(b"\n")).map_err(|e|e.to_string())
+}
+
 fn charge_cache<M: Memory>(r: &mut Reflection<M>, ui: u64) -> Result<Value> {
     r.discover(&["UIChargeSkillInfo"])?;
     let expected_class=r.named["UIChargeSkillInfo"];
@@ -290,6 +369,27 @@ fn config_values<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -
 
 fn main() -> Result<()> {
     let args:Vec<_>=std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--level-only") {
+        if args.len() != 4 { return Err("Usage: hero-contract-audit --level-only PID OUTPUT.json".into()); }
+        let pid: u32 = args[2].parse().map_err(|_| "Invalid PID")?;
+        if pid == 0 { return Err("PID must be positive".into()); }
+        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+        verify_selected_runtime(&root,pid)?;
+        let identity = process_identity(pid)?;
+        let mut reflection = Reflection::new(ProcessMemory::diagnostic(pid)?)?;
+        reflection.discover(&["BattleManager", "LogicBattleManager"])?;
+        let start = now_ns();
+        let level = local_hero_level(&mut reflection, None);
+        if process_identity(pid)? != identity { return Err("Runtime identity changed during level observation".into()); }
+        let hero = level.as_ref().ok().map(|value| value["hero"].clone());
+        let valid = level.is_ok();
+        let result = json!({"format":"clbb-hero-level-audit","version":1,"pid":pid,"birth":identity.0,
+            "executable":identity.1,"hero":hero,"hero_level":level,"same_match_at_end":valid,
+            "start_ns":start,"end_ns":now_ns(),"scope":"read-only coherent owned local Actor/Show level; no UI, input or writes"});
+        write_output(&args[3], &result)?;
+        println!("hero_level_verified={valid} output={}", args[3]);
+        return if valid { Ok(()) } else { Err("Native hero level is unknown; inspect the saved report".into()) };
+    }
     if args.len()!=3 && args.len()!=5 { return Err("Usage: hero-contract-audit PID OUTPUT.json [WIDTH HEIGHT]".into()); }
     let pid:u32=args[1].parse().map_err(|_|"Invalid PID")?;
     if pid==0 {return Err("PID must be positive".into());}
@@ -341,6 +441,7 @@ fn main() -> Result<()> {
     }
     let controls=source.audit_control_state();let ui=source.audit_ui_input();
     let charge_lifecycle=charge_lifecycle(&mut source.reflection,sample.match_owners[2]);
+    let hero_level=local_hero_level(&mut source.reflection,Some((sample.match_owners,hero)));
     let final_sample=source.sample(now_ns(),size);
     let same_match=final_sample.as_ref().is_ok_and(|value|value.match_owners==sample.match_owners&&value.indicator==sample.indicator&&value.frame.hero_id.int()==hero);
     if process_identity(pid)?!=identity {return Err("Runtime identity changed during audit".into());}
@@ -349,14 +450,11 @@ fn main() -> Result<()> {
         "start_ns":start_ns,"end_ns":now_ns(),"hero":hero,"epoch":frame.token.as_str(),"resolution":size,
         "sample_ns":frame.time_ns.value,"active_skill":frame.skill_id.int(),"active_slot":frame.ui.active_slot.as_str(),
         "read_ms":frame.sample_duration_ms.value,"types":sample.control_types,"buttons":buttons,"variants":variants,
-        "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"sample_rejections":errors,
+        "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"hero_level":hero_level,"sample_rejections":errors,
         "same_match_at_end":same_match,"final_sample_error":final_sample.err(),
         "scope":"read-only owned gameplay controls/configuration; no memory writes, input or production template authorization",
     });
-    let bytes=serde_json::to_vec_pretty(&output).map_err(|e|e.to_string())?;
-    if bytes.len()>4*1024*1024 {return Err("Audit output exceeds 4MiB bound".into());}
-    let mut file=OpenOptions::new().write(true).create_new(true).open(&args[2]).map_err(|e|e.to_string())?;
-    file.write_all(&bytes).and_then(|_|file.write_all(b"\n")).map_err(|e|e.to_string())?;
+    write_output(&args[2], &output)?;
     println!("hero={hero} same_match={same_match} contracts={} output={}",output["contracts"].as_object().unwrap().len(),args[2]);
     Ok(())
 }
@@ -364,6 +462,77 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+    const OWNERS: [u64; 4] = [0x8000, 0x8100, 0x8300, 0x8200];
+    struct LevelMemory { bytes: RefCell<Vec<u8>>, race: Cell<bool> }
+    impl Memory for LevelMemory {
+        fn regions(&self) -> Result<Vec<clbb_mapper::platform::Region>> {
+            Ok(vec![clbb_mapper::platform::Region { start: 0, end: 0x10000, readable: true, writable: true, name: String::new() }])
+        }
+        fn read(&self, at: u64, size: usize) -> Result<Vec<u8>> {
+            let value = self.bytes.borrow().get(at as usize..at as usize + size).ok_or("Fixture bounds")?.to_vec();
+            if at == OWNERS[3] + 20 && self.race.replace(false) {
+                self.bytes.borrow_mut()[OWNERS[1] as usize + 16..OWNERS[1] as usize + 24].copy_from_slice(&0x8400_u64.to_le_bytes());
+            }
+            Ok(value)
+        }
+        fn read_into(&self, at: u64, bytes: &mut [u8]) -> Result<()> { bytes.copy_from_slice(&self.read(at, bytes.len())?); Ok(()) }
+    }
+    fn put(bytes: &mut [u8], at: usize, value: u64) { bytes[at..at + 8].copy_from_slice(&value.to_le_bytes()); }
+    fn level_fixture(kind: u8, is_static: bool, property: &str, level: i32, shown: i32) -> Reflection<LevelMemory> {
+        let mut bytes = vec![0; 0x10000]; let mut names = 0x3000; let mut tables = 0x4000; let mut types = 0x5000;
+        let classes = [
+            ("BattleManager", 0x1000, 0, 0x6000, vec![("Instance", 0, 18, true), ("m_LocalPlayerShow", 16, 18, false)]),
+            ("LogicBattleManager", 0x1200, 0, 0x6020, vec![("Instance", 0, 18, true), ("<m_LocalPlayerLogic>k__BackingField", 16, 18, false)]),
+            ("LogicPlayer", 0x1400, 0x1600, 0, vec![]),
+            ("EntityBase", 0x1600, 0, 0, vec![("m_ID", 16, 8, false), (property, 20, kind, is_static), ("_level", 24, 8, false)]),
+            ("ShowPlayer", 0x1800, 0x1a00, 0, vec![]),
+            ("ShowEntity", 0x1a00, 0, 0, vec![("m_Level", 16, 8, false)]),
+        ];
+        let mut named = Vec::new();
+        for (name, class, parent, statics, fields) in classes {
+            bytes[names..names + name.len()].copy_from_slice(name.as_bytes()); put(&mut bytes, class + 16, names as u64); names += name.len() + 1;
+            for offset in [0x40, 0x48] { put(&mut bytes, class + offset, class as u64); }
+            put(&mut bytes, class + 0x58, parent); put(&mut bytes, class + 0xa8, statics); put(&mut bytes, class + 0x78, tables as u64);
+            bytes[class + 0x104..class + 0x106].copy_from_slice(&(fields.len() as u16).to_le_bytes());
+            for (name, offset, kind, is_static) in fields {
+                bytes[names..names + name.len()].copy_from_slice(name.as_bytes()); put(&mut bytes, tables, names as u64); names += name.len() + 1;
+                put(&mut bytes, tables + 8, types as u64); put(&mut bytes, tables + 16, class as u64);
+                bytes[tables + 24..tables + 28].copy_from_slice(&(offset as u32).to_le_bytes());
+                bytes[types + 8..types + 12].copy_from_slice(&(((kind as u32) << 16) | if is_static {16} else {0}).to_le_bytes());
+                tables += 32; types += 16;
+            }
+            named.push((name.to_owned(), class as u64));
+        }
+        for (object, class) in [(OWNERS[0], 0x1000), (OWNERS[1], 0x1200), (OWNERS[2], 0x1800), (OWNERS[3], 0x1400)] { put(&mut bytes, object as usize, class); }
+        put(&mut bytes, 0x6000, OWNERS[0]); put(&mut bytes, 0x6020, OWNERS[1]);
+        put(&mut bytes, OWNERS[0] as usize + 16, OWNERS[2]); put(&mut bytes, OWNERS[1] as usize + 16, OWNERS[3]);
+        for (at, value) in [(OWNERS[3] as usize + 16, 97), (OWNERS[3] as usize + 20, level), (OWNERS[3] as usize + 24, 1), (OWNERS[2] as usize + 16, shown)] {
+            bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        let mut r = Reflection::new(LevelMemory { bytes: RefCell::new(bytes), race: Cell::new(false) }).unwrap();
+        r.named.extend(named); r
+    }
+    #[test]
+    fn native_level_uses_the_actual_inherited_property_and_independent_show_level() {
+        let mut r = level_fixture(8, false, "<m_Level>k__BackingField", 15, 15);
+        let value = local_hero_level(&mut r, Some((OWNERS, 97))).unwrap();
+        assert_eq!(value["value"], 15); assert_eq!(value["show_level"], 15);
+        assert_eq!(value["declaring_class"], "EntityBase"); assert_eq!(value["local_owner_verified"], true);
+        let mut r = level_fixture(8, false, "<m_Level>k__BackingField", 1, 1);
+        assert_eq!(local_hero_level(&mut r, Some((OWNERS, 97))).unwrap()["value"], 1);
+    }
+    #[test]
+    fn native_level_rejects_unknown_semantics_wrong_type_disagreement_and_owner_races() {
+        for (kind, static_field, property, level, shown) in [(9, false, "<m_Level>k__BackingField", 15, 15), (8, true, "<m_Level>k__BackingField", 15, 15),
+            (8, false, "m_iLevelExp", 15, 15), (8, false, "<m_Level>k__BackingField", 15, 1)] {
+            assert!(local_hero_level(&mut level_fixture(kind, static_field, property, level, shown), Some((OWNERS, 97))).is_err());
+        }
+        let mut r = level_fixture(8, false, "<m_Level>k__BackingField", 15, 15);
+        assert!(local_hero_level(&mut r, Some((OWNERS, 25))).is_err());
+        r.memory.race.set(true);
+        assert!(local_hero_level(&mut r, Some((OWNERS, 97))).is_err());
+    }
     #[test]
     fn refuses_non_boolean_and_non_finite_config_values() {
         assert!(primitive(2,&[2]).is_err());

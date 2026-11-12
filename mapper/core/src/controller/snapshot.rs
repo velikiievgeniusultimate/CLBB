@@ -252,6 +252,12 @@ pub struct Logical {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Direction {
+    /// Independently scoped button-to-covered-indicator binding. Readiness
+    /// here authorizes geometry only; it is never a native input ACK.
+    pub covered_binding_ready: Flag,
+    pub covered_base_skill_id: Number,
+    pub covered_actual_skill_id: Number,
+    pub covered_source: Text,
     pub ready: Flag,
     pub coherent: Flag,
     pub source: Text,

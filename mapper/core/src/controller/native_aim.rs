@@ -154,6 +154,33 @@ impl Controller {
         }
         SkillBehavior::AwaitVariant
     }
+    fn covered_direction_binding(&self, button: &Button, frame: &Frame) -> bool {
+        let input = &frame.direction_input;
+        let start = input.sample_start_ns.get(-1.);
+        let end = input.sample_end_ns.get(-1.);
+        let geometry = &frame.active_joystick;
+        input.covered_binding_ready.is_bool() && input.covered_binding_ready.get()
+            && input.covered_source.as_str() == "IndicatorMotionBase.lCoverSkills"
+            && input.covered_base_skill_id.is_number()
+            && input.covered_base_skill_id.int() > 0
+            && input.covered_base_skill_id.int() <= super::MAX_SKILL_ID
+            && input.covered_base_skill_id.value == button.skillId as f64
+            && input.covered_actual_skill_id.is_number()
+            && input.covered_actual_skill_id.int() > 0
+            && input.covered_actual_skill_id.int() <= super::MAX_SKILL_ID
+            && input.covered_actual_skill_id.value == frame.skill_id.value
+            && input.token.as_str() == self.frameEpoch_
+            && input.hero_id.int() == self.heroId_
+            && input.slot.as_str() == self.activeSlot_
+            && input.skill_id.is_number() && input.skill_id.value == frame.skill_id.value
+            && frame.token_string.get() && frame.token_nonempty.get()
+            && input.sample_start_ns.is_number() && input.sample_end_ns.is_number()
+            && start.is_finite() && end.is_finite()
+            && start >= self.castStartedNs_ as f64 && end >= start && end - start <= NS100
+            && self.now_ as f64 - end <= NS100 && end <= self.now_ as f64 + 10e6
+            && same_number(input.sample_start_ns, geometry.sample_start_ns)
+            && same_number(input.sample_end_ns, geometry.sample_end_ns)
+    }
     /// A held button can switch its future cast/release variant while its
     /// owned aiming indicator still belongs to the base skill. Geometry may
     /// authorize the first MOVE before native unit-direction feedback exists;
@@ -174,7 +201,8 @@ impl Controller {
             || actual.value != actual.int() as f64
             || actual.int() <= 0
             || actual.int() != self.coreSkill_
-            || (actual.int() != button.skillId && actual.int() != variant)
+            || (actual.int() != button.skillId && actual.int() != variant
+                && !self.covered_direction_binding(button, frame))
             || frame.token.as_str() != self.frameEpoch_
             || frame.hero_id.int() != self.heroId_
             || frame.ui.hero_id.int() != self.heroId_
@@ -1907,6 +1935,93 @@ mod tests {
         c.ingest_frame(&mut h, &f);
         assert!(c.directionGeometryFresh_);
         assert!(!c.directionAccepted_, "identity alone must not turn unrelated raw input into a receipt");
+    }
+    fn covered_direction_fixture() -> (Controller, Frame, TestHost) {
+        let (c, mut f, h) = held_variant_direction_fixture();
+        f.skill_state.buttons[0].active_skill_id = n(12611.);
+        f.skill_id = n(12612.);
+        f.active_joystick.skill_id = f.skill_id;
+        f.direction_input.skill_id = f.skill_id;
+        f.direction_input.covered_binding_ready = flag(true);
+        f.direction_input.covered_base_skill_id = n(12610.);
+        f.direction_input.covered_actual_skill_id = f.skill_id;
+        f.direction_input.covered_source = text("IndicatorMotionBase.lCoverSkills");
+        (c, f, h)
+    }
+    #[test]
+    fn explicit_current_covered_binding_allows_a_third_direction_identity_and_revokes_immediately() {
+        let (mut c, mut f, mut h) = covered_direction_fixture();
+        c.ingest_frame(&mut h, &f);
+        assert!(c.directionGeometryFresh_ && c.directionAccepted_);
+        assert_eq!(c.coreSkill_, 12612);
+        let moves = h.moves.len();
+        f.direction_input.covered_binding_ready = Flag::default();
+        h.world = Some(Point::new(0., 1.));
+        c.ingest_frame(&mut h, &f);
+        assert!(!c.directionGeometryFresh_ && !c.directionAccepted_);
+        assert_eq!(h.moves.len(), moves, "a revoked membership witness cannot reuse the previous geometry");
+    }
+    #[test]
+    fn covered_binding_scope_rejects_wrong_ids_types_owner_clock_and_non_direction_forms() {
+        for case in 0..18 {
+            let (mut c, mut f, mut h) = covered_direction_fixture();
+            match case {
+                0 => f.direction_input.covered_binding_ready = flag(false),
+                1 => f.direction_input.covered_binding_ready.value = 2,
+                2 => f.direction_input.covered_base_skill_id = n(12630.),
+                3 => f.direction_input.covered_actual_skill_id = n(12699.),
+                4 => f.direction_input.covered_source = text("UnknownCoveredList"),
+                5 => f.direction_input.sample_start_ns = n(1_800_000_000.),
+                6 => { f.direction_input.sample_start_ns = n(1_800_000_000.); f.direction_input.sample_end_ns = n(1_801_000_000.); },
+                7 => f.direction_input.token = text("other-match"),
+                8 => f.direction_input.hero_id = n(25.),
+                9 => f.direction_input.slot = text("skill:1"),
+                10 => f.direction_input.covered_base_skill_id.kind = 2,
+                11 => f.direction_input.covered_actual_skill_id.kind = 2,
+                12 => f.direction_input.covered_actual_skill_id = n(0.),
+                13 => f.direction_input.covered_actual_skill_id = n(-1.),
+                14 => f.direction_input.covered_actual_skill_id = n(10_000_001.),
+                15 => h.binding_aim_type = 3,
+                16 => h.binding_aim_type = 1,
+                _ => f.token_nonempty = flag(false),
+            }
+            c.ingest_frame(&mut h, &f);
+            assert!(!c.directionGeometryFresh_, "case {case}: third-ID geometry needs the exact current binding proof");
+            assert!(!c.directionAccepted_, "case {case}: unsupported identity cannot acknowledge native input");
+            assert!(h.moves.is_empty());
+        }
+    }
+    #[test]
+    fn covered_cold_direction_can_send_first_move_but_cannot_fabricate_native_ack() {
+        let (mut c, mut f, mut h) = covered_direction_fixture();
+        f.direction_input.ready = flag(false);
+        f.direction_input.coherent = Flag::default();
+        f.direction_input.raw_touch_xyz = Default::default();
+        f.direction_input.direction_xz = Default::default();
+        h.world = Some(Point::new(0., 1.));
+        c.ingest_frame(&mut h, &f);
+        assert!(c.directionGeometryFresh_);
+        assert!(!c.directionAccepted_);
+        assert!(!h.moves.is_empty());
+        let sent = c.touchSequence_;
+        c.now_ += 30_000_000;
+        f.time_ns = n(c.now_ as f64); f.ui.time_ns = f.time_ns;
+        for time in [&mut f.skill_state.sample_start_ns, &mut f.active_joystick.sample_start_ns, &mut f.direction_input.sample_start_ns] {
+            *time = n((c.now_ - 2_000_000) as f64);
+        }
+        for time in [&mut f.skill_state.sample_end_ns, &mut f.active_joystick.sample_end_ns, &mut f.direction_input.sample_end_ns] {
+            *time = n((c.now_ - 1_000_000) as f64);
+        }
+        f.direction_input.ready = flag(true); f.direction_input.coherent = flag(true);
+        let actual = cell(c.pixels(c.skillPoint_));
+        f.direction_input.raw_touch_xyz = v3(actual.x * 999. / 1000., 1000. - actual.y * 999. / 1000., 0.);
+        let mut model = AngularRadialSolver::default();
+        assert!(model.configure(Point::new(500., 500.), 100., [1., 0., 0., 1.], 1., c.androidSize_));
+        let observed = model.forward(actual).unwrap(); let observed = observed / observed.length();
+        f.direction_input.direction_xz = v2(observed.x, observed.y);
+        c.ingest_frame(&mut h, &f);
+        assert!(c.directionAccepted_); assert_eq!(c.directionMatchedSequence_, sent);
+        assert!(h.edges.iter().all(|edge| edge.0 != "up"));
     }
     fn buffered_direction_fixture() -> (Controller,TestHost) {
         let (mut c,_,h)=setup();

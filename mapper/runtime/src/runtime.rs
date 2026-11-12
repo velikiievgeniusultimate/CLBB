@@ -723,7 +723,7 @@ impl Runtime {
                     "pending_world_valid":view.pendingWorldValid_,"pending_world":[view.pendingWorld_.x,view.pendingWorld_.y],
                     "desired_valid":view.traceDesiredValid_,"desired":[view.traceDesired_.x,view.traceDesired_.y],
                     "pending_time_ns":view.pendingGoalTime_,
-                    "matched_seq":view.traceMatchedSequence_,"sent_seq":view.touchSequence_,"q_arming":view.qDragArming_,"q_recomputed":view.qDragRecomputeUsed_,
+                    "matched_seq":view.traceMatchedSequence_,"sent_seq":view.touchSequence_,"sent_time_ns":(view.sentTimeNs_>0).then_some(view.sentTimeNs_),"q_arming":view.qDragArming_,"q_recomputed":view.qDragRecomputeUsed_,
                     "range":view.direct.world_range,"center":[view.joystickCenter_.x,view.joystickCenter_.y],
                     "radius":[view.joystickRadius_.x,view.joystickRadius_.y],
                     "skill":view.coreSkill_,"touch":view.skillTouch_,"pending_release":view.pendingRelease_,
@@ -1263,11 +1263,15 @@ mod tests {
         let mut events=Vec::new();let runtime=fixture(&mut events);
         let mut view=clbb_moba_core::controller::view::View::default();
         view.touchSequence_=u64::MAX;view.traceMatchedSequence_=7;view.traceSampleStart_=9_007_199_254_740_993;
+        view.sentTimeNs_=9_007_199_254_740_991;
         let current=runtime.aim_diagnostics(&view);
         assert_eq!(current["sent_seq"].as_u64(),Some(u64::MAX));
         assert_eq!(current["matched_seq"],7);
+        assert_eq!(current["sent_time_ns"].as_i64(),Some(9_007_199_254_740_991));
         assert_eq!(current["logical_start_ns"].as_i64(),Some(9_007_199_254_740_993));
         assert_eq!(view.touchSequence_,u64::MAX);
+        view.sentTimeNs_=0;
+        assert!(runtime.aim_diagnostics(&view)["sent_time_ns"].is_null());
     }
     #[test]
     fn charge_decisions_keep_transient_proof_without_expanding_ordinary_input_rows() {

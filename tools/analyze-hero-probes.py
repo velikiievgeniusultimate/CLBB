@@ -46,23 +46,32 @@ def range_observation(sample,probe):
         goal=max((c['end_ns'] for c in commands),default=None)
     # Both sequence numbers must come from one aim RPC snapshot. The earlier
     # input RPC can describe a command superseded before aim was collected.
-    matched=aim.get('matched_seq');sent=aim.get('sent_seq')
+    matched=aim.get('matched_seq');sent=aim.get('sent_seq');sent_time=aim.get('sent_time_ns')
     eligible=(not sample.get('truncated_at_hold_deadline') and inputs.get('direct') and inputs.get('accepted')
               and aim.get('logical_fresh') and aim.get('desired_valid')
               and vector(aim.get('desired')) and vector(aim.get('offset')))
     down=probe.get('skill_down_ns')
     post_goal=(type(down) is int and isinstance(goal,(int,float)) and goal>=down and aim.get('logical_start_ns',0)>=goal
                and aim.get('accepted_ns',0)>=goal and type(matched) is int and matched>0)
-    exact=post_goal and type(sent) is int and sent>0 and sent==matched
+    # Sequence equality alone can still describe an older command while a new
+    # desired target waits for deferred flush. Require the actual causal send
+    # timestamp, never a current/goal timestamp or a value from another RPC.
+    timed_command=(type(sent_time) is int and sent_time>0)
+    exact=(post_goal and type(sent) is int and sent>0 and sent==matched
+           and type(goal) is int and timed_command and sent_time>=goal
+           and type(aim.get('logical_start_ns')) is int and aim['logical_start_ns']>=sent_time)
     error=None
     if eligible:
         desired=aim['desired'][:2];radius=aim.get('range',0);length=math.hypot(*desired)
         if radius>0 and length>radius:desired=[x*radius/length for x in desired]
         error=math.dist(desired,aim['offset'][:2])
     classification=('unavailable' if error is None else 'previous_or_unproven_goal' if not post_goal
-                    else 'post_goal_temporal_only' if type(sent) is not int else
-                    'current_goal_command_ack' if exact else 'newest_command_not_acknowledged')
-    return dict(phase=phase,goal_command_end_ns=goal,matched_seq=matched,sent_seq=sent,
+                    else 'post_goal_temporal_only' if type(sent) is not int or not timed_command else
+                    'current_goal_command_ack' if exact else
+                    'command_predates_pointer_goal' if sent_time<goal else
+                    'native_receipt_predates_sent_command' if aim.get('logical_start_ns',0)<sent_time else
+                    'newest_command_not_acknowledged')
+    return dict(phase=phase,goal_command_end_ns=goal,matched_seq=matched,sent_seq=sent,sent_time_ns=sent_time,
                 source_after_pointer_goal=bool(post_goal),exact_current_goal_ack=bool(exact and error is not None),
                 error_world=error,classification=classification)
 
@@ -97,7 +106,7 @@ def analyze(path,watches):
         src=[r for r in w['source'] if down<=r['sample_end_ns']<=up]
         out['watch'].append(dict(path=w['path'],skill=w['skill'],local_actor_counter_delta=delta,before_receipt_ns=first['ns'],after_receipt_ns=last['ns'],after_receipt_delay_ms=(last['ns']-up)/1e6,source_held_samples=len(src),source_valid_drag=sum(bool(r.get('valid_drag')) for r in src),source_aim_visible=sum(r.get('aim_world') is not None for r in src),source_direction_ready=sum(bool(r.get('direction_ready')) for r in src),range_values=sorted(set(r.get('world_range',{}).get('value') for r in src if r.get('world_range',{}).get('kind')==1)),native_range_authorized=sum(bool(r.get('world_range_source_present')) for r in src)))
     if not out['watch']:out['limitations']='No aligned coherent local Actor counter receipt supplied: actual application/cancellation is unproven by this probe alone.'
-    out['interpretation']='Immediate and settled vector differences are observations, not confirmed accuracy. Confirmed Range error additionally requires a native receipt starting after the pointer goal acknowledgment and matched_seq==current sent_seq>0; older runtimes without sent_seq cannot establish this. Vectors are world-space/clamped, not screen pixels or target-hit evidence. Sparse held snapshots can miss transient gaps.'
+    out['interpretation']='Immediate and settled vector differences are observations, not confirmed accuracy. Confirmed Range error additionally requires matched_seq==current sent_seq>0 in one aim snapshot, its actual causal sent_time_ns>=pointer goal acknowledgment, and native logical_start_ns>=sent_time_ns. Older runtimes missing either send field cannot establish this. Vectors are world-space/clamped, not screen pixels or target-hit evidence. Sparse held snapshots can miss transient gaps.'
     return out
 
 def main(argv=None):

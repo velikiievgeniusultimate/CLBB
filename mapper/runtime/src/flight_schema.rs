@@ -265,6 +265,10 @@ impl Encode for s::Logical {
 impl Encode for s::Direction {
     fn encode(&self) -> Value {
         let mut out = serde_json::Map::new();
+        out.insert("covered_binding_ready".into(), self.covered_binding_ready.encode());
+        out.insert("covered_base_skill_id".into(), self.covered_base_skill_id.encode());
+        out.insert("covered_actual_skill_id".into(), self.covered_actual_skill_id.encode());
+        out.insert("covered_source".into(), self.covered_source.encode());
         out.insert("ready".into(), self.ready.encode());
         out.insert("coherent".into(), self.coherent.encode());
         out.insert("source".into(), self.source.encode());
@@ -587,6 +591,7 @@ impl Encode for clbb_moba_core::controller::view::View {
             self.pendingGoalSequence_.encode(),
         );
         out.insert("touchSequence_".into(), self.touchSequence_.encode());
+        out.insert("sentTimeNs_".into(), self.sentTimeNs_.encode());
         out.insert(
             "verifiedTransportSequence_".into(),
             self.verifiedTransportSequence_.encode(),
@@ -759,6 +764,30 @@ impl Encode for clbb_moba_core::controller::view::View {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn covered_direction_recording_keeps_unknown_binding_and_exact_source_separate_from_native_ack() {
+        let mut input=s::Direction::default();let missing=input.encode();
+        assert_eq!(missing["covered_binding_ready"]["value"],-1);
+        assert_eq!(missing["covered_base_skill_id"]["kind"],0);
+        assert_eq!(missing["covered_actual_skill_id"]["kind"],0);
+        assert_eq!(missing["covered_source"]["present"],0);
+        input.covered_base_skill_id=s::Number {value:1_013_110.,kind:1};
+        input.covered_actual_skill_id=s::Number {value:2_013_110.,kind:1};
+        input.covered_source=crate::source::text("IndicatorMotionBase.lCoverSkills");
+        for ready in [-1,0,1] {
+            input.covered_binding_ready.value=ready;
+            let encoded=input.encode();let raw=serde_json::to_vec(&encoded).unwrap();
+            let row:Value=serde_json::from_slice(&raw).unwrap();assert_eq!(row,encoded);
+            assert_eq!(row["covered_binding_ready"]["value"],ready);
+            assert_eq!(row["covered_base_skill_id"]["value"],1_013_110.);
+            assert_eq!(row["covered_actual_skill_id"]["value"],2_013_110.);
+            assert_eq!(row["covered_actual_skill_id"]["kind"],1);
+            assert_eq!(row["covered_source"]["value"],"IndicatorMotionBase.lCoverSkills");
+            assert_eq!(row["ready"]["value"],-1,"a binding observation is not a native unit-vector acknowledgement");
+        }
+        input.covered_actual_skill_id.kind=2;
+        assert_eq!(input.encode()["covered_actual_skill_id"]["kind"],2,"record malformed types without silently converting them");
+    }
     #[test]
     fn charge_clock_and_lifecycle_recordings_survive_json_roundtrip_without_losing_unknowns() {
         let mut frame=s::Frame::default();

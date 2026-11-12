@@ -13,6 +13,7 @@ pub struct MotionPlan {
     pub skill: i32,
     pub name: String,
     motion: u64,
+    direction_geometry: bool,
     fields: HashMap<String, u64>,
     circle: Option<Path>,
     circle_field: Option<u64>,
@@ -64,6 +65,10 @@ fn zero_extent_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
     motion=="IndicatorMotionPos" && package=="IndicatorPackage_TwoPartAndPos_Direction"
         && rect==11 && params.len()>=2 && params[0]==11. && params[1]==0.
 }
+fn zero_extent_base_tap_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
+    motion=="IndicatorMotionBase"&&package=="IndicatorPackageEasy_Yuan"
+        &&rect==11&&params.len()>=2&&params[0]==3.&&params[1]==0.
+}
 fn movement_driven_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
     motion=="IndicatorMotionRot" && package=="IndicatorPackageEasy_JianTou_DrivenByJoystick"
         && rect==11 && params.len()>=2 && params[0]==27.
@@ -80,6 +85,10 @@ fn native_range_shape(motion:&str,package:&str)->Option<f64> {
         ("IndicatorMotionPos","IndicatorPackageEasy_Yuan")=>Some(3.),
         _=>None,
     }
+}
+fn verified_direction_geometry(skill:i32,motion:&str,package:&str,fixed_part_direction:bool)->bool {
+    native_template(motion,package)==Some(2)||fixed_part_direction
+        ||(skill==8430&&motion=="IndicatorMotionRot"&&package=="IndicatorPackageEasy")
 }
 fn point_visual_fallback(motion:&str,package:&str)->bool {
     motion=="IndicatorMotionPos"&&package=="IndicatorPackageEasy_Yuan"
@@ -148,6 +157,32 @@ fn fixed_part_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     let (rect,params)=native_rect_config(r,comp,skill,checks)?;
     if !fixed_part_direction_template(motion,package,rect,&params) {
         return Err("Unverified fixed-part direction configuration".into());
+    }
+    Ok(true)
+}
+/// This base motion has no m_OwnPackage field. It is a Tap only when both
+/// actual owners and all three configuration links prove the zero-extent
+/// contract; an unknown motion with a missing owner field remains rejected.
+fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
+    motion_name:&str,package_name:&str,checks:&mut Checks)->Result<bool> {
+    if motion_name!="IndicatorMotionBase"||package_name!="IndicatorPackageEasy_Yuan"{return Ok(false);}
+    let mut config=0;
+    for object in [comp,motion,package] {
+        let at=typed_field(r,object,"m_Config",17)?;
+        let linked=u64_at(&capture(r,checks,at,8)?,0);
+        if linked==0||(config!=0&&linked!=config){return Err("Native base-tap configuration owners differ".into());}
+        config=linked;
+    }
+    // Validate the reference's metadata kind as well as the array's actual
+    // Single[] identity checked by native_rect_config.
+    typed_field(r,config,"m_ShowRectPara",29)?;
+    let(rect,params)=native_rect_config(r,comp,skill,checks)?;
+    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) {
+        return Err("Unverified nonzero base-tap configuration".into());
+    }
+    for object in [motion,package] {
+        let at=typed_field(r,object,"m_OwnComp",18)?;
+        if u64_at(&capture(r,checks,at,8)?,0)!=comp{return Err("Native base-tap owner mismatch".into());}
     }
     Ok(true)
 }
@@ -463,10 +498,12 @@ impl MotionPlan {
     }
     pub fn discover_behavior<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -> Result<(Checks,u8)> {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
+        let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let kind=if let Some(kind)=native_template(&mc.name,&pc.name) {
             if kind==3 {native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Unverified native range family")?;}
             kind
         }
+        else if base_tap {1}
         else if fixed_part_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)? {2}
         else if mc.name=="IndicatorMotionPos" && pc.name=="IndicatorPackage_TwoPartAndPos_Direction" {
             let (rect,params)=native_rect_config(r,comp,skill,&mut checks)?;
@@ -480,6 +517,7 @@ impl MotionPlan {
             1
         } else {return Err("Unverified native template".into());};
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
+            if base_tap&&object==motion&&field=="m_OwnPackage"{continue;}
             if owner(r,object,field,&mut checks)?!=expected {return Err("Native template owner mismatch".into());}
         }
         check(r,&checks)?;Ok((checks,kind))
@@ -489,6 +527,7 @@ impl MotionPlan {
         let name=motion_class.name.clone();
         let range_contract=native_range_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let fixed_part_direction=fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
+        let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,fixed_part_direction);
         let expected = match skill {
             2510 => Some((
                 "IndicatorMotionRotAndPosRot",
@@ -579,6 +618,7 @@ impl MotionPlan {
             skill,
             name,
             motion,
+            direction_geometry,
             fields,
             circle,
             circle_field,
@@ -592,6 +632,54 @@ impl MotionPlan {
             direction_flags,
             direction_endpoint:None,
         })
+    }
+    /// This flag is set only by a verified motion/package/configuration contract.
+    /// Rot alone is insufficient: the same motion also implements plain Taps.
+    pub(crate) fn is_direction_geometry(&self)->bool {self.direction_geometry}
+    /// A charge phase may name a different indicator than its physical button.
+    /// Authorize that relationship only from this owned base motion's current
+    /// typed cover list. Registry membership or similar numeric IDs do not bind
+    /// a phase to the button, and list membership is never cached across samples.
+    pub(crate) fn covers_direction_skill<M:Memory>(&self,r:&mut Reflection<M>,actual:i32,consumed:&mut Checks)->Result<bool> {
+        check(r,&self.checks)?;
+        if !self.direction_geometry{return Ok(false);}
+        if !(1..=10_000_000).contains(&actual){return Err("Invalid covered skill identity".into());}
+        let mut reads=self.checks.clone();
+        let class=u64_at(&capture(r,&mut reads,self.motion,8)?,0);
+        r.class(class)?;
+        let field=typed_field(r,self.motion,"lCoverSkills",21)?;
+        let list=u64_at(&capture(r,&mut reads,field,8)?,0);
+        if list==0 {
+            check(r,&reads)?;consumed.extend(reads);return Ok(false);
+        }
+        let class=u64_at(&capture(r,&mut reads,list,8)?,0);
+        if r.class(class)?.name!="List`1"{return Err("Covered skill list type changed".into());}
+        let items=typed_field(r,list,"_items",29)?;
+        let size=typed_field(r,list,"_size",8)?;
+        let array=u64_at(&capture(r,&mut reads,items,8)?,0);
+        let count=i32_at(&capture(r,&mut reads,size,4)?,0);
+        if !(0..=128).contains(&count){return Err("Covered skill list size changed".into());}
+        if array==0 {
+            if count!=0{return Err("Covered skill list lost its array".into());}
+            check(r,&reads)?;consumed.extend(reads);return Ok(false);
+        }
+        let header=capture(r,&mut reads,array,32)?;
+        let capacity=u64_at(&header,24);
+        if capacity<count as u64||capacity>4096{return Err("Covered skill array size changed".into());}
+        let metadata=capture(r,&mut reads,u64_at(&header,0),0x50)?;
+        if r.cstring(u64_at(&metadata,16))?!="Int32[]"||r.class(u64_at(&metadata,0x40))?.name!="Int32" {
+            return Err("Covered skill array element type changed".into());
+        }
+        let values=capture(r,&mut reads,array+32,count as usize*4)?;
+        let mut found=false;
+        for value in values.chunks_exact(4) {
+            let skill=i32_at(value,0);
+            if !(1..=10_000_000).contains(&skill){return Err("Invalid covered skill list member".into());}
+            found|=skill==actual;
+        }
+        check(r,&reads)?;
+        consumed.extend(reads);
+        Ok(found)
     }
     pub fn sample_direction_visual<M:Memory>(&mut self,r:&mut Reflection<M>,hero:[f64;3],active:bool,consumed:&mut Checks)->Result<Option<crate::projection::DirectionVisual>> {
         let Some((range,start,end))=self.direction_visual else{return Ok(None);};
@@ -770,6 +858,7 @@ impl MotionPlan {
                 sample_end_ns: now,
                 raw_touch_xyz: v3(touch),
                 direction_xz: v2([result[0], result[2]]),
+                ..Default::default()
             };
         } else {
             let mut logical = s::Logical {
@@ -909,6 +998,7 @@ mod tests {
             skill: 2510,
             name: "IndicatorMotionRotAndPosRot".into(),
             motion: 512,
+            direction_geometry:false,
             fields,
             circle: None,
             circle_field: None,
@@ -1172,6 +1262,161 @@ mod tests {
         assert!(!zero_extent_template("Unknown",p,11,&[11.,0.]));
         assert!(!zero_extent_template(m,"Unknown",11,&[11.,0.]));
         assert!(!zero_extent_template(m,p,2,&[11.,0.]));
+    }
+    #[test]
+    fn zero_extent_base_tap_requires_exact_class_pair_rect_and_zero_range() {
+        let m="IndicatorMotionBase";let p="IndicatorPackageEasy_Yuan";
+        assert!(zero_extent_base_tap_template(m,p,11,&[3.,0.,30006.,0.5]));
+        for params in [&[3.,0.001][..],&[3.,-1.][..],&[3.,f64::NAN][..],&[3.,f64::INFINITY][..],
+                       &[8.,0.][..],&[f64::NAN,0.][..],&[3.][..],&[][..]] {
+            assert!(!zero_extent_base_tap_template(m,p,11,params));
+        }
+        for rect in [-1,0,1,10,12]{assert!(!zero_extent_base_tap_template(m,p,rect,&[3.,0.]));}
+        assert!(!zero_extent_base_tap_template("IndicatorMotionPos",p,11,&[3.,0.]));
+        assert!(!zero_extent_base_tap_template("Unknown",p,11,&[3.,0.]));
+        assert!(!zero_extent_base_tap_template(m,"IndicatorPackageEasy",11,&[3.,0.]));
+        // Neither the broad class allowlist nor feedback-plan discovery is
+        // expanded: this Tap must pass the separate owner/configuration gate.
+        assert_eq!(native_template(m,p),None);
+    }
+    fn base_tap_fixture()->Reflection<MutableMemory> {
+        fn put64(bytes:&mut[u8],at:usize,value:u64){bytes[at..at+8].copy_from_slice(&value.to_le_bytes());}
+        fn class(bytes:&mut[u8],address:usize,name:&str,fields:&[(&str,u8,u32)],cursor:&mut usize){
+            let name_at=*cursor;bytes[name_at..name_at+name.len()].copy_from_slice(name.as_bytes());*cursor+=name.len()+1;
+            put64(bytes,address+16,name_at as u64);put64(bytes,address+0x40,address as u64);put64(bytes,address+0x48,address as u64);
+            let table=*cursor;*cursor+=fields.len()*32;put64(bytes,address+0x78,table as u64);
+            bytes[address+0x104..address+0x106].copy_from_slice(&(fields.len()as u16).to_le_bytes());
+            for(i,(name,kind,offset))in fields.iter().enumerate(){
+                let name_at=*cursor;bytes[name_at..name_at+name.len()].copy_from_slice(name.as_bytes());*cursor+=name.len()+1;
+                let ty=*cursor;*cursor+=16;bytes[ty+8..ty+12].copy_from_slice(&((*kind as u32)<<16).to_le_bytes());
+                let row=table+i*32;put64(bytes,row,name_at as u64);put64(bytes,row+8,ty as u64);put64(bytes,row+16,address as u64);
+                bytes[row+24..row+28].copy_from_slice(&offset.to_le_bytes());
+            }
+        }
+        let mut bytes=vec![0u8;32768];let mut cursor=8192;
+        class(&mut bytes,3072,"Holder",&[("m_Config",17,32),("m_OwnComp",18,40)],&mut cursor);
+        class(&mut bytes,4096,"CData_Skill_Element",&[("m_SkillID",8,32),("m_RectType",8,36),("m_ShowRectPara",29,40)],&mut cursor);
+        class(&mut bytes,5120,"Single",&[],&mut cursor);
+        class(&mut bytes,5632,"Single[]",&[],&mut cursor);put64(&mut bytes,5632+0x40,5120);
+        for object in [128,256,384]{put64(&mut bytes,object,3072);put64(&mut bytes,object+32,1024);put64(&mut bytes,object+40,128);}
+        put64(&mut bytes,1024,4096);bytes[1056..1060].copy_from_slice(&4030i32.to_le_bytes());
+        bytes[1060..1064].copy_from_slice(&11i32.to_le_bytes());put64(&mut bytes,1064,1536);
+        put64(&mut bytes,1536,5632);put64(&mut bytes,1560,4);
+        for(at,v)in [(1568,3f32),(1572,0.),(1576,30006.),(1580,0.5)]{bytes[at..at+4].copy_from_slice(&v.to_le_bytes());}
+        Reflection::new(MutableMemory(RefCell::new(bytes))).unwrap()
+    }
+    #[test]
+    fn base_tap_contract_verifies_all_config_owners_type_skill_and_lifetime() {
+        let mut r=base_tap_fixture();let mut reads=Vec::new();
+        assert!(zero_extent_base_tap_contract(&mut r,128,256,384,4030,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",&mut reads).unwrap());
+        assert!(check(&r,&reads).is_ok());
+        // A pooled package being rebound invalidates the already produced
+        // behavioral receipt rather than preserving a previous hero's Tap.
+        r.memory.0.borrow_mut()[424..432].copy_from_slice(&256u64.to_le_bytes());
+        assert!(check(&r,&reads).is_err());
+        for (address,bytes)in [
+            (416,1280u64.to_le_bytes().to_vec()), // package configuration differs
+            (424,256u64.to_le_bytes().to_vec()),  // package belongs to another comp
+            (296,384u64.to_le_bytes().to_vec()),  // motion belongs to another comp
+            (1056,999i32.to_le_bytes().to_vec()), // configuration skill differs
+            (1060,0i32.to_le_bytes().to_vec()),   // unobserved rect
+            (1568,8f32.to_le_bytes().to_vec()),   // unobserved shape
+            (1572,1f32.to_le_bytes().to_vec()),   // nonzero extent
+            (1572,f32::NAN.to_le_bytes().to_vec()),
+        ] {
+            let mut r=base_tap_fixture();r.memory.0.borrow_mut()[address..address+bytes.len()].copy_from_slice(&bytes);
+            assert!(zero_extent_base_tap_contract(&mut r,128,256,384,4030,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",&mut Vec::new()).is_err());
+        }
+        // Config kind cannot be faked merely by keeping readable pointer bytes.
+        let mut r=base_tap_fixture();
+        let table=u64_at(&r.memory.0.borrow()[4096+0x78..4096+0x80],0)as usize;
+        let ty=u64_at(&r.memory.0.borrow()[table+64+8..table+64+16],0)as usize;
+        r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&(8u32<<16).to_le_bytes());
+        assert!(zero_extent_base_tap_contract(&mut r,128,256,384,4030,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",&mut Vec::new()).is_err());
+    }
+
+    fn cover_fixture()->(Reflection<MutableMemory>,MotionPlan) {
+        fn put64(bytes:&mut[u8],at:usize,value:u64){bytes[at..at+8].copy_from_slice(&value.to_le_bytes());}
+        fn class(bytes:&mut[u8],address:usize,name:&str,fields:&[(&str,u8,u32)],cursor:&mut usize){
+            let name_at=*cursor;bytes[name_at..name_at+name.len()].copy_from_slice(name.as_bytes());*cursor+=name.len()+1;
+            put64(bytes,address+16,name_at as u64);put64(bytes,address+0x40,address as u64);put64(bytes,address+0x48,address as u64);
+            let table=*cursor;*cursor+=fields.len()*32;put64(bytes,address+0x78,table as u64);
+            bytes[address+0x104..address+0x106].copy_from_slice(&(fields.len()as u16).to_le_bytes());
+            for(i,(name,kind,offset))in fields.iter().enumerate(){
+                let name_at=*cursor;bytes[name_at..name_at+name.len()].copy_from_slice(name.as_bytes());*cursor+=name.len()+1;
+                let ty=*cursor;*cursor+=16;bytes[ty+8..ty+12].copy_from_slice(&((*kind as u32)<<16).to_le_bytes());
+                let row=table+i*32;put64(bytes,row,name_at as u64);put64(bytes,row+8,ty as u64);put64(bytes,row+16,address as u64);
+                bytes[row+24..row+28].copy_from_slice(&offset.to_le_bytes());
+            }
+        }
+        let mut bytes=vec![0u8;32768];let mut cursor=8192;
+        class(&mut bytes,4096,"IndicatorMotionRot",&[("lCoverSkills",21,256)],&mut cursor);
+        class(&mut bytes,5120,"List`1",&[("_items",29,32),("_size",8,40)],&mut cursor);
+        class(&mut bytes,6144,"Int32",&[],&mut cursor);
+        class(&mut bytes,6656,"Int32[]",&[],&mut cursor);put64(&mut bytes,6656+0x40,6144);
+        put64(&mut bytes,512,4096);put64(&mut bytes,768,1536);
+        put64(&mut bytes,1536,5120);put64(&mut bytes,1568,2048);bytes[1576..1580].copy_from_slice(&3i32.to_le_bytes());
+        put64(&mut bytes,2048,6656);put64(&mut bytes,2072,4);
+        for(at,value)in [(2080,12652i32),(2084,12653),(2088,12653)]{bytes[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        let (_,mut plan)=q_fixture();plan.skill=12650;plan.name="IndicatorMotionRot".into();plan.direction_geometry=true;
+        plan.checks=vec![(512,4096u64.to_le_bytes().to_vec())];
+        (Reflection::new(MutableMemory(RefCell::new(bytes))).unwrap(),plan)
+    }
+    #[test]
+    fn covered_direction_requires_current_typed_membership_and_is_not_cached() {
+        let (mut r,plan)=cover_fixture();let mut reads=Vec::new();
+        assert!(plan.covers_direction_skill(&mut r,12652,&mut reads).unwrap());
+        assert!(!plan.covers_direction_skill(&mut r,12658,&mut Vec::new()).unwrap());
+        assert!(check(&r,&reads).is_ok());
+        r.memory.0.borrow_mut()[2080..2084].copy_from_slice(&12654i32.to_le_bytes());
+        assert!(check(&r,&reads).is_err());
+        assert!(!plan.covers_direction_skill(&mut r,12652,&mut Vec::new()).unwrap());
+        assert!(plan.covers_direction_skill(&mut r,12654,&mut Vec::new()).unwrap());
+        let (mut r,mut plan)=cover_fixture();plan.direction_geometry=false;
+        assert!(!plan.covers_direction_skill(&mut r,12652,&mut Vec::new()).unwrap());
+    }
+    #[test]
+    fn covered_direction_rejects_wrong_types_bounds_owner_rebind_and_invalid_ids() {
+        for (at,value)in [(1576,-1i32),(1576,129),(2080,0),(2080,-1),(2080,10_000_001)] {
+            let(mut r,plan)=cover_fixture();r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());
+            assert!(plan.covers_direction_skill(&mut r,12652,&mut Vec::new()).is_err());
+        }
+        for (at,value)in [(768,0u64),(1568,0),(2072,2),(2072,4097),(512,5120),(1536,4096),(6656+0x40,4096)] {
+            let(mut r,plan)=cover_fixture();r.memory.0.borrow_mut()[at..at+8].copy_from_slice(&value.to_le_bytes());
+            let result=plan.covers_direction_skill(&mut r,12652,&mut Vec::new());
+            if at==768{assert_eq!(result.unwrap(),false);}else{assert!(result.is_err(),"{at}");}
+        }
+        // The same readable pointers cannot qualify a field with the wrong
+        // metadata kind or a static field masquerading as an instance member.
+        for (class,field_index,attrs)in [(4096,0,18u32<<16),(4096,0,(21u32<<16)|16),
+                                       (5120,0,18u32<<16),(5120,1,12u32<<16)] {
+            let(mut r,plan)=cover_fixture();
+            let table=u64_at(&r.memory.0.borrow()[class+0x78..class+0x80],0)as usize;
+            let row=table+field_index*32;let ty=u64_at(&r.memory.0.borrow()[row+8..row+16],0)as usize;
+            r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&attrs.to_le_bytes());
+            assert!(plan.covers_direction_skill(&mut r,12652,&mut Vec::new()).is_err());
+        }
+        for actual in [0,-1,10_000_001] {
+            let(mut r,plan)=cover_fixture();assert!(plan.covers_direction_skill(&mut r,actual,&mut Vec::new()).is_err());
+        }
+        // All consumed owner/list/array links remain in the caller's outer fence.
+        for (at,value)in [(768,1664u64),(1536,4096),(1568,2304),(2048,4096),(6656+0x40,4096)] {
+            let(mut r,plan)=cover_fixture();let mut reads=Vec::new();
+            assert!(plan.covers_direction_skill(&mut r,12652,&mut reads).unwrap());
+            r.memory.0.borrow_mut()[at..at+8].copy_from_slice(&value.to_le_bytes());
+            assert!(check(&r,&reads).is_err(),"{at}");
+        }
+    }
+    #[test]
+    fn direction_geometry_flag_comes_from_verified_contract_not_motion_name() {
+        assert!(verified_direction_geometry(2520,"IndicatorMotionRot","IndicatorPackageEasy_JianTou",false));
+        assert!(verified_direction_geometry(12650,"IndicatorMotionRot","IndicatorPackage_JianTou_OtherFixedPart",true));
+        assert!(verified_direction_geometry(8430,"IndicatorMotionRot","IndicatorPackageEasy",false));
+        assert!(!verified_direction_geometry(2530,"IndicatorMotionRot","IndicatorPackageEasy",false));
+        assert!(!verified_direction_geometry(4030,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",false));
+        assert!(!verified_direction_geometry(11810,"IndicatorMotionPos","IndicatorPackageEasy_Yuan",false));
+        assert!(!verified_direction_geometry(12650,"IndicatorMotionRot","Unknown",false));
+        let(_,mut plan)=q_fixture();assert!(!plan.is_direction_geometry());plan.direction_geometry=true;assert!(plan.is_direction_geometry());
     }
 
     #[test]

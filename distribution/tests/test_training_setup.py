@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Offline setup-tool checks. No socket, UI audit or native input is opened."""
 import contextlib
+import argparse
 import copy
 import importlib.util
 import io
@@ -31,6 +32,16 @@ def gm(opened=True):
         rows.append({'path': 'UITrainGM.uiFrame.' + overlay,
                      'widget': {'visible': desired, 'onscreen': True, 'center_uv': [.26, .18]}})
     return {'objects': rows}
+
+
+def level_report(now=1_000_000_000, level=15):
+    return {'pid': 123, 'birth': 456, 'hero': 97, 'same_match_at_end': True,
+            'executable': '/owned/clbb', 'hero_level': {'Ok': {
+                'hero': 97, 'source': 'EntityBase.<m_Level>k__BackingField',
+                'declaring_class': 'EntityBase', 'field': '<m_Level>k__BackingField', 'kind': 8,
+                'show_declaring_class': 'ShowEntity', 'show_field': 'm_Level', 'show_kind': 8,
+                'coherent': True, 'local_owner_verified': True, 'value': level, 'show_level': level,
+                'start_ns': now - 3_000_000, 'end_ns': now}}}
 
 
 class FakeSession:
@@ -70,6 +81,58 @@ class FakeSession:
 
 
 class TrainingSetupTests(unittest.TestCase):
+    def test_max_level_requires_fresh_typed_owned_actor_and_show_receipts(self):
+        good = level_report()
+        self.assertEqual(setup.validate_hero_level(good, 97, 123, '456', now_ns=1_002_000_000,
+            expected_executable='/owned/clbb')['value'], 15)
+        changes = [('pid', 999), ('birth', 999), ('hero', 25), ('same_match_at_end', False),
+                   ('executable', '/other/clbb')]
+        for key, value in changes:
+            data = copy.deepcopy(good); data[key] = value
+            with self.subTest(header=key), self.assertRaises(setup.ObservationError):
+                setup.validate_hero_level(data, 97, 123, 456, now_ns=1_002_000_000,
+                    expected_executable='/owned/clbb')
+        for key, value in [('field', '_level'), ('kind', 9), ('local_owner_verified', 1),
+                           ('coherent', False), ('show_level', 1), ('value', True),
+                           ('end_ns', 700_000_000), ('start_ns', float('nan'))]:
+            data = copy.deepcopy(good); data['hero_level']['Ok'][key] = value
+            with self.subTest(native=key), self.assertRaises(setup.ObservationError):
+                setup.validate_hero_level(data, 97, 123, 456, now_ns=1_002_000_000)
+        data = copy.deepcopy(good); data['hero_level'] = {'Err': 'owner changed'}
+        with self.assertRaises(setup.ObservationError) as error:
+            setup.validate_hero_level(data, 97, 123, 456, now_ns=1_002_000_000)
+        self.assertEqual(error.exception.reason, 'hero_level_unknown')
+        with self.assertRaises(setup.ObservationError) as error:
+            setup.validate_hero_level(level_report(level=1), 97, 123, 456, now_ns=1_002_000_000)
+        self.assertEqual(error.exception.reason, 'hero_level_not_maximum')
+
+    def test_unknown_level_after_max_button_stops_before_skill_learning(self):
+        for verified in (False, True):
+            session = mock.Mock()
+            session.read.return_value = {'active': []}
+            session.open_gm.return_value = gm()
+            if verified:
+                session.verify_level.return_value = {'receipt': level_report()}
+            else:
+                session.verify_level.side_effect = setup.ObservationError('hero_level_not_maximum', 'Observed level1')
+            report = {'commands': [], 'samples': [], 'phases': [], 'pressed_keys': []}
+            args = argparse.Namespace(hero=97, evidence=Path('/unused'), max_level=True,
+                configure_flags=False, verify_flags=False, gm_close_point=(.974, .1), rounds=1, hold_ms=100)
+            with mock.patch.object(setup, 'Setup', return_value=session), mock.patch.object(setup, 'learn') as learn:
+                if verified:
+                    setup.run(args, report)
+                    learn.assert_called_once()
+                    self.assertTrue(report['max_level']['level_15_verified'])
+                else:
+                    with self.assertRaises(setup.ObservationError):
+                        setup.run(args, report)
+                    learn.assert_not_called()
+                    session.command.assert_not_called()
+                    session.close_gm.assert_not_called()
+                    self.assertFalse(report['max_level']['level_15_verified'])
+            session.verify_level.assert_called_once_with('after-max-level', 15)
+            session.tap.assert_called_once()
+
     def test_fresh_owner_and_same_epoch_are_required(self):
         good = controls()
         self.assertEqual(setup.validate_controls(good, 97, now_ns=1_002_000_000), 'owned:test:97')

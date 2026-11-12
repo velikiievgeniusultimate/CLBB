@@ -50,21 +50,22 @@ typedef struct {
     unsigned raw_steps;
     guint raw_timer;
 } ClbbHost;
-static guint interval,downs,ups,moves;
-static gboolean accept=TRUE;
+static guint interval,downs,ups,moves,timer_calls;
+static gboolean accept=TRUE,accept_move=TRUE;
+static double last_up_x,last_up_y;
 static GSourceFunc saved_callback;
 static gpointer saved_context;
 static void *game_surface(void *window) { return window; }
 static int clbb_view_touch(void *window,int edge,int finger,double x,double y) {
     assert(window==(void*)1 && finger==-1 && isfinite(x) && isfinite(y));
     if(edge==0) { ++downs;return accept; }
-    if(edge==1) ++moves;
-    else if(edge==2) ++ups;
+    if(edge==1) { ++moves;return accept_move; }
+    else if(edge==2) { ++ups;last_up_x=x;last_up_y=y; }
     else assert(0);
     return 1;
 }
 static guint test_timeout_add(guint ms,GSourceFunc callback,gpointer context) {
-    interval=ms;saved_callback=callback;saved_context=context;return 42;
+    ++timer_calls;interval=ms;saved_callback=callback;saved_context=context;return 42;
 }
 #define g_timeout_add test_timeout_add
 '''
@@ -72,7 +73,8 @@ static guint test_timeout_add(guint ms,GSourceFunc callback,gpointer context) {
 
 TEST = r'''
 static void reset(void) {
-    interval=downs=ups=moves=0;saved_callback=NULL;saved_context=NULL;accept=TRUE;
+    interval=downs=ups=moves=timer_calls=0;saved_callback=NULL;saved_context=NULL;accept=accept_move=TRUE;
+    last_up_x=last_up_y=-1;
 }
 static void parser_checks(void) {
     const char *good[][3]={
@@ -107,8 +109,14 @@ int main(void) {
     assert(strcmp(reply,"OK hold")==0);g_free(reply);
     assert(host.raw_tap&&host.raw_steps==0&&host.raw_timer==42&&interval==950);
     assert(downs==1&&ups==0&&moves==0&&saved_context==&host);
+    char *move[]={"move-held","0.6","0.2",NULL};
+    reply=move_held(&host,move);
+    assert(strcmp(reply,"OK move-held")==0);g_free(reply);
+    assert(moves==1&&downs==1&&ups==0&&host.raw_x==.6&&host.raw_y==.2);
+    assert(host.raw_timer==42&&interval==950&&timer_calls==1);
     assert(saved_callback(&host)==G_SOURCE_REMOVE);
     assert(ups==1&&!host.raw_tap&&host.raw_timer==0);
+    assert(last_up_x==.6&&last_up_y==.2);
     // Neither an active raw contact nor its pending timer can be replaced.
     reset();host.raw_tap=TRUE;host.raw_timer=7;host.raw_x=.2;
     reply=hold(&host,valid);
@@ -124,21 +132,44 @@ int main(void) {
     reset();char *bad[]={"hold","nan",".5","900",NULL};reply=hold(&host,bad);
     assert(strcmp(reply,"REJECTED hold")==0);g_free(reply);
     assert(downs==0&&interval==0);
+    // MOVE can neither create a contact nor take over an automatic swipe.
+    reset();host.raw_tap=FALSE;host.raw_timer=0;
+    reply=move_held(&host,move);assert(strcmp(reply,"REJECTED move-held")==0);g_free(reply);
+    assert(moves==0&&downs==0&&ups==0&&timer_calls==0);
+    host.raw_tap=TRUE;
+    reply=move_held(&host,move);assert(strcmp(reply,"REJECTED move-held")==0);g_free(reply);
+    host.raw_timer=7;host.raw_steps=1;
+    reply=move_held(&host,move);assert(strcmp(reply,"REJECTED move-held")==0);g_free(reply);
+    host.raw_steps=0;host.closing=TRUE;
+    reply=move_held(&host,move);assert(strcmp(reply,"REJECTED move-held")==0);g_free(reply);
+    assert(moves==0&&host.raw_timer==7&&timer_calls==0);
+    host.closing=FALSE;host.raw_x=.2;host.raw_y=.3;
+    char *bad_move[]={"move-held","nan","0.5",NULL};
+    reply=move_held(&host,bad_move);assert(strcmp(reply,"REJECTED move-held")==0);g_free(reply);
+    assert(moves==0&&host.raw_x==.2&&host.raw_y==.3&&host.raw_timer==7);
+    accept_move=FALSE;
+    reply=move_held(&host,move);assert(strcmp(reply,"REJECTED move-held")==0);g_free(reply);
+    assert(moves==1&&host.raw_x==.2&&host.raw_y==.3&&host.raw_timer==7&&timer_calls==0);
     g_print("DIAGNOSTIC_RAW_HOLD_OK parser_valid=4 parser_invalid=19 "
-            "timed_down_up=1 busy_rejected=1 failed_down_no_timer=1 invalid_no_input=1\n");
+            "timed_down_up=1 busy_rejected=1 failed_down_no_timer=1 invalid_no_input=1 "
+            "held_move_final_up=1 move_does_not_extend_timer=1 move_requires_hold=1 failed_move_preserves_position=1\n");
 }
 '''
 
 
 def main():
     source = SOURCE.read_text()
+    pointer_parser = production_body(source, "static gboolean raw_pointer_arguments(")
     parser = production_body(source, "static gboolean raw_hold_arguments(")
     finish = production_body(source, "static gboolean finish_raw_tap(")
     branch = production_body(source, 'else if (count == 4 && strcmp(args[0], "hold") == 0)')
     branch = branch.removeprefix("else ")
-    fixture = (PRELUDE + parser + "\n" + finish +
+    move_branch=production_body(source, 'else if (count == 3 && strcmp(args[0], "move-held") == 0)').removeprefix("else ")
+    fixture = (PRELUDE + pointer_parser + "\n" + parser + "\n" + finish +
                "\nstatic char *hold(ClbbHost *h,char **args) { guint count=4;char *reply=NULL;\n" +
-               branch + "\nreturn reply; }\n" + TEST)
+               branch + "\nreturn reply; }\n" +
+               "\nstatic char *move_held(ClbbHost *h,char **args) { guint count=3;char *reply=NULL;\n" +
+               move_branch + "\nreturn reply; }\n" + TEST)
     flags = shlex.split(subprocess.check_output(
         ["pkgconf", "--cflags", "--libs", "glib-2.0"], text=True))
     with tempfile.TemporaryDirectory(prefix="clbb-diagnostic-raw-hold-") as directory:

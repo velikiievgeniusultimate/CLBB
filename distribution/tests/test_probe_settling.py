@@ -54,11 +54,13 @@ class FakeProbe:
         return sample
 
 
-def sample(stage="held:1:settled", source_start=3000, matched=4, sent=4):
+def sample(stage="held:1:settled", source_start=3000, matched=4, sent=4, sent_time=2500):
     aim = {"logical_fresh": 1, "desired_valid": 1, "desired": [3., 4.], "offset": [0., 0.],
            "range": 5., "logical_start_ns": source_start, "accepted_ns": source_start + 10, "matched_seq": matched}
     if sent is not None:
         aim["sent_seq"] = sent
+    if sent_time is not None:
+        aim["sent_time_ns"] = sent_time
     return {"stage": stage, "start_ns": 4000, "end_ns": 5000,
             "pointer_goal": {"command_end_ns": 2000},
             "data": {"input": {"direct": 1, "accepted": 1}, "aim": aim}}
@@ -128,6 +130,30 @@ class ProbeSettlingTests(unittest.TestCase):
             result = analysis.analyze(path, [])
             self.assertEqual(result["confirmed_native_range_vector_error_world"]["n"], 1)
             self.assertEqual(result["range_feedback_by_phase"]["settled"]["confirmed_current_goal_vector_error_world"]["n"], 1)
+
+    def test_post_goal_feedback_for_an_old_equal_sequence_is_not_strict_accuracy(self):
+        p={"skill_down_ns":1000}
+        old=sample(sent_time=1500)
+        result=analysis.range_observation(old,p)
+        self.assertTrue(result["source_after_pointer_goal"])
+        self.assertEqual(result["matched_seq"],result["sent_seq"])
+        self.assertEqual(result["classification"],"command_predates_pointer_goal")
+        self.assertFalse(result["exact_current_goal_ack"])
+        early_receipt=analysis.range_observation(sample(source_start=2400,sent_time=2500),p)
+        self.assertEqual(early_receipt["classification"],"native_receipt_predates_sent_command")
+        self.assertFalse(early_receipt["exact_current_goal_ack"])
+        for missing in [None,0,-1,True,2500.0]:
+            row=sample(sent_time=missing)
+            row["data"]["input"]["sent_time_ns"]=2600
+            result=analysis.range_observation(row,p)
+            self.assertFalse(result["exact_current_goal_ack"],missing)
+            self.assertEqual(result["classification"],"post_goal_temporal_only")
+        p.update(request={"hero":118,"key":81},physical_up_ns=6000,samples=[old])
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"probe.json";path.write_text(json.dumps(p))
+            result=analysis.analyze(path,[])
+            self.assertIsNone(result["confirmed_native_range_vector_error_world"])
+            self.assertIsNone(result["range_feedback_by_phase"]["settled"]["confirmed_current_goal_vector_error_world"])
 
     def test_legacy_probe_goal_is_recovered_from_latest_completed_pointer_command(self):
         row = sample(source_start=1500)
