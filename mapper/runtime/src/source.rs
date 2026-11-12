@@ -273,6 +273,12 @@ pub(crate) fn skill_button_class<M: Memory>(r: &mut Reflection<M>, class: &crate
     Ok(control_kind(false, &ancestry) == "skill")
 }
 
+fn held_indicator_behavior_id(base:i32, future:i32, actual:i32, charge:bool, held_slot:bool)->i32 {
+    // The future release changes during charging, while the owned active
+    // indicator can still be the base. Classify the indicator actually held,
+    // not the future cast. Never reuse it for an idle or unverified variant.
+    if charge && held_slot && base>0 && actual==base {base}else{future}
+}
 fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
     // Badang's successful wall dash exposes its ordinary wall-removal button
     // through the SAME owned slot/data. There is intentionally no aim registry
@@ -322,7 +328,16 @@ fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
 
 #[cfg(test)]
 mod control_kind_tests {
-    use super::control_kind;
+    use super::{control_kind, held_indicator_behavior_id};
+    #[test]
+    fn held_charge_keeps_base_indicator_template_but_other_variants_do_not() {
+        assert_eq!(held_indicator_behavior_id(7810,7871,7810,true,true),7810);
+        assert_eq!(held_indicator_behavior_id(7810,7811,7810,true,true),7810);
+        for (actual,charge,held) in [(7810,false,true),(7810,true,false),(7871,true,true),(0,true,true)] {
+            assert_eq!(held_indicator_behavior_id(7810,7871,actual,charge,held),7871);
+        }
+        assert_eq!(held_indicator_behavior_id(7720,7725,7720,false,true),7725);
+    }
     #[test]
     fn specialized_hero_button_keeps_skill_slot() {
         let chain = ["KeySkilleCheckMesh", "SkillButton", "KeySkill"].map(String::from);
@@ -1346,6 +1361,8 @@ impl<M: Memory> Source<M> {
             let id=skill_state.buttons.iter().take(skill_state.count.min(32) as usize)
                 .find(|v|v.slot.as_str()==entry.slot.as_str() && v.base_skill_id.int()==entry.skill_id.int())
                 .map(|v|v.active_skill_id.int()).filter(|id|*id>0).unwrap_or(entry.skill_id.int());
+            let id=if !choice_family {held_indicator_behavior_id(entry.skill_id.int(),id,skill,
+                control_holds.get(entry.slot.as_str())==Some(&true),ui.active_slot.as_str()==entry.slot.as_str())}else{id};
             if id<=0 {continue;}
             if !choice_family && hero == 84 && entry.slot.as_str() == "skill:2" && id == 8430 {
                 // Ling's ultimate rotates its blade landing arrangement even

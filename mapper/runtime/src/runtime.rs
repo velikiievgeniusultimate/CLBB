@@ -1477,11 +1477,11 @@ mod tests {
     #[test]
     fn hold_duration_skills_have_one_ui_row_and_observed_forms_are_scoped_by_base_skill() {
         let mut events=Vec::new();let mut r=fixture(&mut events);
-        for n in 0..3 {
-            let slot=format!("skill:{n}");let mut sample=template_sample(126,2,now_ns());
+        for (hero,n,base) in [(126,0,12610),(126,1,12630),(126,2,12650),(78,0,7810)] {
+            let slot=format!("skill:{n}");let mut sample=template_sample(hero,2,now_ns());
             sample.frame.ui.buttons[0].slot=crate::source::text(&slot);
-            let base=12610+n*20;sample.frame.ui.buttons[0].skill_id=crate::source::number(base as f64);
-            r.host.settings.observed_forms.entry(126).or_default().insert((slot.clone(),base),[base+1,base+2,2510].into());
+            sample.frame.ui.buttons[0].skill_id=crate::source::number(base as f64);
+            r.host.settings.observed_forms.entry(hero).or_default().insert((slot.clone(),base),[base+1,base+2,7871].into());
             r.host.sample=Some(Arc::new(sample));let rows=r.hero_controls();
             assert_eq!(rows.lines().count(),2,"{rows}");
             assert!(!rows.contains(&format!("{slot}:")));

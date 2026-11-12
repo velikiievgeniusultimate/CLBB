@@ -550,7 +550,9 @@ pub fn parse_resolution(value: &str) -> Option<(u32, u32)> {
 pub fn plain_spell_id(id:i32)->bool {matches!(id,20030|20080)}
 fn plain_spell_slot(slot:&str)->bool {slot.strip_prefix("extra:2:").and_then(|s|s.parse::<i32>().ok()).is_some_and(plain_spell_id)}
 pub fn hold_duration_skill(hero: i32, slot: &str) -> bool {
-    hero==126 && matches!(variant_base(slot).unwrap_or(slot),"skill:0"|"skill:1"|"skill:2")
+    let base=variant_base(slot).unwrap_or(slot);
+    (hero==126 && matches!(base,"skill:0"|"skill:1"|"skill:2"))
+        || (hero==78 && base=="skill:0")
 }
 pub fn valid_key(key: i32) -> bool {
     key == 0
@@ -1030,6 +1032,22 @@ mod field_inheritance_tests {
         }
         s.set("hero.bindings.extra:2.cast_mode","1",126).unwrap();
         assert_eq!(s.binding(126,"extra:2").cast_mode,1);
+    }
+    #[test]
+    fn khufra_first_skill_is_one_release_only_charge_without_restricting_other_skills() {
+        let mut s=Settings::default();
+        s.values.insert("common.bindings.skill:0.cast_mode".into(),"1".into());
+        s.values.insert("heroes.78.bindings.skill:0:7871.cast_mode".into(),"1".into());
+        for slot in ["skill:0","skill:0:7811","skill:0:7871"] {
+            assert_eq!(s.binding(78,slot).cast_mode,0);
+            assert!(s.set(&format!("hero.bindings.{slot}.cast_mode"),"1",78).is_err());
+            assert!(s.set(&format!("common.bindings.{slot}.cast_mode"),"1",78).is_err());
+        }
+        s.set("hero.bindings.skill:0:7871.stop_movement","true",78).unwrap();
+        assert!(s.binding(78,"skill:0").stop_movement);
+        s.set("hero.bindings.skill:1.cast_mode","1",78).unwrap();
+        assert_eq!(s.binding(78,"skill:1").cast_mode,1);
+        assert_eq!(s.binding(25,"skill:0").cast_mode,1);
     }
     #[test]
     fn extended_keyboard_identities_are_saved_without_aliasing_mouse_or_function_keys() {

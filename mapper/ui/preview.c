@@ -631,6 +631,15 @@ int main(int argc, char **argv) {
     g_hash_table_remove(p.values,"preview.controls");put(&p,"hero.id","25");clbb_settings_refresh(s);
     g_assert_nonnull(find_control(window,"hero.bindings.skill:0.cast_mode"));
     g_print("CLBB_SUYOU_SINGLE_HOLD_SKILL_UI_OK three fixed release modes, shared stop/key settings\n");
+    put(&p,"hero.id","78");put(&p,"hero.name","Хуфра");
+    put(&p,"preview.controls","1\t78\nskill:0\tskill:0\tskill:0\t7810\t7810\t2\nskill:0\tskill:0:7871\tskill:0:7871\t7810\t7871\t2\nskill:1\tskill:1\tskill:1\t7820\t7820\t1\n");
+    clbb_settings_refresh(s);
+    g_assert_null(find_control(window,"hero.bindings.skill:0.cast_mode"));
+    g_assert_null(find_control(window,"common.bindings.skill:0.cast_mode"));
+    g_assert_null(find_control(window,"hero.bindings.skill:0:7871.cast_mode"));
+    g_assert_nonnull(find_control(window,"hero.bindings.skill:0.key"));
+    g_assert_nonnull(find_control(window,"hero.bindings.skill:1.cast_mode"));
+    g_print("CLBB_KHUFRA_SINGLE_HOLD_SKILL_UI_OK first skill fixed release, other skills editable\n");
     put(&p,"hero.id","77");put(&p,"common.battle_spell_id","20030");
     put(&p,"common.bindings.extra:2.cast_mode","3");
     put(&p,"preview.controls","1\t77\nextra:2\textra:2\textra:2:20030\t20030\t20030\t1\n");
