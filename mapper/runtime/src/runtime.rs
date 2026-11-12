@@ -797,7 +797,8 @@ impl Runtime {
                 let state = &sample.frame.skill_state;
                 let buttons: Vec<_> = state.buttons.iter().take(state.count as usize).map(|button| {
                     let locked = button.cast_locked.is_bool().then(|| button.cast_locked.get());
-                    serde_json::json!({"slot": button.slot.as_str(), "form": button.active_skill_id.int(), "locked": locked})
+                    let state_forbidden = button.state_forbidden.is_bool().then(|| button.state_forbidden.get());
+                    serde_json::json!({"slot": button.slot.as_str(), "form": button.active_skill_id.int(), "locked": locked, "state_forbidden": state_forbidden})
                 }).collect();
                 serde_json::json!({
                     "epoch": state.token.as_str(), "hero": state.hero_id.int(),

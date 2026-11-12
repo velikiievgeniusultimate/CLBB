@@ -237,6 +237,17 @@ impl Controller {
             } else {
                 0
             };
+        // UI ownership is acceptance even when an animation/buffered cast has
+        // not produced a logical target yet. Never infer rejection later merely
+        // because that indicator disappears or becomes temporarily forbidden.
+        if self.skillTouch_ >= 0 && self.frameCoreSampleStartNs_ >= self.castStartedNs_ {
+            let matching_skill = self.coreSkill_ > 0 && self.find_button(&self.activeSlot_)
+                .is_some_and(|b| self.coreSkill_ == b.skillId
+                    || self.coreSkill_ == self.skillCooldownVariant_);
+            if self.frameActiveSlot_ == self.activeSlot_ || matching_skill {
+                self.skillActivationObserved_ = true;
+            }
+        }
         if self.skillTouch_ >= 0
             && !self.skillCancelPending_
             && self.startupArmed_
@@ -290,6 +301,9 @@ impl Controller {
         self.update_range_drag_arming(host, f);
         self.sample_accepted_input(f, host);
         self.sample_direction_input(host, f);
+        if self.acceptedInput_ || self.directionAccepted_ {
+            self.skillActivationObserved_ = true;
+        }
         self.sample_skill_cancel(host, f);
         self.tick(host);
     }

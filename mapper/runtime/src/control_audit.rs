@@ -87,6 +87,13 @@ pub(crate) fn cast_lock_address<M: Memory>(r: &mut Reflection<M>, object: u64) -
         .then(|| object + field.offset)
 }
 
+pub(crate) fn state_forbid_address<M: Memory>(r: &mut Reflection<M>, object: u64) -> Option<u64> {
+    let (_, metadata) = fields(r, object, &mut Vec::new()).ok()?;
+    let field = metadata.get("m_bIsStateForbid")?;
+    (field.kind == 2 && !field.is_static && field.offset <= 1_048_576)
+        .then(|| object + field.offset)
+}
+
 pub fn observe<M: Memory>(r: &mut Reflection<M>, ui: u64, buttons: &[ButtonPlan]) -> Result<Value> {
     let mut consumed = Vec::new();
     let mut rows = Vec::new();

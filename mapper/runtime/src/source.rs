@@ -76,6 +76,16 @@ fn boolean<M: Memory>(r: &Reflection<M>, checks: &mut Checks, address: u64) -> R
         _ => Err("Invalid native boolean".into()),
     }
 }
+fn optional_flag<M: Memory>(r: &Reflection<M>, checks: &mut Checks, address: Option<u64>) -> s::Flag {
+    let checkpoint = checks.len();
+    let Some(value) = address.and_then(|address| boolean(r, checks, address).ok()) else {
+        checks.truncate(checkpoint);
+        return s::Flag::default();
+    };
+    // Only valid optional observations become part of the coherent sample.
+    // An unreadable/malformed flag is unknown, never permission or prohibition.
+    flag(value)
+}
 pub fn capture_path<M: Memory>(
     r: &Reflection<M>,
     checks: &mut Checks,
@@ -184,6 +194,7 @@ pub struct ButtonPlan {
     pub skill: u64,
     pub variant: Option<u64>,
     pub cast_lock: Option<u64>,
+    pub state_forbid: Option<u64>,
     pub timer: Option<u64>,
     pub widget: Option<Widget>,
 }
@@ -344,6 +355,11 @@ impl UiPlan {
             } else {
                 None
             };
+            let state_forbid = if kind == "skill" {
+                crate::control_audit::state_forbid_address(r, button)
+            } else {
+                None
+            };
             checks.push((button, class.address.to_le_bytes().to_vec()));
             checks.push((at, index.to_le_bytes().to_vec()));
             buttons.push(ButtonPlan {
@@ -356,6 +372,7 @@ impl UiPlan {
                 skill,
                 variant,
                 cast_lock,
+                state_forbid,
                 timer,
                 widget: None,
             });
@@ -580,12 +597,14 @@ impl UiPlan {
                     .and_then(|address| boolean(r, consumed, address).ok())
                     .map(flag)
                     .unwrap_or_default();
+                let state_forbidden = optional_flag(r, consumed, button.state_forbid);
                 let n = variants.count as usize;
                 variants.buttons[n] = s::Variant {
                     slot: text(&button.slot),
                     base_skill_id: number(skill as f64),
                     active_skill_id: number(variant as f64),
                     cast_locked,
+                    state_forbidden,
                 };
                 variants.count += 1;
             }
@@ -1343,6 +1362,33 @@ mod tests {
         fn read_into(&self, address: u64, bytes: &mut [u8]) -> Result<()> {
             bytes.copy_from_slice(&self.read(address, bytes.len())?);
             Ok(())
+        }
+    }
+    #[test]
+    fn optional_state_flag_is_unknown_when_absent_invalid_or_unreadable() {
+        let r = Reflection::new(MutableMemory(RefCell::new(vec![0, 1, 2]))).unwrap();
+        for address in [None, Some(2), Some(3)] {
+            let retained = vec![(0, vec![0])];
+            let mut reads = retained.clone();
+            let observed = optional_flag(&r, &mut reads, address);
+            assert!(observed.missing());
+            assert_eq!(reads, retained);
+            assert!(check(&r, &reads).is_ok());
+        }
+    }
+    #[test]
+    fn optional_state_flag_false_and_true_are_fenced_against_game_updates() {
+        let r = Reflection::new(MutableMemory(RefCell::new(vec![0, 1]))).unwrap();
+        for (address, expected) in [(0, false), (1, true)] {
+            let mut reads = Vec::new();
+            let observed = optional_flag(&r, &mut reads, Some(address));
+            assert!(observed.is_bool());
+            assert_eq!(observed.get(), expected);
+            assert_eq!(reads, vec![(address, vec![expected as u8])]);
+            assert!(check(&r, &reads).is_ok());
+            r.memory.0.borrow_mut()[address as usize] = (!expected) as u8;
+            assert!(check(&r, &reads).is_err());
+            r.memory.0.borrow_mut()[address as usize] = expected as u8;
         }
     }
     #[test]

@@ -16,6 +16,8 @@ mod native_aim;
 pub mod snapshot;
 mod tick;
 pub mod view;
+#[cfg(test)]
+mod rejection_tests;
 use crate::{AimSolver, AngularRadialSolver, Point};
 use host::{Host, Timer};
 use std::collections::{BTreeMap, BTreeSet};
@@ -91,6 +93,7 @@ pub struct SkillVariant {
     pub base: i32,
     pub active: i32,
     pub cast_locked: Option<bool>,
+    pub state_forbidden: Option<bool>,
 }
 #[derive(Clone, Copy)]
 pub(crate) struct KaguraThrowTransition {
@@ -174,6 +177,8 @@ pub struct Controller {
     pub(crate) skillNudged_: bool,
     pub(crate) skillKeyHeld_: bool,
     pub(crate) skillExpectedAim_: bool,
+    pub(crate) skillActivationObserved_: bool,
+    pub(crate) skillStateForbiddenAtDown_: bool,
     pub(crate) pendingRelease_: bool,
     pub(crate) pendingWorldValid_: bool,
     pub(crate) movementReady_: bool,

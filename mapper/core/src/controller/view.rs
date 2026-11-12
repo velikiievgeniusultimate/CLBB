@@ -47,6 +47,7 @@ pub struct VariantView {
     pub slot: Text,
     pub base: i32,
     pub active: i32,
+    pub state_forbidden: super::snapshot::Flag,
 }
 #[repr(C)]
 #[derive(Default)]
@@ -87,6 +88,8 @@ pub struct View {
     pub skillNudged_: u8,
     pub skillKeyHeld_: u8,
     pub skillExpectedAim_: u8,
+    pub skillActivationObserved_: u8,
+    pub skillStateForbiddenAtDown_: u8,
     pub pendingRelease_: u8,
     pub pendingWorldValid_: u8,
     pub movementReady_: u8,
@@ -250,6 +253,9 @@ impl View {
                 slot: text(&v.slot),
                 base: v.base,
                 active: v.active,
+                state_forbidden: super::snapshot::Flag {
+                    value: v.state_forbidden.map_or(-1, |value| value as i32),
+                },
             }
         }
         Self {
@@ -289,6 +295,8 @@ impl View {
             skillNudged_: s.skillNudged_ as u8,
             skillKeyHeld_: s.skillKeyHeld_ as u8,
             skillExpectedAim_: s.skillExpectedAim_ as u8,
+            skillActivationObserved_: s.skillActivationObserved_ as u8,
+            skillStateForbiddenAtDown_: s.skillStateForbiddenAtDown_ as u8,
             pendingRelease_: s.pendingRelease_ as u8,
             pendingWorldValid_: s.pendingWorldValid_ as u8,
             movementReady_: s.movementReady_ as u8,
@@ -479,6 +487,8 @@ impl View {
         self.skillNudged_ = s.skillNudged_ as u8;
         self.skillKeyHeld_ = s.skillKeyHeld_ as u8;
         self.skillExpectedAim_ = s.skillExpectedAim_ as u8;
+        self.skillActivationObserved_ = s.skillActivationObserved_ as u8;
+        self.skillStateForbiddenAtDown_ = s.skillStateForbiddenAtDown_ as u8;
         self.pendingRelease_ = s.pendingRelease_ as u8;
         self.pendingWorldValid_ = s.pendingWorldValid_ as u8;
         self.movementReady_ = s.movementReady_ as u8;

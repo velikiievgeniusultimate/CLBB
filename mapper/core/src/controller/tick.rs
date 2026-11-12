@@ -39,6 +39,11 @@ impl Controller {
             }
             return;
         }
+        // The first coherent post-DOWN sample may arrive after physical UP.
+        // Release only the explicitly rejected, never-owned range contact.
+        if self.finish_rejected_range(host) {
+            return;
+        }
         if self.pendingRelease_
             && self.releaseRequested_.valid()
             && self.releaseRequested_.elapsed(self.now_) >= 1500

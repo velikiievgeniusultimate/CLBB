@@ -109,6 +109,7 @@ impl Controller {
                 base: base.int(),
                 active: active.int(),
                 cast_locked: entry.cast_locked.is_bool().then(|| entry.cast_locked.get()),
+                state_forbidden: entry.state_forbidden.is_bool().then(|| entry.state_forbidden.get()),
             });
         }
         self.skillVariants_ = variants;

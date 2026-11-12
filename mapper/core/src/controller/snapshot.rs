@@ -153,6 +153,7 @@ pub struct Variant {
     pub base_skill_id: Number,
     pub active_skill_id: Number,
     pub cast_locked: Flag,
+    pub state_forbidden: Flag,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]

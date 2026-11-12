@@ -105,6 +105,7 @@ impl Encode for s::Variant {
         out.insert("base_skill_id".into(), self.base_skill_id.encode());
         out.insert("active_skill_id".into(), self.active_skill_id.encode());
         out.insert("cast_locked".into(), self.cast_locked.encode());
+        out.insert("state_forbidden".into(), self.state_forbidden.encode());
         Value::Object(out)
     }
 }
@@ -374,6 +375,7 @@ impl Encode for clbb_moba_core::controller::view::VariantView {
         out.insert("slot".into(), self.slot.encode());
         out.insert("base".into(), self.base.encode());
         out.insert("active".into(), self.active.encode());
+        out.insert("state_forbidden".into(), self.state_forbidden.encode());
         Value::Object(out)
     }
 }
@@ -458,6 +460,8 @@ impl Encode for clbb_moba_core::controller::view::View {
         out.insert("skillNudged_".into(), self.skillNudged_.encode());
         out.insert("skillKeyHeld_".into(), self.skillKeyHeld_.encode());
         out.insert("skillExpectedAim_".into(), self.skillExpectedAim_.encode());
+        out.insert("skillActivationObserved_".into(), self.skillActivationObserved_.encode());
+        out.insert("skillStateForbiddenAtDown_".into(), self.skillStateForbiddenAtDown_.encode());
         out.insert("pendingRelease_".into(), self.pendingRelease_.encode());
         out.insert(
             "pendingWorldValid_".into(),
@@ -746,6 +750,17 @@ impl Encode for clbb_moba_core::controller::view::View {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn state_forbidden_recording_preserves_unknown_false_and_true() {
+        for value in [-1, 0, 1] {
+            let mut variant = s::Variant::default();
+            variant.state_forbidden.value = value;
+            assert_eq!(variant.encode()["state_forbidden"]["value"], value);
+            let mut view = clbb_moba_core::controller::view::VariantView::default();
+            view.state_forbidden.value = value;
+            assert_eq!(view.encode()["state_forbidden"]["value"], value);
+        }
+    }
     #[test]
     fn missing_values_and_capacity_are_not_silently_flattened() {
         let mut frame = s::Frame::default();

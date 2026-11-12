@@ -500,6 +500,7 @@ impl Controller {
         if self.skillCancelPending_ || self.skillTouch_ >= 0 {
             return false;
         }
+        let state_forbidden = self.state_forbidden(b, self.cooldown_variant(b), 0) == Some(true);
         self.flush_pointer(host);
         if b.stopMovement && self.classify_skill(b) != SkillBehavior::AwaitVariant {
             self.finish_movement(host, "")
@@ -555,6 +556,8 @@ impl Controller {
         self.releaseRequested_.invalidate();
         self.skillNudged_ = false;
         self.skillExpectedAim_ = false;
+        self.skillActivationObserved_ = false;
+        self.skillStateForbiddenAtDown_ = state_forbidden;
         self.traceDesiredValid_ = false;
         self.observedSkillId_ = 0;
         self.solverRadius_ = 0.;
@@ -572,6 +575,51 @@ impl Controller {
             self.freeze_direction_intent(host)
         }
         self.changed_ = true;
+        true
+    }
+    fn state_forbidden(&self, b: &Button, variant: i32, minimum: i64) -> Option<bool> {
+        if b.kind != "skill"
+            || variant <= 0
+            || self.skillVariantSampleNs_ <= 0
+            || self.skillVariantSampleStartNs_ < minimum
+            || self.now_ - self.skillVariantSampleNs_ > 100_000_000
+        {
+            return None;
+        }
+        self.skillVariants_.iter()
+            .find(|v| v.slot == b.slot && v.base == b.skillId && v.active == variant)
+            .and_then(|v| v.state_forbidden)
+    }
+    pub(crate) fn finish_rejected_range(&mut self, host: &mut impl Host) -> bool {
+        // StateForbid alone is not a generic admission gate: buffered skills
+        // may legitimately be pressed during another animation (e.g. Ling R).
+        // Require an ordinary range release, a forbid already present at DOWN,
+        // and fresh proof that this exact form never claimed any game UI/input.
+        if self.skillTouch_ < 0
+            || self.skillKeyHeld_
+            || self.skillCancelPending_
+            || self.skillCastMode_ != 0
+            || self.skillBehavior_ != SkillBehavior::Range
+            || !self.skillStateForbiddenAtDown_
+            || self.skillActivationObserved_
+            || self.touchSequence_ != 1
+            || self.skillNudged_
+            || self.qDragArming_
+            || self.provisionalStartup_
+            || self.coreSkill_ != 0
+            || !self.frameActiveSlot_.is_empty()
+            || self.frameCoreSampleStartNs_ < self.castStartedNs_
+            || self.lastFrameNs_ <= 0
+            || self.now_ - self.lastFrameNs_ > 100_000_000
+        {
+            return false;
+        }
+        let Some(button) = self.find_button(&self.activeSlot_) else { return false };
+        if self.state_forbidden(button, self.skillCooldownVariant_, self.castStartedNs_) != Some(true) {
+            return false;
+        }
+        self.trace(host, "range_rejected", "state_forbidden_without_ui_capture");
+        self.finish_skill(host, true);
         true
     }
     pub(crate) fn finish_skill(&mut self, host: &mut impl Host, cancel: bool) {
@@ -614,6 +662,8 @@ impl Controller {
             }
         }
         self.skillCooldownVariant_ = 0;
+        self.skillActivationObserved_ = false;
+        self.skillStateForbiddenAtDown_ = false;
         self.skillCancelPending_ = false;
         self.skillCancelAcknowledged_ = false;
         self.skillCancelSentNs_ = 0;
