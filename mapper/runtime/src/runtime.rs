@@ -225,6 +225,8 @@ struct Adapter {
     wall_surface:projection::WallSurface,
     next_ray: u64,
     timers: [Option<i64>; 5],
+    conflicts: BTreeMap<i32,Vec<String>>,
+    conflict_stamp: Option<u64>,
     trace: bool,
     recorder: Arc<Recorder>,
     last_feedback_trace: Option<(String,i64)>,
@@ -361,6 +363,42 @@ fn core_decision_diagnostics(v:&clbb_moba_core::controller::view::View,event:&st
     }
     value
 }
+impl Adapter {
+    fn refresh_conflicts(&mut self, hero:i32, settings_changed:bool) {
+        use std::hash::{Hash,Hasher};
+        let mut hash=std::collections::hash_map::DefaultHasher::new();
+        let stamp=self.fresh().filter(|s|s.frame.ready.get()&&s.frame.hero_id.int()==hero&&s.frame.ui.ready.get()).map(|s| {
+            hero.hash(&mut hash);s.linked.is_some().hash(&mut hash);
+            for b in s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize)
+                .chain(s.frame.ui.capability_controls.iter().take(s.frame.ui.capability_count.min(32) as usize)) {
+                b.slot.as_str().hash(&mut hash);b.active.get().hash(&mut hash);b.press_uv.valid().hash(&mut hash);
+            }
+            hash.finish()
+        });
+        if settings_changed || stamp!=self.conflict_stamp {
+            self.conflicts=self.binding_conflicts(hero);self.conflict_stamp=stamp;
+        }
+    }
+    fn binding_conflicts(&self, hero:i32) -> BTreeMap<i32,Vec<String>> {
+        let mut owners:BTreeMap<i32,Vec<String>>=BTreeMap::new();
+        let Some(sample)=self.fresh().filter(|s|s.frame.ready.get()&&s.frame.hero_id.int()==hero&&s.frame.ui.ready.get()) else {return owners;};
+        let mut seen=std::collections::BTreeSet::new();
+        let mut add=|key:i32, name:String| { if key!=0 {owners.entry(key).or_default().push(name);} };
+        for b in sample.frame.ui.buttons.iter().take(sample.frame.ui.button_count.min(32) as usize)
+            .chain(sample.frame.ui.capability_controls.iter().take(sample.frame.ui.capability_count.min(32) as usize)) {
+            let slot=b.slot.as_str();
+            if !b.active.get()||!b.press_uv.valid()||!seen.insert(slot) {continue;}
+            if sample.linked.is_some()&&matches!(slot,"skill:2"|"skill:3") {continue;}
+            add(self.settings.binding(hero,slot).key,slot.into());
+        }
+        if sample.linked.is_some() { for n in 0..2 {let slot=format!("combo:{n}");add(self.settings.binding(hero,&slot).key,slot);} }
+        add(self.settings.integer("hero.cancel_key",hero),"Отмена навыка".into());
+        if self.settings.integer("hero.movement.click_mode",hero)==2 {
+            for direction in ["up","down","left","right"] {add(self.settings.integer(&format!("hero.movement.{direction}"),hero),format!("Движение · {direction}"));}
+        } else {add(self.settings.integer("hero.movement.button",hero),"Движение".into());}
+        owners.retain(|_,names|names.len()>1);owners
+    }
+}
 impl Host for Adapter {
     fn clock_ns(&mut self) -> Option<i64> {
         Some(now_ns())
@@ -483,10 +521,12 @@ impl Host for Adapter {
         if config == "extra:2" && button.skillId == 20080 {
             binding.cast_mode = self.settings.integer("hero.bindings.extra:2:20080.cast_mode", hero);
         }
+        if self.conflicts.contains_key(&binding.key) { binding.key=0; }
         binding
     }
     fn cancel_key(&mut self, hero: i32) -> i32 {
-        self.settings.integer("hero.cancel_key", hero)
+        let key=self.settings.integer("hero.cancel_key", hero);
+        if self.conflicts.contains_key(&key) {0} else {key}
     }
     fn timer(&mut self, timer: Timer, delay: Option<i64>) {
         let slot = &mut self.timers[timer_index(timer)];
@@ -603,6 +643,7 @@ impl Runtime {
                 wall_surface:Default::default(),
                 next_ray: 0,
                 timers: [None; 5],
+                conflicts:Default::default(), conflict_stamp:None,
                 trace, recorder:recorder.clone(), last_feedback_trace:None,
             },
             worker: Worker::start(recorder),
@@ -653,6 +694,7 @@ impl Runtime {
         if recording {self.recorder.push(now_ns(),"settings",serde_json::json!({"values":self.host.settings.values}));}
         let hero=self.host.fresh().map(|s|s.frame.hero_id.int()).unwrap_or(self.core.inspect().heroId_);
         self.configure_movement(hero);
+        self.host.refresh_conflicts(hero,true);
         self.input(Input::RefreshBindings);
         self.input(Input::Enabled(
             !self.suspended && self.host.settings.boolean("enabled", 0),
@@ -691,7 +733,17 @@ impl Runtime {
             if self.host.fresh().is_some() {
                 self.host.settings.observe_native_templates(sample.frame.hero_id.int(), &sample.control_types);
                 self.host.settings.observe_native_holds(sample.frame.hero_id.int(), &sample.control_holds);
+                if sample.frame.skill_state.ready.get() {
+                    let forms=self.host.settings.observed_forms.entry(sample.frame.hero_id.int()).or_default();
+                    for v in sample.frame.skill_state.buttons.iter().take(sample.frame.skill_state.count.min(32) as usize) {
+                        if v.slot.as_str().starts_with("skill:") && v.active_skill_id.int()>0 && forms.len()<32 {
+                            let ids=forms.entry(v.slot.owned()).or_default();
+                            if ids.len()<16 {ids.insert(v.active_skill_id.int());}
+                        }
+                    }
+                }
             }
+            self.host.refresh_conflicts(sample.frame.hero_id.int(),false);
             let skill = sample.frame.skill_id.int();
             self.core.update_observation(
                 sample.aim.is_some(),
@@ -939,7 +991,21 @@ impl Runtime {
         } else {
             code
         };
-        if key == self.host.settings.integer("hero.movement.button", self.core.inspect().heroId_) {
+        let hero=self.core.inspect().heroId_;
+        if key!=0 && self.host.conflicts.contains_key(&key) && down {
+            self.debug_route_reason="conflicting_binding_disabled";
+            return true;
+        }
+        let keyboard=self.host.settings.integer("hero.movement.click_mode",hero)==2;
+        if keyboard {
+            for (direction,name) in ["up","down","left","right"].iter().enumerate() {
+                if key!=0 && key==self.host.settings.integer(&format!("hero.movement.{name}"),hero) {
+                    self.debug_route_reason="keyboard_movement";
+                    return if repeat {true} else {self.input(Input::MovementKey {direction,down})};
+                }
+            }
+        }
+        if !keyboard && key != 0 && key == self.host.settings.integer("hero.movement.button", hero) {
             self.debug_route_reason="movement_binding";
             return self.input(Input::Mouse {
                 button: 2,
@@ -994,10 +1060,19 @@ impl Runtime {
             if linked && matches!(slot,"skill:2"|"skill:3") {continue;}
             let variant=sample.frame.skill_state.buttons.iter().take(sample.frame.skill_state.count.min(32) as usize)
                 .find(|v|v.slot.as_str()==slot&&v.base_skill_id.int()==b.skill_id.int()).map(|v|v.active_skill_id.int()).filter(|v|*v>0).unwrap_or(b.skill_id.int());
-            let config=if hero==25 && slot=="skill:1" && variant==2521 {"skill:1:2521"}else{slot};
+            let config=slot;
             let kind=sample.control_types.get(slot).copied().unwrap_or(0);
             let mode_config=if slot=="extra:2"&&b.skill_id.int()==20080 {"extra:2:20080"}else{config};
             text.push_str(&format!("{slot}\t{config}\t{mode_config}\t{}\t{variant}\t{kind}\n",b.skill_id.int()));
+            if b.kind.as_str()=="skill" {
+                let mut forms=self.host.settings.observed_forms.get(&hero).and_then(|m|m.get(slot)).cloned().unwrap_or_default();
+                if variant>0 {forms.insert(variant);}
+                if hero==25 {match slot {"skill:1"=>{forms.extend([2520,2521]);},"skill:2"=>{forms.extend([2530,2531]);},_=>{}}}
+                if hero==84&&slot=="skill:1" {forms.extend([8420,8425]);}
+                for id in forms.into_iter().filter(|id|*id!=b.skill_id.int()).take(15) {
+                    text.push_str(&format!("{slot}\t{slot}:{id}\t{slot}:{id}\t{}\t{id}\t{kind}\n",b.skill_id.int()));
+                }
+            }
         }
         if linked {
             for n in 0..2 {text.push_str(&format!("combo:{n}\tcombo:{n}\tcombo:{n}\t0\t0\t1\n"));}
@@ -1070,6 +1145,7 @@ impl Runtime {
                 }).to_string()
             }).unwrap_or_else(|| "{\"ready\":false}".into()),
             "hero.controls"=>self.hero_controls(),
+            "bindings.conflicts"=>self.host.conflicts.iter().map(|(key,names)|format!("{key}\t{}\n",names.join(", "))).collect::<String>(),
             "common.battle_spell_id"=>self.host.fresh().and_then(|s|s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize).find(|b|b.kind.as_str()=="extra"&&b.slot.as_str()=="extra:2")).map(|b|b.skill_id.int()).unwrap_or(0).to_string(),
             "hero.linked_controls"=>if self.host.fresh().is_some_and(|s|s.linked.is_some()) {"1".into()}else{"0".into()},
             "hero.skill0_type"|"hero.skill1_type"|"hero.skill2_type"|"hero.skill3_type"=>{
@@ -1276,6 +1352,7 @@ mod tests {
                 wall_surface:Default::default(),
                 next_ray: 0,
                 timers: [None; 5],
+                conflicts:Default::default(), conflict_stamp:None,
                 trace: false, recorder:recorder.clone(), last_feedback_trace:None,
             },
             worker: Worker {
@@ -1326,6 +1403,43 @@ mod tests {
             projection: [0.; 16], logic: [0.; 2], indicator: 0,
             aim: None, direction_visual: None,
             control_types: BTreeMap::from([("skill:2".into(), kind)]), control_holds: BTreeMap::new(), linked: None,
+        }
+    }
+    #[test]
+    fn conflicts_disable_both_skill_and_keyboard_without_dispatching_a_touch() {
+        let mut events=Vec::new(); let mut r=fixture(&mut events);
+        let mut sample=template_sample(25,2,now_ns());
+        sample.frame.ui.buttons[0].slot=crate::source::text("skill:1");
+        sample.control_types=BTreeMap::from([("skill:1".into(),2)]);
+        r.worker.shared.lock().unwrap().sample=Some(Arc::new(sample));
+        r.poll(1280.,720.);
+        r.host.settings.set("movement.click_mode","2",0).unwrap();
+        r.host.refresh_conflicts(25,true);
+        let conflicts=r.host.binding_conflicts(25);
+        assert_eq!(conflicts.get(&87).unwrap().len(),2);
+        let b=Button {slot:"skill:1".into(),kind:"skill".into(),skillId:2520,..Default::default()};
+        assert_eq!(r.host.binding(25,&b,"skill:1").key,0);
+        assert!(r.event_inner(1,87,true,false,Point::default()));
+        assert_eq!(r.debug_route_reason,"conflicting_binding_disabled");
+        assert!(events.is_empty());
+        r.host.settings.set("hero.movement.up","16777235",25).unwrap();
+        r.host.refresh_conflicts(25,true);
+        assert!(!r.host.binding_conflicts(25).contains_key(&87));
+        assert_eq!(r.host.binding(25,&b,"skill:1").key,87);
+        r.host.settings.set("hero.movement.down","65",25).unwrap();
+        assert_eq!(r.host.binding_conflicts(25).get(&65).unwrap().len(),2);
+    }
+    #[test]
+    fn known_multi_form_actions_expose_two_versions_inside_one_role() {
+        for (hero,slot,base,alt) in [(25,"skill:1",2520,2521),(25,"skill:2",2530,2531),(84,"skill:1",8420,8425)] {
+            let mut events=Vec::new();let mut r=fixture(&mut events);
+            let mut sample=template_sample(hero,2,now_ns());
+            sample.frame.ui.buttons[0].slot=crate::source::text(slot);
+            sample.frame.ui.buttons[0].skill_id=crate::source::number(base as f64);
+            r.host.sample=Some(Arc::new(sample));
+            let layout=r.hero_controls();
+            assert!(layout.contains(&format!("{slot}\t{slot}\t{slot}\t{base}")));
+            assert!(layout.contains(&format!("{slot}\t{slot}:{alt}\t{slot}:{alt}\t{base}")));
         }
     }
     #[test]

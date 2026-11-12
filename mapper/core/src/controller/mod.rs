@@ -222,6 +222,7 @@ pub struct Controller {
     pub(crate) movementTouch_: i32,
     pub(crate) manualTouch_: i32,
     pub(crate) movementClickMode_: i32,
+    pub(crate) movementKeys_: [bool; 4],
     pub(crate) movementClickPercent_: Option<i32>,
     pub(crate) movementHoldMs_: i32,
     pub(crate) movementWaypoint_: i32,

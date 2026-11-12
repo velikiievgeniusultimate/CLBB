@@ -22,6 +22,8 @@ typedef struct {
   gboolean battle_spell_mode;
   gboolean plain_spell_mode;
   char *visible_if;
+  int visible_mode;
+  gboolean visible_not;
   char *inherit_key;
   GtkWidget *inherit_reset;
 } Control;
@@ -95,6 +97,7 @@ static const char css[] =
     "button.clbb-section-heading:hover { color: #ff668d; }"
     ".clbb-section-content { margin-top: 12px; }"
     ".clbb-binding-scope { background: #19161c; border: 1px solid #392832; border-radius: 5px; padding: 12px; }"
+    ".clbb-settings .clbb-conflict { border: 1px solid #ff526f; color: #ff8197; background: #42232f; }"
     ".clbb-inherited, .clbb-settings .clbb-inherited label { color: #b4a8b3; }"
     ".clbb-row { padding: 7px 0; border-bottom: 1px solid alpha(#927a8c, "
     "0.12); } .clbb-row:last-child { border-bottom: none; }"
@@ -522,7 +525,7 @@ static void mode_control(ClbbSettings *s, GtkWidget *box, const char *title,
                          const char *key, int fallback, gboolean movement) {
   Control *c = new_control(s, box, title, key, CONTROL_MODE, fallback);
   const char *const casts[] = {"При отпускании", "Сразу при нажатии", NULL};
-  const char *const moves[] = {"По прямой", "С обходом препятствий", NULL};
+  const char *const moves[] = {"По прямой", "С обходом препятствий", "Клавиатура", NULL};
   const char *const spells[] = {"Моментальное прожатие", "Обычный навык",
                                 "Моментальный с наведением",
                                 "Прожатие с удержанием", NULL};
@@ -555,12 +558,19 @@ static int action_key(const char *slot) {
   return 0;
 }
 static gboolean valid_action(const char *slot) {
-  if (g_str_has_prefix(slot,"skill:")) return (strlen(slot)==7 && slot[6]>='0' && slot[6]<='3') || !strcmp(slot,"skill:1:2521");
+  if (g_str_has_prefix(slot,"skill:")) {
+    if (slot[6]<'0'||slot[6]>'3') return FALSE;
+    if (!slot[7]) return TRUE;
+    if (slot[7]!=':'||!slot[8]||strlen(slot)>24) return FALSE;
+    for (const char *p=slot+8;*p;++p) if (!g_ascii_isdigit(*p)) return FALSE;
+    return g_ascii_strtoll(slot+8,NULL,10)>0;
+  }
   return action_key(slot)!=0;
 }
 static const char *action_title(const char *slot, int skill, const char *config) {
+  (void)config;
   if (!strcmp(slot,"skill:0")) return "Навык 1";
-  if (!strcmp(slot,"skill:1")) return !strcmp(config,"skill:1:2521") ? "Навык 2 · без зонта" : "Навык 2";
+  if (!strcmp(slot,"skill:1")) return "Навык 2";
   if (!strcmp(slot,"skill:2")) return "Навык 3";
   if (!strcmp(slot,"skill:3")) return "Навык 4";
   if (!strcmp(slot,"combo:0")) return "Комбо · навык 1 → навык 2";
@@ -580,20 +590,36 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
   gtk_flow_box_insert(GTK_FLOW_BOX(flow),box,-1);
   gtk_box_append(GTK_BOX(box),label(personal?"Для этого героя":"Для всех героев","clbb-section-title"));
   guint first=s->controls->len;
-  if (!personal && !strcmp(config,"skill:1:2521")) {
-    config="skill:1";
-    if (!strcmp(mode_config,"skill:1:2521")) mode_config="skill:1";
-  }
-  char *key=cancel?g_strdup_printf("%s.cancel_key",prefix):g_strdup_printf("%s.bindings.%s.key",prefix,config);
+  (void)config;
+  char *key=cancel?g_strdup_printf("%s.cancel_key",prefix):g_strdup_printf("%s.bindings.%s.key",prefix,slot);
   bind_control(s,box,"Клавиша",key,cancel?'T':action_key(slot));g_free(key);
   gboolean fixed=g_str_has_prefix(slot,"combo:");
   if (!cancel&&!fixed) {
-    key=g_strdup_printf("%s.bindings.%s.cast_mode",prefix,mode_config);
-    mode_control(s,box,"Нажатие",key,0,FALSE);g_free(key);
-    if (g_str_has_prefix(slot,"skill:")||!strcmp(slot,"extra:2")) {
-      key=g_strdup_printf("%s.bindings.%s.stop_movement",prefix,config);
-      switch_control(s,box,"Останавливать движение",key,0);g_free(key);
+    GPtrArray *forms=g_ptr_array_new_with_free_func(g_free);
+    g_ptr_array_add(forms,g_strdup(!strcmp(slot,"extra:2")?mode_config:slot));
+    char **lines=g_strsplit(s->hero_layout,"\n",258);
+    if (g_str_has_prefix(slot,"skill:")) for (guint n=1;lines[n]&&forms->len<16;++n) {
+      char **v=g_strsplit(lines[n],"\t",7);
+      if (g_strv_length(v)==6&&!strcmp(v[0],slot)&&valid_action(v[1])&&g_str_has_prefix(v[1],slot)&&v[1][strlen(slot)]==':') {
+        gboolean found=FALSE;for (guint k=0;k<forms->len;++k) found|=!strcmp(g_ptr_array_index(forms,k),v[1]);
+        if (!found) g_ptr_array_add(forms,g_strdup(v[1]));
+      }
+      g_strfreev(v);
     }
+    g_strfreev(lines);
+    for (guint n=0;n<forms->len;++n) {
+      const char *form=g_ptr_array_index(forms,n);
+      char *title=forms->len>1?g_strdup_printf("Нажатие · версия %u",n+1):g_strdup("Нажатие");
+      key=g_strdup_printf("%s.bindings.%s.cast_mode",prefix,form);
+      mode_control(s,box,title,key,0,FALSE);g_free(key);g_free(title);
+    }
+    if (g_str_has_prefix(slot,"skill:")||!strcmp(slot,"extra:2")) for (guint n=0;n<forms->len;++n) {
+      const char *form=g_ptr_array_index(forms,n);
+      char *title=forms->len>1?g_strdup_printf("Останавливать движение · версия %u",n+1):g_strdup("Останавливать движение");
+      key=g_strdup_printf("%s.bindings.%s.stop_movement",prefix,form);
+      switch_control(s,box,title,key,0);g_free(key);g_free(title);
+    }
+    g_ptr_array_unref(forms);
   }
   if (personal) for (guint n=first;n<s->controls->len;++n) add_inheritance(g_ptr_array_index(s->controls,n));
 }
@@ -619,8 +645,9 @@ static void movement_scope(ClbbSettings *s,GtkWidget *flow,gboolean personal) {
   gtk_box_append(GTK_BOX(box),label(personal?"Для этого героя":"Для всех героев","clbb-section-title"));
   guint first=s->controls->len;
   const char *prefix=personal?"hero.movement":"movement";
-  char *key=g_strdup_printf("%s.button",prefix);bind_control(s,box,"Клавиша",key,KEY_MOUSE|2);g_free(key);
-  key=g_strdup_printf("%s.click_mode",prefix);mode_control(s,box,"Короткое нажатие",key,0,TRUE);g_free(key);
+  char *key=g_strdup_printf("%s.button",prefix);Control *mouse=bind_control(s,box,"Клавиша",key,KEY_MOUSE|2);g_free(key);
+  mouse->visible_if=g_strdup_printf("%s.click_mode",prefix);mouse->visible_mode=2;mouse->visible_not=TRUE;
+  key=g_strdup_printf("%s.click_mode",prefix);mode_control(s,box,"Режим",key,0,TRUE);g_free(key);
   key=g_strdup_printf("%s.click_distance_percent",prefix);
   Control *c=new_control(s,box,"Дальность клика, %",key,CONTROL_NUMBER,100);g_free(key);
   c->visible_if=g_strdup_printf("%s.click_mode",prefix);
@@ -630,6 +657,14 @@ static void movement_scope(ClbbSettings *s,GtkWidget *flow,gboolean personal) {
   key=g_strdup_printf("%s.hold_ms",prefix);c=new_control(s,box,"Порог удержания, мс",key,CONTROL_NUMBER,150);g_free(key);
   c->widget=gtk_spin_button_new_with_range(40,600,10);gtk_widget_set_size_request(c->widget,100,-1);
   g_signal_connect(c->widget,"value-changed",G_CALLBACK(changed_number),c);gtk_box_append(GTK_BOX(c->row),c->widget);
+  c->visible_if=g_strdup_printf("%s.click_mode",prefix);c->visible_mode=2;c->visible_not=TRUE;
+  const char *directions[]={"up","down","left","right"};
+  const char *titles[]={"Вверх","Вниз","Влево","Вправо"};
+  const int defaults[]={'W','S','A','D'};
+  for (guint n=0;n<4;++n) {
+    key=g_strdup_printf("%s.%s",prefix,directions[n]);c=bind_control(s,box,titles[n],key,defaults[n]);g_free(key);
+    c->visible_if=g_strdup_printf("%s.click_mode",prefix);c->visible_mode=2;
+  }
   if (personal) for (guint n=first;n<s->controls->len;++n) add_inheritance(g_ptr_array_index(s->controls,n));
 }
 static void clear_dynamic(ClbbSettings *s, GtkWidget *box) {
@@ -656,7 +691,7 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
   }
   clear_dynamic(s,s->hero_box);
   s->hero=hero;g_free(s->hero_layout);s->hero_layout=g_strdup(layout);
-  char **lines=g_strsplit(layout,"\n",66);
+  char **lines=g_strsplit(layout,"\n",258);
   char *expected=g_strdup_printf("1\t%d",hero);
   gboolean valid=hero>0&&strlen(layout)<=16384&&lines[0]&&!strcmp(lines[0],expected);
   s->active_profile=valid;
@@ -666,11 +701,11 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
     if (!*lines[n]) continue;
     char **v=g_strsplit(lines[n],"\t",7);
     if (g_strv_length(v)==6&&valid_action(v[0])&&valid_action(v[1])&&
-        (!strcmp(v[0],v[1])||(hero==25&&!strcmp(v[0],"skill:1")&&!strcmp(v[1],"skill:1:2521")&&atoi(v[4])==2521))&&
+        (!strcmp(v[0],v[1])||(g_str_has_prefix(v[0],"skill:")&&g_str_has_prefix(v[1],v[0])&&v[1][strlen(v[0])]==':'))&&
         (!strcmp(v[1],v[2])||(!strcmp(v[0],"extra:2")&&atoi(v[3])==20080&&!strcmp(v[2],"extra:2:20080")))&&!g_hash_table_contains(seen,v[0])) {
       g_hash_table_add(seen,g_strdup(v[0]));
       int type=CLAMP(atoi(v[5]),0,4);any=TRUE;can_cancel|=type>=2||g_str_has_prefix(v[0],"combo:");
-      action_card(s,v[0],v[1],v[2],atoi(v[3]),type,expanded,FALSE);
+      action_card(s,v[0],v[0],v[2],atoi(v[3]),type,expanded,FALSE);
     }
     g_strfreev(v);
   }
@@ -1319,6 +1354,8 @@ void clbb_settings_refresh(ClbbSettings *s) {
   t = read_text(s, "debug.status", "Запись выключена");
   gtk_label_set_text(GTK_LABEL(s->debug_status), t);
   g_free(t);
+  char *conflict_text=read_text(s,"bindings.conflicts","");
+  char **conflicts=g_strsplit(conflict_text,"\n",128);g_free(conflict_text);
   for (guint i = 0; i < s->controls->len; ++i) {
     Control *c = g_ptr_array_index(s->controls, i);
     if (s->capture == c)
@@ -1333,6 +1370,11 @@ void clbb_settings_refresh(ClbbSettings *s) {
       } else t = key_name(n);
       gtk_button_set_label(GTK_BUTTON(c->widget), t);
       g_free(t);
+      gboolean conflict=FALSE;
+      for (guint k=0;conflicts[k];++k) if (n!=0&&atoi(conflicts[k])==n) {conflict=TRUE;break;}
+      if (conflict) gtk_widget_add_css_class(c->widget,"clbb-conflict");
+      else gtk_widget_remove_css_class(c->widget,"clbb-conflict");
+      gtk_widget_set_tooltip_text(c->widget,conflict?"Конфликт назначений: клавиша отключена. Измените один из биндов.":NULL);
       break;
     case CONTROL_SWITCH:
       if (GTK_IS_TOGGLE_BUTTON(c->widget)) {
@@ -1365,14 +1407,14 @@ void clbb_settings_refresh(ClbbSettings *s) {
         static const guint spell_indices[] = {1, 2, 0, 3};
         gtk_drop_down_set_selected(GTK_DROP_DOWN(c->widget), spell_indices[CLAMP(n, 0, 3)]);
       } else {
-        gtk_drop_down_set_selected(GTK_DROP_DOWN(c->widget), CLAMP(n, 0, 1));
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(c->widget), CLAMP(n, 0, g_str_has_suffix(c->key,"movement.click_mode")?2:1));
       }
       break;
     case CONTROL_VOLUME:
       gtk_range_set_value(GTK_RANGE(c->widget), CLAMP(n, 0, 100));
       break;
     }
-    if (c->visible_if) gtk_widget_set_visible(c->row,read_int(s,c->visible_if,0)==0);
+    if (c->visible_if) gtk_widget_set_visible(c->row,(read_int(s,c->visible_if,0)==c->visible_mode)!=c->visible_not);
     if (c->inherit_key) {
       gboolean own=read_bool(s,c->inherit_key,FALSE);
       gtk_widget_set_sensitive(c->inherit_reset,own);
@@ -1383,6 +1425,7 @@ void clbb_settings_refresh(ClbbSettings *s) {
     }
 
   }
+  g_strfreev(conflicts);
   gtk_widget_set_visible(s->movement_distance_row,
                          read_int(s, "movement.click_mode", 0) == 0);
   s->refreshing = FALSE;

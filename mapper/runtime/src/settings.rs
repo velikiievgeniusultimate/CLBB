@@ -16,6 +16,8 @@ pub struct Settings {
     native_skill_types: BTreeMap<i32, BTreeMap<String, u8>>,
     #[serde(skip)]
     native_charge_slots: BTreeMap<i32, BTreeSet<String>>,
+    #[serde(skip)]
+    pub observed_forms: BTreeMap<i32, BTreeMap<String, BTreeSet<i32>>>,
 }
 impl Settings {
     pub fn load() -> Self {
@@ -153,6 +155,26 @@ impl Settings {
     }
     pub fn get(&self, key: &str, hero: i32) -> String {
         if key == "enabled" { return "true".into(); }
+        if let Some((scope, tail)) = key.split_once(".bindings.") {
+            if let Some((slot, field)) = tail.rsplit_once('.') {
+                if let Some(base) = variant_base(slot) {
+                    if field == "key" { return self.get(&format!("{scope}.bindings.{base}.key"), hero); }
+                    if matches!(field,"cast_mode"|"stop_movement") {
+                        let own=Self::canonical(key,hero);
+                        let explicit=self.values.get(&format!("{own}.override")).map(|v|matches!(v.as_str(),"true"|"1")).unwrap_or(self.values.contains_key(&own));
+                        if scope=="hero" && explicit { if let Some(value)=self.values.get(&own) { return value.clone(); } }
+                        if scope=="hero" && !explicit {
+                            let common=format!("common.bindings.{slot}.{field}");
+                            return if self.values.contains_key(&common) { self.get(&common,hero) }
+                                else { self.get(&format!("hero.bindings.{base}.{field}"),hero) };
+                        }
+                        if scope=="common" && !self.values.contains_key(key) {
+                            return self.get(&format!("common.bindings.{base}.{field}"),hero);
+                        }
+                    }
+                }
+            }
+        }
         if let Some(tail) = key.strip_prefix("hero.bindings.") {
             if let Some((slot, field)) = tail.rsplit_once('.') {
                 if matches!(field, "key" | "cast_mode" | "stop_movement") {
@@ -173,14 +195,6 @@ impl Settings {
             let name=Self::canonical(key,hero);
             let explicit=self.values.get(&format!("{name}.override")).map(|v|matches!(v.as_str(),"true"|"1")).unwrap_or(self.values.contains_key(&name));
             if !explicit { return self.get("common.cancel_key",hero); }
-        }
-        // A form-specific personal binding inherits the shared button role.
-        // Preserve explicitly stored legacy form-wide values when present.
-        if let Some(field)=key.strip_prefix("common.bindings.skill:1:2521.") {
-            let base=format!("common.bindings.skill:1.{field}");
-            if !self.values.contains_key(key) {
-                if let Some(value)=self.values.get(&base) {return value.clone();}
-            }
         }
         if key == "display.fps_limit" {
             return self
@@ -231,6 +245,10 @@ impl Settings {
             "debug.auto_marks" => "true".into(),
             "debug.mark_shortcut" => (0x04000000 | 83).to_string(),
             "movement.click_mode" => "0".into(),
+            "movement.up" => "87".into(),
+            "movement.down" => "83".into(),
+            "movement.left" => "65".into(),
+            "movement.right" => "68".into(),
             "movement.click_distance_percent" => "100".into(),
             "movement.hold_ms" => "150".into(),
             "movement.button" => (MOUSE | 2).to_string(),
@@ -348,6 +366,11 @@ impl Settings {
         }
     }
     pub fn set(&mut self, key: &str, value: &str, hero: i32) -> Result<(), String> {
+        if let Some((scope,tail))=key.split_once(".bindings.") {
+            if let Some(slot)=tail.strip_suffix(".key") {
+                if let Some(base)=variant_base(slot) { return self.set(&format!("{scope}.bindings.{base}.key"),value,hero); }
+            }
+        }
         if key.len() > 128 || value.len() > 64 {
             return Err("Setting is too long".into());
         }
@@ -382,7 +405,7 @@ impl Settings {
             "display.show_fps" | "audio.muted" | "debug.recording" | "debug.auto_marks" => matches!(value, "true" | "false" | "0" | "1"),
             "audio.input_device" | "audio.output_device" => !value.is_empty() && value.len() <= 255 && value.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b)),
             "audio.volume" | "audio.game_volume" | "audio.voice_volume" => integer.is_some_and(|v| (0..=100).contains(&v)),
-            "movement.click_mode" | "hero.movement.click_mode" => matches!(value, "0" | "1"),
+            "movement.click_mode" | "hero.movement.click_mode" => matches!(value, "0" | "1" | "2"),
             "movement.click_distance_percent" | "hero.movement.click_distance_percent" => integer.is_some_and(|v| (0..=500).contains(&v)),
             "movement.hold_ms" | "hero.movement.hold_ms" => integer.is_some_and(|v| (40..=600).contains(&v)),
             "hotkeys.settings" | "hotkeys.confine" | "hotkeys.fullscreen" => {
@@ -400,6 +423,10 @@ impl Settings {
                     && (v & 0x0e000000!=0 || !["hotkeys.settings","hotkeys.confine","hotkeys.fullscreen"].iter().any(|key|self.integer(key,hero)==v)))
             }),
             "hero.cancel_key" | "common.cancel_key" | "movement.button" | "hero.movement.button" => {
+                integer.is_some_and(|v| valid_key(v) && !self.reserved(v, hero))
+            }
+            _ if (key.starts_with("movement.") || key.starts_with("hero.movement."))
+                && ["up","down","left","right"].iter().any(|f| key.ends_with(&format!(".{f}"))) => {
                 integer.is_some_and(|v| valid_key(v) && !self.reserved(v, hero))
             }
             _ if is_binding && key.ends_with(".key") => {
@@ -505,6 +532,10 @@ pub fn valid_key(key: i32) -> bool {
         })
         || ((key & !0xffff) == 0x03000000 && matches!(key & 0xffff, 4..=7 | 30..=65535))
 }
+pub fn variant_base(slot: &str) -> Option<&str> {
+    let (base, id)=slot.rsplit_once(':')?;
+    (native_skill_slot(base) && id.parse::<i32>().is_ok_and(|v|v>0)).then_some(base)
+}
 fn native_skill_slot(slot: &str) -> bool {
     slot.strip_prefix("skill:")
         .is_some_and(|index| !index.is_empty() && index.bytes().all(|v| v.is_ascii_digit())
@@ -513,6 +544,38 @@ fn native_skill_slot(slot: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn keyboard_defaults_arrow_remapping_and_per_direction_inheritance() {
+        let mut s=Settings::default();
+        s.set("movement.click_mode","2",0).unwrap();
+        for (name,code) in [("up",87),("down",83),("left",65),("right",68)] {
+            assert_eq!(s.integer(&format!("hero.movement.{name}"),25),code);
+        }
+        s.set("hero.movement.up","16777235",25).unwrap();
+        s.set("movement.down","16777237",0).unwrap();
+        assert_eq!(s.integer("hero.movement.up",25),16777235);
+        assert_eq!(s.integer("hero.movement.up",84),87);
+        assert_eq!(s.integer("hero.movement.down",25),16777237);
+        assert!(s.set("movement.click_mode","3",0).is_err());
+    }
+    #[test]
+    fn alternate_modes_and_stop_flags_are_independent_but_key_is_shared() {
+        for (hero,base,alt) in [(25,"skill:1","skill:1:2521"),(25,"skill:2","skill:2:2531"),(84,"skill:1","skill:1:8425"),(131,"skill:2","skill:2:13131")] {
+            let mut s=Settings::default();
+            s.set(&format!("hero.bindings.{base}.cast_mode"),"1",hero).unwrap();
+            assert_eq!(s.binding(hero,alt).cast_mode,1);
+            s.set(&format!("hero.bindings.{alt}.cast_mode"),"0",hero).unwrap();
+            s.set(&format!("hero.bindings.{alt}.stop_movement"),"true",hero).unwrap();
+            s.set(&format!("hero.bindings.{base}.key"),"88",hero).unwrap();
+            assert_eq!(s.binding(hero,base).cast_mode,1);
+            assert_eq!(s.binding(hero,alt).cast_mode,0);
+            assert!(s.binding(hero,alt).stop_movement);
+            assert!(!s.binding(hero,base).stop_movement);
+            assert_eq!(s.binding(hero,alt).key,88);
+            s.set(&format!("hero.bindings.{alt}.cast_mode.override"),"false",hero).unwrap();
+            assert_eq!(s.binding(hero,alt).cast_mode,1);
+        }
+    }
     #[test]
     fn every_unconfigured_action_defaults_to_release_and_quick_cast_is_explicit() {
         let mut s = Settings::default();

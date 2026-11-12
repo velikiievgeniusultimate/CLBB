@@ -1,6 +1,23 @@
 use super::*;
 impl Controller {
+    pub(crate) fn keyboard_movement(&mut self, host: &mut impl Host, direction: usize, down: bool) -> bool {
+        if direction >= 4 || self.movementClickMode_ != 2 { return false; }
+        if down && (!self.ready() || !self.movementReady_) { return false; }
+        self.movementKeys_[direction] = down;
+        let x = self.movementKeys_[3] as i32 - self.movementKeys_[2] as i32;
+        let y = self.movementKeys_[1] as i32 - self.movementKeys_[0] as i32;
+        if x == 0 && y == 0 {
+            // Opposite keys neutralize the joystick, retaining all physical key states.
+            self.stop_movement_output(host, "Клавиатура · остановлено");
+        } else if self.start_movement_touch(host) {
+            self.movementHeld_ = true;
+            self.update_movement(host, false);
+        }
+        true
+    }
+
     pub(crate) fn finish_movement(&mut self, host: &mut impl Host, reason: &str) {
+        self.movementKeys_ = [false; 4];
         self.movementPressed_ = false;
         self.movementPressTime_.invalidate();
         self.stop_movement_output(host, reason);
@@ -61,6 +78,14 @@ impl Controller {
         }
     }
     pub(crate) fn movement_point(&self, host: &mut impl Host) -> Option<Point> {
+        if self.movementClickMode_ == 2 {
+            let delta = Point::new(
+                (self.movementKeys_[3] as i32 - self.movementKeys_[2] as i32) as f64,
+                (self.movementKeys_[1] as i32 - self.movementKeys_[0] as i32) as f64);
+            let length = delta.length();
+            let unit = if length > 0. { delta / length } else { Point::default() };
+            return Some(self.pixels(self.movementCenter_) + unit * self.radius_pixels(self.movementRadius_));
+        }
         if !self.frameCameraReady_ {
             return None;
         }

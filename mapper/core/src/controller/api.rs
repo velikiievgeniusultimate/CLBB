@@ -5,7 +5,7 @@ pub enum Input<'a> {
     Enabled(bool), Pointer(Point), Key { code:i32, down:bool, repeat:bool },
     Mouse { button:i32, down:bool, point:Point }, Timer(Timer), Release,
     Invalid(&'a str), Navigation { available:bool, reason:&'a str },
-    MovementMode(i32), MovementClickPercent(i32), HoldThreshold(i64), RefreshBindings, Trace(bool),
+    MovementKey { direction: usize, down: bool }, MovementMode(i32), MovementClickPercent(i32), HoldThreshold(i64), RefreshBindings, Trace(bool),
 }
 impl Controller {
     pub fn apply_input(&mut self,host:&mut impl Host,event:Input<'_>,now:i64)->bool {
@@ -24,11 +24,10 @@ impl Controller {
             Input::Release=>self.release_all(host),
             Input::Invalid(s)=>self.invalidate(host,s),
             Input::Navigation{available,reason}=>self.set_navigation_state(host,available,reason.into()),
+            Input::MovementKey { direction, down } => return self.keyboard_movement(host, direction, down),
             Input::MovementMode(v) => {
-                if (0..=1).contains(&v) && self.movementClickMode_ != v {
-                    if self.movementAuto_ {
-                        self.finish_movement(host, "");
-                    }
+                if (0..=2).contains(&v) && self.movementClickMode_ != v {
+                    self.finish_movement(host, "");
                     self.movementClickMode_ = v;
                 }
             }

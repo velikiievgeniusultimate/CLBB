@@ -35,11 +35,10 @@ impl Controller {
             .unwrap_or(0)
     }
     pub(crate) fn current_config_slot(&self, b: &Button) -> String {
-        if self.heroId_ == 25 && b.skillId == 2520 && self.active_variant(b) == 2521 {
-            "skill:1:2521".into()
-        } else {
-            b.slot.clone()
-        }
+        let variant = self.active_variant(b);
+        if b.kind == "skill" && variant > 0 && variant != b.skillId {
+            format!("{}:{variant}", b.slot)
+        } else { b.slot.clone() }
     }
     pub(crate) fn refresh_bindings(&mut self, host: &mut impl Host) {
         for i in 0..self.buttons_.len() {

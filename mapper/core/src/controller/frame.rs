@@ -104,6 +104,7 @@ impl Controller {
         }
         self.ingest_skill_variants(f);
         self.ingest_auxiliary_controls(host, f);
+        self.cancelKey_ = host.cancel_key(hero);
         self.observe_kagura_throw(host);
         let mut fresh = Vec::new();
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize) {

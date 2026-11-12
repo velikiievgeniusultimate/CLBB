@@ -254,6 +254,57 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_movement_is_immediate_diagonal_normalized_and_independent_of_pointer_and_skills() {
+        let (mut c, mut h) = setup(Some(false));
+        c.apply_input(&mut h, Input::MovementMode(2), T + 55 * MS);
+        assert!(c.apply_input(&mut h, Input::MovementKey { direction:0, down:true }, T + 56 * MS));
+        let finger=c.movementTouch_;
+        let up=h.active[&finger];
+        assert!(up.y<c.movementCenter_.y && (up.x-c.movementCenter_.x).abs()<1e-8);
+        c.apply_input(&mut h, Input::MovementKey { direction:3, down:true }, T + 57 * MS);
+        let diagonal=h.active[&finger];
+        assert!(diagonal.x>up.x && diagonal.y>up.y);
+        let radius=distance(c.pixels(diagonal),c.pixels(c.movementCenter_));
+        assert!((radius-c.radius_pixels(c.movementRadius_)).abs()<1e-6);
+        c.apply_input(&mut h, Input::Pointer(Point::new(0.1,0.9)), T + 58 * MS);
+        assert_eq!(h.active[&finger],diagonal);
+        key(&mut c,&mut h,59,81,true);
+        let primary=c.skillTouch_;
+        assert!(primary>=0 && primary!=finger);
+        c.apply_input(&mut h, Input::MovementKey { direction:0, down:false }, T + 60 * MS);
+        assert!((h.active[&finger].y-c.movementCenter_.y).abs()<1e-8);
+        c.apply_input(&mut h, Input::MovementKey { direction:3, down:false }, T + 61 * MS);
+        assert!(!h.active.contains_key(&finger));
+        assert!(h.active.contains_key(&primary));
+    }
+    #[test]
+    fn opposite_keyboard_keys_neutralize_and_release_resumes_remaining_direction() {
+        let (mut c,mut h)=setup(Some(false));
+        c.apply_input(&mut h,Input::MovementMode(2),T+55*MS);
+        c.apply_input(&mut h,Input::MovementKey {direction:2,down:true},T+56*MS);
+        c.apply_input(&mut h,Input::MovementKey {direction:3,down:true},T+57*MS);
+        assert_eq!(c.movementTouch_,-1);
+        c.apply_input(&mut h,Input::MovementKey {direction:3,down:false},T+58*MS);
+        assert!(c.movementTouch_>=0);
+        assert!(h.active[&c.movementTouch_].x<c.movementCenter_.x);
+        c.apply_input(&mut h,Input::Release,T+59*MS);
+        assert_eq!(c.movementKeys_,[false;4]);
+        assert!(h.active.is_empty());
+    }
+    #[test]
+    fn every_verified_alternate_skill_id_selects_its_own_mode_slot() {
+        let mut c=Controller::new();
+        for (hero,slot,base,active) in [(25,"skill:1",2520,2521),(25,"skill:2",2530,2531),(84,"skill:1",8420,8425),(131,"skill:2",13130,13131)] {
+            c.heroId_=hero;
+            let b=Button {slot:slot.into(),kind:"skill".into(),skillId:base,..Default::default()};
+            c.skillVariants_=vec![SkillVariant {slot:slot.into(),base,active,..Default::default()}];
+            assert_eq!(c.current_config_slot(&b),format!("{slot}:{active}"));
+            c.skillVariants_[0].active=base;
+            assert_eq!(c.current_config_slot(&b),slot);
+        }
+    }
+
+    #[test]
     fn default_auxiliary_holds_until_physical_up_and_preserves_other_fingers() {
         let (mut c, mut h) = setup(Some(false));
         let movement = c.movementTouch_;

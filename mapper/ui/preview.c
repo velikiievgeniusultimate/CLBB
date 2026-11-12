@@ -275,6 +275,31 @@ int main(int argc, char **argv) {
     g_assert_false(gtk_widget_get_sensitive(reset));
     put(&p,"common.bindings.skill:0.key","81");
     clbb_settings_refresh(s);
+    // Keyboard controls are mirrored, editable and visible only in keyboard mode.
+    GtkWidget *mode_row=find_control(clbb_settings_panel(s),"movement.click_mode");
+    GtkWidget *mode=find_type(mode_row,GTK_TYPE_DROP_DOWN);
+    g_assert_cmpuint(g_list_model_get_n_items(gtk_drop_down_get_model(GTK_DROP_DOWN(mode))),==,3);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(mode),2);
+    g_assert_cmpstr(read_value(&p,"movement.click_mode"),==,"2");
+    g_assert_true(gtk_widget_get_visible(find_control(clbb_settings_panel(s),"movement.up")));
+    g_assert_false(gtk_widget_get_visible(find_control(clbb_settings_panel(s),"movement.button")));
+    put(&p,"bindings.conflicts","87\tНавык 2, движение\n");
+    clbb_settings_refresh(s);
+    GtkWidget *up_button=find_type(find_control(clbb_settings_panel(s),"movement.up"),GTK_TYPE_BUTTON);
+    g_assert_true(gtk_widget_has_css_class(up_button,"clbb-conflict"));
+    put(&p,"bindings.conflicts","");clbb_settings_refresh(s);
+    g_assert_false(gtk_widget_has_css_class(up_button,"clbb-conflict"));
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(mode),0);
+    // Alternate forms stay in one skill card with one key and paired press/stop fields.
+    put(&p,"preview.controls","1\t25\nskill:1\tskill:1\tskill:1\t2520\t2520\t2\nskill:1\tskill:1:2521\tskill:1:2521\t2520\t2521\t1\nskill:2\tskill:2\tskill:2\t2530\t2530\t1\nskill:2\tskill:2:2531\tskill:2:2531\t2530\t2531\t1\n");
+    clbb_settings_refresh(s);
+    g_assert_nonnull(find_control(clbb_settings_panel(s),"hero.bindings.skill:1.key"));
+    g_assert_null(find_control(clbb_settings_panel(s),"hero.bindings.skill:1:2521.key"));
+    g_assert_nonnull(find_control(clbb_settings_panel(s),"hero.bindings.skill:1.cast_mode"));
+    g_assert_nonnull(find_control(clbb_settings_panel(s),"hero.bindings.skill:1:2521.cast_mode"));
+    g_assert_nonnull(find_control(clbb_settings_panel(s),"common.bindings.skill:2:2531.stop_movement"));
+    g_hash_table_remove(p.values,"preview.controls");clbb_settings_refresh(s);
+    g_print("CLBB_KEYBOARD_CONFLICT_AND_FORM_UI_OK keyboard visibility, collision warning, nested form settings\n");
     // Absent controls are removed, rather than left as disabled phantom rows.
     put(&p,"preview.controls","1\t25\nskill:0\tskill:0\tskill:0\t2510\t2510\t3\n");
     clbb_settings_refresh(s);
