@@ -229,11 +229,159 @@ index cd521ee..7a2e30c 100644
      frame = lock_user(VERIFY_WRITE, frame_addr, layout.total_size, 0);
      if (!frame) {
          goto give_sigsegv;
+diff --git a/linux-user/fd-trans.c b/linux-user/fd-trans.c
+index c0687c5..9eda58b 100644
+--- a/linux-user/fd-trans.c
++++ b/linux-user/fd-trans.c
+@@ -263,6 +263,7 @@ enum {
+ 
+ TargetFdTrans **target_fd_trans;
+ unsigned int target_fd_max;
++GMutex target_fd_trans_mutex;
+ 
+ static void tswap_nlmsghdr(struct nlmsghdr *nlh)
+ {
+diff --git a/linux-user/fd-trans.h b/linux-user/fd-trans.h
+index a3fcdaa..844369d 100644
+--- a/linux-user/fd-trans.h
++++ b/linux-user/fd-trans.h
+@@ -28,37 +28,55 @@ extern TargetFdTrans **target_fd_trans;
+ 
+ extern unsigned int target_fd_max;
+ 
++/* The table may grow while another vCPU looks up an fd.  Protect the count,
++ * allocation and entries together; a copied callback points to a static
++ * TargetFdTrans and must be invoked only after releasing this mutex. */
++extern GMutex target_fd_trans_mutex;
++
+ static inline TargetFdDataFunc fd_trans_target_to_host_data(int fd)
+ {
+-    if (fd >= 0 && fd < target_fd_max && target_fd_trans[fd]) {
+-        return target_fd_trans[fd]->target_to_host_data;
++    TargetFdDataFunc func = NULL;
++
++    g_mutex_lock(&target_fd_trans_mutex);
++    if (fd >= 0 && (unsigned int)fd < target_fd_max && target_fd_trans[fd]) {
++        func = target_fd_trans[fd]->target_to_host_data;
+     }
+-    return NULL;
++    g_mutex_unlock(&target_fd_trans_mutex);
++    return func;
+ }
+ 
+ static inline TargetFdDataFunc fd_trans_host_to_target_data(int fd)
+ {
+-    if (fd >= 0 && fd < target_fd_max && target_fd_trans[fd]) {
+-        return target_fd_trans[fd]->host_to_target_data;
++    TargetFdDataFunc func = NULL;
++
++    g_mutex_lock(&target_fd_trans_mutex);
++    if (fd >= 0 && (unsigned int)fd < target_fd_max && target_fd_trans[fd]) {
++        func = target_fd_trans[fd]->host_to_target_data;
+     }
+-    return NULL;
++    g_mutex_unlock(&target_fd_trans_mutex);
++    return func;
+ }
+ 
+ static inline TargetFdAddrFunc fd_trans_target_to_host_addr(int fd)
+ {
+-    if (fd >= 0 && fd < target_fd_max && target_fd_trans[fd]) {
+-        return target_fd_trans[fd]->target_to_host_addr;
++    TargetFdAddrFunc func = NULL;
++
++    g_mutex_lock(&target_fd_trans_mutex);
++    if (fd >= 0 && (unsigned int)fd < target_fd_max && target_fd_trans[fd]) {
++        func = target_fd_trans[fd]->target_to_host_addr;
+     }
+-    return NULL;
++    g_mutex_unlock(&target_fd_trans_mutex);
++    return func;
+ }
+ 
+-static inline void fd_trans_register(int fd, TargetFdTrans *trans)
++/* Caller holds target_fd_trans_mutex. */
++static inline void fd_trans_register_locked(int fd, TargetFdTrans *trans)
+ {
+     unsigned int oldmax;
+ 
+-    if (fd >= target_fd_max) {
++    if ((unsigned int)fd >= target_fd_max) {
+         oldmax = target_fd_max;
+-        target_fd_max = ((fd >> 6) + 1) << 6; /* by slice of 64 entries */
++        target_fd_max = (((unsigned int)fd >> 6) + 1) << 6;
+         target_fd_trans = g_renew(TargetFdTrans *,
+                                   target_fd_trans, target_fd_max);
+         memset((void *)(target_fd_trans + oldmax), 0,
+@@ -67,19 +85,51 @@ static inline void fd_trans_register(int fd, TargetFdTrans *trans)
+     target_fd_trans[fd] = trans;
+ }
+ 
++static inline void fd_trans_register(int fd, TargetFdTrans *trans)
++{
++    if (fd < 0) {
++        return;
++    }
++    g_mutex_lock(&target_fd_trans_mutex);
++    fd_trans_register_locked(fd, trans);
++    g_mutex_unlock(&target_fd_trans_mutex);
++}
++
+ static inline void fd_trans_unregister(int fd)
+ {
+-    if (fd >= 0 && fd < target_fd_max) {
++    g_mutex_lock(&target_fd_trans_mutex);
++    if (fd >= 0 && (unsigned int)fd < target_fd_max) {
+         target_fd_trans[fd] = NULL;
+     }
++    g_mutex_unlock(&target_fd_trans_mutex);
+ }
+ 
+ static inline void fd_trans_dup(int oldfd, int newfd)
+ {
+-    fd_trans_unregister(newfd);
+-    if (oldfd < target_fd_max && target_fd_trans[oldfd]) {
+-        fd_trans_register(newfd, target_fd_trans[oldfd]);
++    if (newfd < 0 || oldfd == newfd) {
++        return;
++    }
++    g_mutex_lock(&target_fd_trans_mutex);
++    if ((unsigned int)newfd < target_fd_max) {
++        target_fd_trans[newfd] = NULL;
++    }
++    if (oldfd >= 0 && (unsigned int)oldfd < target_fd_max &&
++        target_fd_trans[oldfd]) {
++        fd_trans_register_locked(newfd, target_fd_trans[oldfd]);
+     }
++    g_mutex_unlock(&target_fd_trans_mutex);
++}
++
++/* The forking thread owns the lock in both parent and child.  No table lock
++ * may be inherited from a different vCPU that disappears in the child. */
++static inline void fd_trans_fork_start(void)
++{
++    g_mutex_lock(&target_fd_trans_mutex);
++}
++
++static inline void fd_trans_fork_end(void)
++{
++    g_mutex_unlock(&target_fd_trans_mutex);
+ }
+ 
+ extern TargetFdTrans target_packet_trans;
 diff --git a/linux-user/main.c b/linux-user/main.c
-index a86ad79..e567c11 100644
+index a86ad79..7501cab 100644
 --- a/linux-user/main.c
 +++ b/linux-user/main.c
-@@ -47,6 +47,35 @@
+@@ -27,6 +27,7 @@
+ 
+ #include "qapi/error.h"
+ #include "qemu.h"
++#include "fd-trans.h"
+ #include "qemu/path.h"
+ #include "qemu/queue.h"
+ #include "qemu/config-file.h"
+@@ -47,6 +48,35 @@
  #include "cpu_loop-common.h"
  #include "crypto/init.h"
  
@@ -269,7 +417,21 @@ index a86ad79..e567c11 100644
  char *exec_path;
  
  int singlestep;
-@@ -741,7 +770,7 @@ int qemu_main(int argc, char **argv, char **envp)
+@@ -138,11 +168,13 @@ void fork_start(void)
+ {
+     start_exclusive();
+     mmap_fork_start();
++    fd_trans_fork_start();
+     cpu_list_lock();
+ }
+ 
+ void fork_end(int child)
+ {
++    fd_trans_fork_end();
+     mmap_fork_end(child);
+     if (child) {
+         CPUState *cpu, *next_cpu;
+@@ -741,7 +773,7 @@ int qemu_main(int argc, char **argv, char **envp)
  //#endif
  
      /* init tcg before creating CPUs and to get qemu_host_page_size */
@@ -278,7 +440,7 @@ index a86ad79..e567c11 100644
  
      cpu = cpu_create(cpu_type);
      env = cpu->env_ptr;
-@@ -892,6 +921,7 @@ int qemu_main(int argc, char **argv, char **envp)
+@@ -892,6 +924,7 @@ int qemu_main(int argc, char **argv, char **envp)
  
      target_set_brk(info->brk);
      syscall_init();
@@ -480,7 +642,7 @@ index 836efb8..0db6ecb 100644
  {
      TaskState *ts = (TaskState *)thread_cpu->opaque;
 diff --git a/linux-user/syscall.c b/linux-user/syscall.c
-index c1b79ed..be5ce7d 100644
+index c1b79ed..0eee1d7 100644
 --- a/linux-user/syscall.c
 +++ b/linux-user/syscall.c
 @@ -1200,9 +1200,72 @@ static inline abi_long copy_from_user_timeval(struct timeval *tv,
@@ -624,7 +786,92 @@ index c1b79ed..be5ce7d 100644
  }
  #endif
  
-@@ -5920,6 +6005,8 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
+@@ -1529,9 +1614,10 @@ static inline abi_long target_to_host_sockaddr(int fd, struct sockaddr *addr,
+     const socklen_t unix_maxlen = sizeof (struct sockaddr_un);
+     sa_family_t sa_family;
+     struct target_sockaddr *target_saddr;
++    TargetFdAddrFunc trans = fd_trans_target_to_host_addr(fd);
+ 
+-    if (fd_trans_target_to_host_addr(fd)) {
+-        return fd_trans_target_to_host_addr(fd)(addr, target_addr, len);
++    if (trans) {
++        return trans(addr, target_addr, len);
+     }
+ 
+     target_saddr = lock_user(VERIFY_READ, target_addr, len, 1);
+@@ -3133,13 +3219,13 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
+     msg.msg_iov = vec;
+ 
+     if (send) {
+-        if (fd_trans_target_to_host_data(fd)) {
++        TargetFdDataFunc trans = fd_trans_target_to_host_data(fd);
++        if (trans) {
+             void *host_msg;
+ 
+             host_msg = g_malloc(msg.msg_iov->iov_len);
+             memcpy(host_msg, msg.msg_iov->iov_base, msg.msg_iov->iov_len);
+-            ret = fd_trans_target_to_host_data(fd)(host_msg,
+-                                                   msg.msg_iov->iov_len);
++            ret = trans(host_msg, msg.msg_iov->iov_len);
+             if (ret >= 0) {
+                 msg.msg_iov->iov_base = host_msg;
+                 ret = get_errno(safe_sendmsg(fd, &msg, flags));
+@@ -3154,10 +3240,11 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
+     } else {
+         ret = get_errno(safe_recvmsg(fd, &msg, flags));
+         if (!is_error(ret)) {
++            TargetFdDataFunc trans = fd_trans_host_to_target_data(fd);
+             len = ret;
+-            if (fd_trans_host_to_target_data(fd)) {
+-                ret = fd_trans_host_to_target_data(fd)(msg.msg_iov->iov_base,
+-                                               MIN(msg.msg_iov->iov_len, len));
++            if (trans) {
++                ret = trans(msg.msg_iov->iov_base,
++                            MIN(msg.msg_iov->iov_len, len));
+             } else {
+                 ret = host_to_target_cmsg(msgp, &msg);
+             }
+@@ -3374,6 +3461,7 @@ static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
+     void *host_msg;
+     void *copy_msg = NULL;
+     abi_long ret;
++    TargetFdDataFunc trans;
+ 
+     if ((int)addrlen < 0) {
+         return -TARGET_EINVAL;
+@@ -3382,11 +3470,12 @@ static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
+     host_msg = lock_user(VERIFY_READ, msg, len, 1);
+     if (!host_msg)
+         return -TARGET_EFAULT;
+-    if (fd_trans_target_to_host_data(fd)) {
++    trans = fd_trans_target_to_host_data(fd);
++    if (trans) {
+         copy_msg = host_msg;
+         host_msg = g_malloc(len);
+         memcpy(host_msg, copy_msg, len);
+-        ret = fd_trans_target_to_host_data(fd)(host_msg, len);
++        ret = trans(host_msg, len);
+         if (ret < 0) {
+             goto fail;
+         }
+@@ -3442,11 +3531,11 @@ static abi_long do_recvfrom(int fd, abi_ulong msg, size_t len, int flags,
+         ret = get_errno(safe_recvfrom(fd, host_msg, len, flags, NULL, 0));
+     }
+     if (!is_error(ret)) {
+-        if (fd_trans_host_to_target_data(fd)) {
+-            abi_long trans;
+-            trans = fd_trans_host_to_target_data(fd)(host_msg, MIN(ret, len));
+-            if (is_error(trans)) {
+-                ret = trans;
++        TargetFdDataFunc trans = fd_trans_host_to_target_data(fd);
++        if (trans) {
++            abi_long translated = trans(host_msg, MIN(ret, len));
++            if (is_error(translated)) {
++                ret = translated;
+                 goto fail;
+             }
+         }
+@@ -5920,6 +6009,8 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
  #define NEW_STACK_SIZE 0x40000
  
  
@@ -633,7 +880,7 @@ index c1b79ed..be5ce7d 100644
  static pthread_mutex_t clone_lock = PTHREAD_MUTEX_INITIALIZER;
  typedef struct {
      CPUArchState *env;
-@@ -6837,6 +6924,20 @@ static inline int target_to_host_mlockall_arg(int arg)
+@@ -6837,6 +6928,20 @@ static inline int target_to_host_mlockall_arg(int arg)
  #if (defined(TARGET_NR_stat64) || defined(TARGET_NR_lstat64) ||     \
       defined(TARGET_NR_fstat64) || defined(TARGET_NR_fstatat64) ||  \
       defined(TARGET_NR_newfstatat))
@@ -654,7 +901,7 @@ index c1b79ed..be5ce7d 100644
  static inline abi_long host_to_target_stat64(void *cpu_env,
                                               abi_ulong target_addr,
                                               struct stat *host_st)
-@@ -6879,8 +6980,14 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
+@@ -6879,8 +6984,14 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
          struct target_stat *target_st;
  #endif
  
@@ -669,7 +916,7 @@ index c1b79ed..be5ce7d 100644
          memset(target_st, 0, sizeof(*target_st));
          __put_user(host_st->st_dev, &target_st->st_dev);
          __put_user(host_st->st_ino, &target_st->st_ino);
-@@ -6904,7 +7011,12 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
+@@ -6904,7 +7015,12 @@ static inline abi_long host_to_target_stat64(void *cpu_env,
          __put_user(host_st->st_mtim.tv_nsec, &target_st->target_st_mtime_nsec);
          __put_user(host_st->st_ctim.tv_nsec, &target_st->target_st_ctime_nsec);
  #endif
@@ -682,7 +929,15 @@ index c1b79ed..be5ce7d 100644
      }
  
      return 0;
-@@ -7659,6 +7771,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+@@ -7636,6 +7752,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+ {
+     CPUState *cpu = env_cpu(cpu_env);
+     abi_long ret;
++    TargetFdDataFunc fd_data_trans;
+ #if defined(TARGET_NR_stat) || defined(TARGET_NR_stat64) \
+     || defined(TARGET_NR_lstat) || defined(TARGET_NR_lstat64) \
+     || defined(TARGET_NR_fstat) || defined(TARGET_NR_fstat64) \
+@@ -7659,6 +7776,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
              return -TARGET_ERESTARTSYS;
          }
  
@@ -692,7 +947,7 @@ index c1b79ed..be5ce7d 100644
          cpu_list_lock();
  
          if (CPU_NEXT(first_cpu)) {
-@@ -7676,7 +7791,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+@@ -7676,7 +7796,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                            NULL, NULL, 0);
              }
              thread_cpu = NULL;
@@ -701,6 +956,35 @@ index c1b79ed..be5ce7d 100644
              g_free(ts);
              rcu_unregister_thread();
              pthread_exit(NULL);
+@@ -7693,9 +7813,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+             if (!(p = lock_user(VERIFY_WRITE, arg2, arg3, 0)))
+                 return -TARGET_EFAULT;
+             ret = get_errno(safe_read(arg1, p, arg3));
+-            if (ret >= 0 &&
+-                fd_trans_host_to_target_data(arg1)) {
+-                ret = fd_trans_host_to_target_data(arg1)(p, ret);
++            if (ret >= 0) {
++                fd_data_trans = fd_trans_host_to_target_data(arg1);
++                if (fd_data_trans) {
++                    ret = fd_data_trans(p, ret);
++                }
+             }
+             unlock_user(p, arg2, ret);
+         }
+@@ -7706,10 +7828,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+         }
+         if (!(p = lock_user(VERIFY_READ, arg2, arg3, 1)))
+             return -TARGET_EFAULT;
+-        if (fd_trans_target_to_host_data(arg1)) {
++        fd_data_trans = fd_trans_target_to_host_data(arg1);
++        if (fd_data_trans) {
+             void *copy = g_malloc(arg3);
+             memcpy(copy, p, arg3);
+-            ret = fd_trans_target_to_host_data(arg1)(copy, arg3);
++            ret = fd_data_trans(copy, arg3);
+             if (ret >= 0) {
+                 ret = get_errno(safe_write(arg1, copy, ret));
+             }
 diff --git a/target/arm/cpu.h b/target/arm/cpu.h
 index 4c0e3f8..6d8e88a 100644
 --- a/target/arm/cpu.h

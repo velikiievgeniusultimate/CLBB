@@ -53,6 +53,7 @@ python3 "$ROOT/smoke/check-motion-event.py"
 python3 "$ROOT/smoke/check-frame-pacing.py"
 python3 "$ROOT/smoke/check-resource-only-dex.py"
 python3 "$ROOT/smoke/check-tcg-cache-size.py"
+python3 "$ROOT/tools/check-fd-trans.py"
 "$ROOT/tools/tb-state-audit/check.sh"
 bash "$ROOT/tools/pauth-audit/check-guest-simd.sh"
 bash "$ROOT/smoke/check-libc-contract.sh" --run

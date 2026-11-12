@@ -164,6 +164,7 @@ install -m 0755 "$CLBB_ART_DIR/out/host/linux-x86/lib64/libart.so" \
     "$CLBB_ATL_PREFIX/lib/art/libart.so"
 
 printf '%s\n' 'Building QEMU, host bridge and guest bionic...'
+python3 "$CLBB_BUILD_ROOT/tools/check-fd-trans.py"
 # The generated table is deliberately inlined in QEMU. Keep the Rust definition
 # and the complete finite-domain C oracle check part of a reproducible rebuild.
 "$CLBB_BUILD_ROOT/tools/rsqrt-estimate-audit/check.sh"
