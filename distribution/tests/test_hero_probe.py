@@ -22,6 +22,27 @@ def sample(contacts, touch=-1, pending=0, movement=-1, at=10):
 
 
 class HeroProbeTests(unittest.TestCase):
+    def test_expected_watch_pid_rejects_a_restarted_runtime_before_ownership_or_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); (root / "logs").mkdir()
+            (root / "logs/current-atl-pid.json").write_text(json.dumps({"pid": 456}))
+            with mock.patch.object(probe, "ROOT", root), mock.patch.object(probe, "runtime_executable_is_owned") as owned:
+                with self.assertRaisesRegex(RuntimeError, "Expected watched runtime PID 123"):
+                    probe.Probe(25, {}, expected_pid=123)
+            owned.assert_not_called()
+    def test_optional_cancel_diagnostic_supports_old_runtime_only_on_empty_reply(self):
+        reader=probe.Probe.__new__(probe.Probe)
+        self.assertIn("cancel",probe.DIAGNOSTICS)
+        with mock.patch.object(reader,"command",return_value=""):
+            self.assertEqual(reader.read("diagnostics.cancel"),{"available":False,"reason":"unsupported_diagnostic"})
+            with self.assertRaises(json.JSONDecodeError):
+                reader.read("diagnostics.input")
+        with mock.patch.object(reader,"command",return_value="malformed"):
+            with self.assertRaises(json.JSONDecodeError):
+                reader.read("diagnostics.cancel")
+        with mock.patch.object(reader,"command",return_value='{"available":true}'):
+            self.assertEqual(reader.read("diagnostics.cancel"),{"available":True})
+
     def test_parameter_bounds_and_keyboard_codes(self):
         self.assertEqual(probe.key_code("q"), 81)
         self.assertEqual(probe.key_code("81"), 81)

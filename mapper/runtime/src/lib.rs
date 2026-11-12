@@ -12,7 +12,7 @@ pub mod projection;
 pub mod reflection;
 #[cfg(target_os="linux")]
 mod native_debug;
-mod flight_schema;
+pub mod flight_schema;
 pub mod recorder;
 pub mod render_metrics;
 #[cfg(target_os = "linux")]

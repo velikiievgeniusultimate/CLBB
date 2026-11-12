@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from runtime_identity import runtime_executable_is_owned
 
-DIAGNOSTICS = ("input", "aim", "contacts", "cast_lock", "templates", "gestures")
+DIAGNOSTICS = ("input", "aim", "contacts", "cast_lock", "templates", "gestures", "cancel")
 WAYPOINTS = ((.60, .50), (.57, .62), (.43, .58), (.37, .45), (.48, .35), (.62, .43))
 RELEASE_SECONDS = 1.8
 HEARTBEAT_SECONDS = .5  # The native independent-pointer lease is two seconds.
@@ -95,11 +95,13 @@ def observations(samples: list[dict], movement: bool, physical_up_ns: int | None
 
 
 class Probe:
-    def __init__(self, expected_hero: int, report: dict):
+    def __init__(self, expected_hero: int, report: dict, expected_pid: int | None = None):
         self.hero = expected_hero
         self.report = report
         self.metadata_path = ROOT / "logs/current-atl-pid.json"
         self.pid = json.loads(self.metadata_path.read_text())["pid"]
+        if expected_pid is not None and self.pid != expected_pid:
+            raise RuntimeError(f"Expected watched runtime PID {expected_pid}, selected PID is {self.pid}; refusing input")
         if type(self.pid) is not int or self.pid <= 0 or not runtime_executable_is_owned(self.pid, ROOT):
             raise RuntimeError("Recorded process is not the verified owned runtime")
         self.proc = Path("/proc") / str(self.pid)
@@ -193,10 +195,15 @@ class Probe:
             entry["end_ns"] = time.monotonic_ns()
 
     def read(self, key: str, deadline=None):
-        return json.loads(self.command("read " + key, deadline=deadline))
+        reply=self.command("read " + key, deadline=deadline)
+        if key == "diagnostics.cancel" and not reply:
+            return {"available":False,"reason":"unsupported_diagnostic"}
+        return json.loads(reply)
 
-    def snapshot(self, stage: str, deadline=None) -> dict:
+    def snapshot(self, stage: str, deadline=None, goal=None) -> dict:
         sample = {"stage": stage, "start_ns": time.monotonic_ns(), "data": {}}
+        if goal is not None:
+            sample["pointer_goal"] = dict(goal)
         self.report["samples"].append(sample)
         try:
             for name in DIAGNOSTICS:
@@ -222,13 +229,61 @@ class Probe:
             now = time.monotonic()
             heartbeat_at = self.last_input_at + HEARTBEAT_SECONDS
             if now >= heartbeat_at:
-                self.send_pointer(self.pointer)
+                self.send_pointer(self.pointer, deadline=deadline)
             else:
                 time.sleep(max(0., min(deadline, heartbeat_at) - now))
 
 
+def settle_deadline(now: float, hold_deadline: float, next_waypoint: float,
+                    interval: float, settle_ms: int) -> float:
+    return min(hold_deadline, next_waypoint, now + min(settle_ms / 1000., interval / 3.))
+
+
+def held_snapshot(probe, stage, goal, deadline):
+    if deadline - time.monotonic() <= 1e-9:
+        return None
+    try:
+        return probe.snapshot(stage, deadline=deadline, goal=goal)
+    except TimeoutError:
+        if time.monotonic() < deadline:
+            raise
+        # Reaching the hold budget is not permission to postpone physical UP.
+        samples = probe.report.get("samples", [])
+        if samples and samples[-1].get("stage") == stage:
+            samples[-1]["truncated_at_hold_deadline"] = True
+        return None
+
+
+def hold_waypoints(probe, report, down_at: float, hold_ms: int, settle_ms: int):
+    deadline = down_at + hold_ms / 1000.
+    interval = hold_ms / 1000. / len(WAYPOINTS)
+    report["hold_deadline_ns"] = round(deadline * 1e9)
+    for index, pointer in enumerate(WAYPOINTS):
+        probe.wait_until(down_at + interval * index)
+        if deadline - time.monotonic() <= 1e-9:
+            break
+        try:
+            probe.send_pointer(pointer, deadline=deadline)
+        except TimeoutError:
+            if time.monotonic() >= deadline:
+                break
+            raise
+        command = report["commands"][-1]
+        goal = {"index": index, "pointer_uv": list(pointer),
+                "command_start_ns": command["start_ns"], "command_end_ns": command["end_ns"]}
+        held_snapshot(probe, f"held:{index}", goal, deadline)
+        if settle_ms and time.monotonic() < deadline:
+            now = time.monotonic()
+            target = settle_deadline(now, deadline, down_at + interval * (index + 1), interval, settle_ms)
+            if target > now:
+                goal["settle_wait_ms"] = (target - now) * 1000.
+                probe.wait_until(target)
+                held_snapshot(probe, f"held:{index}:settled", goal, deadline)
+    probe.wait_until(deadline)
+
+
 def run(args, report: dict):
-    probe = Probe(args.hero, report)
+    probe = Probe(args.hero, report, getattr(args, "expected_pid", None))
     initial = probe.snapshot("preflight")
     if initial["data"]["contacts"].get("active") != []:
         raise RuntimeError("Initial contacts are not empty; refusing to release somebody else's gesture")
@@ -271,13 +326,7 @@ def run(args, report: dict):
         down_at = time.monotonic()
         down_reply = probe.command(f"key {args.key} 1")
         report["skill_down_ns"] = report["commands"][-1]["start_ns"]
-        for index, pointer in enumerate(WAYPOINTS):
-            probe.wait_until(down_at + args.hold_ms / 1000. * index / len(WAYPOINTS))
-            if index and time.monotonic() >= down_at + args.hold_ms / 1000.:
-                break  # Slow diagnostics never extend a short hold to complete a path.
-            probe.send_pointer(pointer)
-            probe.snapshot(f"held:{index}")
-        probe.wait_until(down_at + args.hold_ms / 1000.)
+        hold_waypoints(probe, report, down_at, args.hold_ms, getattr(args, "settle_ms", 0))
         if args.cancel:
             pressed_keys.add(cancel_key)
             cancel_reply = probe.command(f"key {cancel_key} 1")
@@ -333,15 +382,17 @@ def run(args, report: dict):
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--hero", type=bounded_int(1, 10000), required=True, help="Expected current hero ID; never selects a hero")
+    parser.add_argument("--expected-pid", type=bounded_int(1, 0x7fffffff), help="Refuse input if the selected runtime changed after a native watcher started")
     parser.add_argument("--key", type=key_code, required=True, help="Keyboard bind, e.g. Q, W, E, SPACE, or decimal code 81")
     parser.add_argument("--hold-ms", type=bounded_int(16, 5000), default=600)
+    parser.add_argument("--settle-ms", type=bounded_int(0, 250), default=0, help="Diagnostic follow-up sample delay, capped by waypoint/hold budgets; does not change mapper latency")
     parser.add_argument("--movement", action="store_true", help="Hold the existing RMB movement bind concurrently")
     parser.add_argument("--cancel", action="store_true", help="Press the existing hero cancel bind before physical key UP")
     parser.add_argument("--output", type=Path, required=True, help="A new JSON file; never overwrites an earlier probe")
     args = parser.parse_args(argv)
     report = {"format": "clbb-hero-control-probe", "version": 1, "start_ns": time.monotonic_ns(),
               "request": {"hero": args.hero, "key": args.key, "hold_ms": args.hold_ms,
-                          "movement": args.movement, "cancel": args.cancel},
+                          "movement": args.movement, "cancel": args.cancel, "settle_ms": args.settle_ms},
               "commands": [], "samples": [], "status": "observation_only",
               "release_mode": "explicit_cancel" if args.cancel else "physical_up",
               "limits": "Telemetry probe only; hit accuracy, native cast success and cancellation require gameplay/result evidence."}

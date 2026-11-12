@@ -7139,10 +7139,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..f940e5a
+index 0000000..d278c16
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1026 @@
+@@ -0,0 +1,1071 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7154,8 +7154,10 @@ index 0000000..f940e5a
 +#include "../api-impl-jni/widgets/android_view_SurfaceView.h"
 +#include <X11/Xlib.h>
 +#include <dlfcn.h>
++#include <errno.h>
 +#include <gdk/x11/gdkx.h>
 +#include <limits.h>
++#include <math.h>
 +#include <stdatomic.h>
 +#include <stdint.h>
 +#include <stdio.h>
@@ -7810,6 +7812,29 @@ index 0000000..f940e5a
 +    ClbbHost *host;
 +    GSocketConnection *connection;
 +} ControlRead;
++static gboolean raw_hold_arguments(const char *u, const char *v, const char *ms,
++                                   double *x, double *y, guint *duration) {
++    char *end = NULL;
++    errno = 0;
++    double parsed_x = g_ascii_strtod(u, &end);
++    if (errno || end == u || *end || !isfinite(parsed_x) ||
++        parsed_x < 0 || parsed_x > 1)
++        return FALSE;
++    errno = 0;
++    double parsed_y = g_ascii_strtod(v, &end);
++    if (errno || end == v || *end || !isfinite(parsed_y) ||
++        parsed_y < 0 || parsed_y > 1)
++        return FALSE;
++    errno = 0;
++    guint64 parsed_ms = g_ascii_strtoull(ms, &end, 10);
++    if (errno || end == ms || *end || ms[0] == '-' || ms[0] == '+' ||
++        parsed_ms < 16 || parsed_ms > 5000)
++        return FALSE;
++    *x = parsed_x;
++    *y = parsed_y;
++    *duration = (guint)parsed_ms;
++    return TRUE;
++}
 +static gboolean finish_raw_tap(gpointer data) {
 +    ClbbHost *h = data;
 +    if (h->raw_tap && h->raw_steps && !h->closing) {
@@ -7928,6 +7953,26 @@ index 0000000..f940e5a
 +                if (h->raw_tap) h->raw_timer = g_timeout_add(16, finish_raw_tap, h);
 +            }
 +            reply = g_strdup(h->raw_tap ? "OK swipe" : "REJECTED swipe");
++        }
++        else if (count == 4 && strcmp(args[0], "hold") == 0) {
++            /* Developer-only raw baseline, using exactly the native tap
++             * contact and release timer. No mapper binding or desktop input. */
++            double x, y;
++            guint duration;
++            gboolean started = FALSE;
++            if (!h->raw_tap && !h->raw_timer &&
++                raw_hold_arguments(args[1], args[2], args[3], &x, &y, &duration)) {
++                h->raw_steps = 0;
++                h->raw_tap = clbb_view_touch(
++                    game_surface(GTK_WIDGET(h->window)), 0, -1, x, y);
++                if (h->raw_tap) {
++                    h->raw_x = x;
++                    h->raw_y = y;
++                    h->raw_timer = g_timeout_add(duration, finish_raw_tap, h);
++                    started = TRUE;
++                }
++            }
++            reply = g_strdup(started ? "OK hold" : "REJECTED hold");
 +        }
 +        else if (count == 3 && strcmp(args[0], "tap") == 0) {
 +            double x = g_ascii_strtod(args[1], NULL),

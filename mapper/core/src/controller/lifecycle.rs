@@ -574,6 +574,7 @@ impl Controller {
         {
             self.freeze_direction_intent(host)
         }
+        self.arm_charge_gesture(b);
         self.changed_ = true;
         true
     }
@@ -623,22 +624,28 @@ impl Controller {
         true
     }
     pub(crate) fn finish_skill(&mut self, host: &mut impl Host, cancel: bool) {
+        self.finish_skill_inner(host, cancel, false);
+    }
+    pub(crate) fn finish_auto_completed_charge(&mut self, host: &mut impl Host) {
+        self.finish_skill_inner(host, false, true);
+    }
+    fn finish_skill_inner(&mut self, host: &mut impl Host, cancel: bool, auto_completed: bool) {
         host.timer(Timer::Tap, None);
         if cancel && !(self.skillCancelPending_ && self.skillCancelAcknowledged_) {
             self.clear_queued_skills(host, "predecessor_aborted")
         }
-        if cancel {
+        if cancel || auto_completed {
             self.skillEchoPending_ = false
         }
         if self.skillTouch_ >= 0 {
-            if !cancel {
+            if !cancel && !auto_completed {
                 let finishing = self.skillTouch_;
                 self.flush_pointer(host);
                 if self.skillTouch_ != finishing {
                     return;
                 }
             }
-            self.trace(host, "release", if cancel { "cancel" } else { "cast" });
+            self.trace(host, "release", if auto_completed { "auto_completed" } else if cancel { "cancel" } else { "cast" });
             if !cancel || self.skillCancelAcknowledged_ || !self.abort_retribution_touch(host) {
                 if cancel && self.cancelReady_ && !self.skillCancelPending_ {
                     self.move_skill(host, self.cancelPoint_, false);
@@ -648,7 +655,7 @@ impl Controller {
             self.sync_clock(host);
             self.lastSkillEndNs_ = self.now_;
             if self.heroId_ == 25 && self.activeSlot_ == "skill:0" {
-                self.kaguraThrow_ = (!cancel
+                self.kaguraThrow_ = (!cancel && !auto_completed
                     && self.skillCooldownVariant_ == 2510
                     && self.kagura_w_cast_lock().is_some())
                 .then_some(KaguraThrowTransition {
@@ -656,12 +663,13 @@ impl Controller {
                     observed_lock: false,
                 });
             }
-            if !cancel {
+            if !cancel && !auto_completed {
                 let slot = self.activeSlot_.clone();
                 self.mark_cooldown_cast(&slot, self.skillCooldownVariant_)
             }
         }
         self.skillCooldownVariant_ = 0;
+        self.chargeGesture_ = None;
         self.skillActivationObserved_ = false;
         self.skillStateForbiddenAtDown_ = false;
         self.skillCancelPending_ = false;
@@ -708,6 +716,7 @@ impl Controller {
         if self.skillTouch_ < 0 || self.skillCancelPending_ {
             return;
         }
+        self.charge_cancel_requested();
         self.skillCancelPending_ = true;
         self.skillCancelAcknowledged_ = false;
         self.skillCancelSentNs_ = 0;

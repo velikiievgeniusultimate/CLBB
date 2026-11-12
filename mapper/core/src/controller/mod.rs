@@ -11,6 +11,7 @@ pub mod api;
 pub mod host;
 mod input;
 mod lifecycle;
+mod charge_lifecycle;
 mod movement;
 mod native_aim;
 pub mod snapshot;
@@ -97,6 +98,7 @@ pub struct SkillVariant {
     pub active: i32,
     pub cast_locked: Option<bool>,
     pub state_forbidden: Option<bool>,
+    pub charge_skill: Option<bool>,
 }
 #[derive(Clone, Copy)]
 pub(crate) struct KaguraThrowTransition {
@@ -182,6 +184,7 @@ pub struct Controller {
     pub(crate) skillExpectedAim_: bool,
     pub(crate) skillActivationObserved_: bool,
     pub(crate) skillStateForbiddenAtDown_: bool,
+    pub(crate) chargeGesture_: Option<charge_lifecycle::ChargeGesture>,
     pub(crate) pendingRelease_: bool,
     pub(crate) pendingWorldValid_: bool,
     pub(crate) movementReady_: bool,

@@ -154,6 +154,7 @@ pub struct Variant {
     pub active_skill_id: Number,
     pub cast_locked: Flag,
     pub state_forbidden: Flag,
+    pub charge_skill: Flag,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -283,6 +284,7 @@ pub struct Frame {
     pub ready: Flag,
     pub hero_id: Number,
     pub time_ns: Number,
+    pub game_clock_ms: Number,
     pub sample_duration_ms: Number,
     pub skill_id: Number,
     pub token: Text,

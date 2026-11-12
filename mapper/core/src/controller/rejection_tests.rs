@@ -107,6 +107,7 @@ fn frame(now: i64, skill: Skill, forbidden: Option<bool>) -> snapshot::Frame {
     f.skill_state.buttons[0] = snapshot::Variant {
         slot: text(skill.slot), base_skill_id: n(skill.base as f64), active_skill_id: n(skill.form as f64),
         cast_locked: flag(false), state_forbidden: forbidden.map(flag).unwrap_or_default(),
+        charge_skill: snapshot::Flag::default(),
     };
     f
 }

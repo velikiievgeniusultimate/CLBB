@@ -106,6 +106,7 @@ impl Encode for s::Variant {
         out.insert("active_skill_id".into(), self.active_skill_id.encode());
         out.insert("cast_locked".into(), self.cast_locked.encode());
         out.insert("state_forbidden".into(), self.state_forbidden.encode());
+        out.insert("charge_skill".into(), self.charge_skill.encode());
         Value::Object(out)
     }
 }
@@ -300,6 +301,7 @@ impl Encode for s::Frame {
         out.insert("ready".into(), self.ready.encode());
         out.insert("hero_id".into(), self.hero_id.encode());
         out.insert("time_ns".into(), self.time_ns.encode());
+        out.insert("game_clock_ms".into(), self.game_clock_ms.encode());
         out.insert(
             "sample_duration_ms".into(),
             self.sample_duration_ms.encode(),
@@ -376,6 +378,7 @@ impl Encode for clbb_moba_core::controller::view::VariantView {
         out.insert("base".into(), self.base.encode());
         out.insert("active".into(), self.active.encode());
         out.insert("state_forbidden".into(), self.state_forbidden.encode());
+        out.insert("charge_skill".into(), self.charge_skill.encode());
         Value::Object(out)
     }
 }
@@ -462,6 +465,12 @@ impl Encode for clbb_moba_core::controller::view::View {
         out.insert("skillExpectedAim_".into(), self.skillExpectedAim_.encode());
         out.insert("skillActivationObserved_".into(), self.skillActivationObserved_.encode());
         out.insert("skillStateForbiddenAtDown_".into(), self.skillStateForbiddenAtDown_.encode());
+        out.insert("chargeStage_".into(), self.chargeStage_.encode());
+        out.insert("chargeBase_".into(), self.chargeBase_.encode());
+        out.insert("chargeFuture_".into(), self.chargeFuture_.encode());
+        out.insert("chargeEndClock_".into(), self.chargeEndClock_.encode());
+        out.insert("chargeEndSampleNs_".into(), self.chargeEndSampleNs_.encode());
+        out.insert("chargeLastSampleNs_".into(), self.chargeLastSampleNs_.encode());
         out.insert("pendingRelease_".into(), self.pendingRelease_.encode());
         out.insert(
             "pendingWorldValid_".into(),
@@ -750,6 +759,37 @@ impl Encode for clbb_moba_core::controller::view::View {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn charge_clock_and_lifecycle_recordings_survive_json_roundtrip_without_losing_unknowns() {
+        let mut frame=s::Frame::default();
+        assert_eq!(frame.encode()["game_clock_ms"]["kind"],0);
+        frame.game_clock_ms=s::Number {value:u32::MAX as f64,kind:1};
+        frame.skill_state.count=1;
+        for value in [-1,0,1] {
+            frame.skill_state.buttons[0].charge_skill.value=value;
+            let encoded=frame.encode();let raw=serde_json::to_vec(&encoded).unwrap();
+            let row:Value=serde_json::from_slice(&raw).unwrap();
+            assert_eq!(row,encoded);
+            assert_eq!(row["game_clock_ms"]["kind"],1);
+            assert_eq!(row["game_clock_ms"]["value"],json!(u32::MAX as f64));
+            assert_eq!(row["skill_state"]["buttons"][0]["charge_skill"]["value"],value);
+            let mut variant=clbb_moba_core::controller::view::VariantView::default();
+            variant.charge_skill.value=value;
+            assert_eq!(variant.encode()["charge_skill"]["value"],value);
+        }
+        let mut view=clbb_moba_core::controller::view::View::default();
+        assert_eq!(view.encode()["chargeEndClock_"]["kind"],0);
+        view.chargeStage_=2;view.chargeBase_=1_013_110;view.chargeFuture_=2_013_110;
+        view.chargeEndClock_=s::Number {value:u32::MAX as f64,kind:1};
+        view.chargeEndSampleNs_=9_007_199_254_740_993;view.chargeLastSampleNs_=9_007_199_254_740_999;
+        let encoded=view.encode();let raw=serde_json::to_vec(&encoded).unwrap();
+        let row:Value=serde_json::from_slice(&raw).unwrap();
+        assert_eq!(row,encoded);assert_eq!(row["chargeStage_"],2);
+        assert_eq!(row["chargeBase_"],1_013_110);assert_eq!(row["chargeFuture_"],2_013_110);
+        assert_eq!(row["chargeEndClock_"]["kind"],1);
+        assert_eq!(row["chargeEndSampleNs_"].as_i64(),Some(9_007_199_254_740_993));
+        assert_eq!(row["chargeLastSampleNs_"].as_i64(),Some(9_007_199_254_740_999));
+    }
     #[test]
     fn state_forbidden_recording_preserves_unknown_false_and_true() {
         for value in [-1, 0, 1] {

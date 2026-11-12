@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Bounded read-only watch of one current owned hero's native skill indicator.
 //! READY is flushed before watching so a separate owner can supply test input.
-use clbb_mapper::{aim::MotionPlan, platform::{Memory, linux::{ProcessMemory, now_ns}},
+use clbb_mapper::{aim::MotionPlan, flight_schema::Encode, platform::{Memory, linux::{ProcessMemory, now_ns}},
     reflection::{Reflection, u64_at}, source::{Source, Checks, capture, check}};
 use serde_json::{Value, json};
 use std::{fs::{self, OpenOptions}, io::{self, Write, BufWriter}, path::{Path, PathBuf},
@@ -142,6 +142,8 @@ fn main()->Result<(),String> {
                         "valid_drag":frame.frame.logical.valid_drag.get(),"first_drag":frame.frame.logical.first_drag.get(),
                         "native_source":frame.frame.logical.source.as_str(),"aim_world":frame.aim,"types":frame.control_types,
                         "control_holds":frame.control_holds,"cast_receipt":cast_receipt,
+                        "cancel_state":frame.frame.cancel_state.encode(),
+                        "cancel_uv":frame.frame.ui.cancel_uv.values.map(|v|v.value),"cancel_uv_valid":frame.frame.ui.cancel_uv.valid(),
                         "world_range":{"value":frame.frame.logical.world_range.value,"kind":frame.frame.logical.world_range.kind},
                         "world_range_source":frame.frame.logical.world_range_source.as_str(),
                         "world_range_source_present":frame.frame.logical.world_range_source_present.get(),

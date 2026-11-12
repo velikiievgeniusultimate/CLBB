@@ -304,6 +304,7 @@ impl Controller {
         if self.acceptedInput_ || self.directionAccepted_ {
             self.skillActivationObserved_ = true;
         }
+        self.observe_charge_gesture(host, f);
         self.sample_skill_cancel(host, f);
         self.tick(host);
     }

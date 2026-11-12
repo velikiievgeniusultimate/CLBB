@@ -71,7 +71,7 @@ fn movement_driven_template(motion:&str,package:&str,rect:i32,params:&[f64])->bo
 }
 fn fixed_part_direction_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
     motion=="IndicatorMotionRot" && package=="IndicatorPackage_JianTou_OtherFixedPart"
-        && rect==11 && params.len()>=2 && params[0]==15.
+        && matches!(rect,0|11) && params.len()>=2 && params[0]==15.
         && params[1].is_finite() && params[1]>0. && params[1]<1e4
 }
 fn native_range_shape(motion:&str,package:&str)->Option<f64> {
@@ -1191,15 +1191,16 @@ mod tests {
     fn fixed_part_direction_requires_exact_pair_and_native_shape() {
         let m="IndicatorMotionRot";let p="IndicatorPackage_JianTou_OtherFixedPart";
         assert!(fixed_part_direction_template(m,p,11,&[15.,3.4]));
+        assert!(fixed_part_direction_template(m,p,0,&[15.,3.8]));
         assert!(fixed_part_direction_template(m,p,11,&[15.,7.5,12658.]));
         for params in [&[2.,3.4][..],&[15.,0.][..],&[15.,-1.][..],&[15.,1e4][..],
                        &[15.,f64::NAN][..],&[15.,f64::INFINITY][..],&[f64::NAN,3.4][..],&[15.][..],&[][..]] {
-            assert!(!fixed_part_direction_template(m,p,11,params));
+            for rect in [0,11] {assert!(!fixed_part_direction_template(m,p,rect,params));}
         }
         assert!(!fixed_part_direction_template("IndicatorMotionPos",p,11,&[15.,3.4]));
         assert!(!fixed_part_direction_template("Unknown",p,11,&[15.,3.4]));
         assert!(!fixed_part_direction_template(m,"IndicatorPackageEasy_JianTou",11,&[15.,3.4]));
-        assert!(!fixed_part_direction_template(m,p,0,&[15.,3.4]));
+        for rect in [-1,1,2,10,12] {assert!(!fixed_part_direction_template(m,p,rect,&[15.,3.4]));}
         // No broad Rot/package allowlist entry: both discovery paths must go
         // through the same typed, owner-checked configuration contract.
         assert_eq!(native_template(m,p),None);

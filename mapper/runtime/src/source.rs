@@ -614,6 +614,7 @@ impl UiPlan {
                     active_skill_id: number(variant as f64),
                     cast_locked,
                     state_forbidden,
+                    charge_skill: s::Flag::default(),
                 };
                 variants.count += 1;
             }
@@ -1111,7 +1112,7 @@ impl<M: Memory> Source<M> {
             clock,
         );
         let token = format!("{}:{}", self.token, epoch);
-        let (ui, skill_state, cancel_state) =
+        let (ui, mut skill_state, cancel_state) =
             plan.ui
                 .sample(r, hero, &token, now, size, clock, &mut consumed)?;
         if plan.ui.linked.as_ref().is_some_and(|p|p.validate(r).is_err()) {plan.ui.linked=None;plan.ui.linked_retry=0;}
@@ -1137,6 +1138,12 @@ impl<M: Memory> Source<M> {
             if let Some(value) = button.charge.as_ref().and_then(|charge| charge.sample(r, &mut consumed)) {
                 control_holds.insert(button.slot.clone(), value);
             }
+        }
+        // Charge flags share the same owner-fenced bracket as the local
+        // skill variants. Missing/contradictory native flags remain unknown.
+        for variant in skill_state.buttons.iter_mut().take(skill_state.count.min(32) as usize) {
+            variant.charge_skill = control_holds.get(variant.slot.as_str())
+                .copied().map(flag).unwrap_or_default();
         }
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill" || b.kind.as_str()=="extra") {
             let id=skill_state.buttons.iter().take(skill_state.count.min(32) as usize)
@@ -1174,6 +1181,7 @@ impl<M: Memory> Source<M> {
             hero_id: number(hero as f64),
             time_ns: number(now as f64),
             sample_duration_ms: number(0.),
+            game_clock_ms: number(clock as f64),
             skill_id: number(skill as f64),
             token: text(&token),
             token_nonempty: flag(true),

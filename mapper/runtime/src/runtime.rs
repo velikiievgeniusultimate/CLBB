@@ -303,6 +303,26 @@ fn timer_index(timer: Timer) -> usize {
         Timer::Auxiliary => 4,
     }
 }
+fn primary_cancel_wait_over_100ms(view: &clbb_moba_core::controller::view::View, now: i64) -> bool {
+    view.skillCancelPending_ != 0 && view.skillCancelSentNs_ > 0
+        && now - view.skillCancelSentNs_ > 100_000_000
+}
+fn core_decision_diagnostics(v:&clbb_moba_core::controller::view::View,event:&str,reason:&str)->serde_json::Value {
+    let mut value=serde_json::json!({"event":event,"reason":reason,"skill":v.coreSkill_,"touch":v.skillTouch_,"key":v.skillKey_,"key_held":v.skillKeyHeld_,"cast_mode":v.skillCastMode_,"cast_start_ns":v.castStartedNs_,"touch_sequence":v.touchSequence_,"pending_release":v.pendingRelease_,"direction_goal_seq":v.directionGoalSequence_,"direction_matched_seq":v.directionMatchedSequence_,"observed_skill":v.observedSkillId_});
+    // Capture transition proof synchronously, before finish/reset can clear it.
+    // Keep high-frequency ordinary input decisions at their existing size.
+    if matches!(event,"charge_transition"|"charge_tracking_revoked") || (event=="release"&&reason=="auto_completed") {
+        use crate::flight_schema::Encode;
+        let object=value.as_object_mut().unwrap();
+        object.insert("charge_stage".into(),v.chargeStage_.encode());
+        object.insert("charge_base".into(),v.chargeBase_.encode());
+        object.insert("charge_future".into(),v.chargeFuture_.encode());
+        object.insert("charge_end_clock".into(),v.chargeEndClock_.encode());
+        object.insert("charge_end_sample_ns".into(),v.chargeEndSampleNs_.encode());
+        object.insert("charge_last_sample_ns".into(),v.chargeLastSampleNs_.encode());
+    }
+    value
+}
 impl Host for Adapter {
     fn clock_ns(&mut self) -> Option<i64> {
         Some(now_ns())
@@ -429,7 +449,7 @@ impl Host for Adapter {
             if !repeated {
                 if event=="direction_feedback_rejected"{self.last_feedback_trace=Some((reason.into(),now));}
                 let v=state.inspect();
-                self.recorder.push(now,"core_decision",serde_json::json!({"event":event,"reason":reason,"skill":v.coreSkill_,"touch":v.skillTouch_,"key":v.skillKey_,"key_held":v.skillKeyHeld_,"cast_mode":v.skillCastMode_,"cast_start_ns":v.castStartedNs_,"touch_sequence":v.touchSequence_,"pending_release":v.pendingRelease_,"direction_goal_seq":v.directionGoalSequence_,"direction_matched_seq":v.directionMatchedSequence_,"observed_skill":v.observedSkillId_}));
+                self.recorder.push(now,"core_decision",core_decision_diagnostics(&v,event,reason));
             }
         }
         if self.trace {
@@ -636,6 +656,38 @@ impl Runtime {
         self.gestures.poll(&mut self.host,sample.as_ref().map(|s|s.frame.token.as_str()).unwrap_or(""),sample.as_ref().and_then(|s|s.linked.as_ref()),sample.as_ref().map(|s|s.frame.skill_id.int()).unwrap_or(0),sample.as_ref().map(|s|s.frame.skill_state.sample_start_ns.value as i64).unwrap_or(0),now,cancel_feedback);
         self.debug_observe();
     }
+    fn cancel_diagnostics(&self, view: &clbb_moba_core::controller::view::View) -> serde_json::Value {
+        use crate::flight_schema::Encode;
+        let now=now_ns();let sample=self.host.sample.as_ref();let fresh=self.host.fresh();
+        let native=fresh.map(|sample|&sample.frame.cancel_state);
+        let native_fresh=native.is_some_and(|state| {
+            let start=state.sample_start_ns.get(-1.);let end=state.sample_end_ns.get(-1.);
+            state.sample_start_ns.is_number()&&state.sample_end_ns.is_number()
+                &&start.is_finite()&&end.is_finite()&&start>=0.&&end>=start
+                &&end-start<=100e6&&end<=now as f64+10e6&&now as f64-end<=100e6
+        });
+        let native_owner_matches=native.is_some_and(|state| {
+            state.hero_id.int()==view.heroId_&&!view.frameEpoch_.as_str().is_empty()
+                &&state.token.as_str()==view.frameEpoch_.as_str()
+        });
+        serde_json::json!({
+            "available":fresh.is_some(),"now_ns":now,"hero":view.heroId_,"epoch":view.frameEpoch_.as_str(),
+            "source":{"present":sample.is_some(),"fresh":fresh.is_some(),
+                "sample_start_ns":sample.map(|sample|sample.frame.time_ns.value-sample.frame.sample_duration_ms.value*1e6),
+                "sample_end_ns":sample.map(|sample|sample.frame.time_ns.value),
+                "age_ms":sample.map(|sample|(now as f64-sample.frame.time_ns.value)/1e6),
+                "clock_ms":sample.map(|sample|sample.game_clock_ms)},
+            "native":native.map(Encode::encode),"native_fresh":native_fresh,"native_owner_matches":native_owner_matches,
+            "native_slot_matches":native.is_some_and(|state|!view.activeSlot_.as_str().is_empty()&&state.slot.as_str()==view.activeSlot_.as_str()),
+            "cancel_uv":fresh.map(|sample|sample.frame.ui.cancel_uv.encode()),
+            "cancel_uv_valid":fresh.is_some_and(|sample|sample.frame.ui.cancel_uv.valid()),
+            "controller":{"pending":view.skillCancelPending_!=0,"sent_ns":view.skillCancelSentNs_,
+                "acknowledged":view.skillCancelAcknowledged_!=0,"touch":view.skillTouch_,"key":view.skillKey_,
+                "slot":view.activeSlot_.as_str(),"skill":view.coreSkill_,"cast_start_ns":view.castStartedNs_,
+                "sent_age_ms":(view.skillCancelSentNs_>0).then(||(now-view.skillCancelSentNs_)as f64/1e6),
+                "cancel_point_ready":view.cancelReady_!=0,"cancel_point":[view.cancelPoint_.x,view.cancelPoint_.y]}
+        })
+    }
     fn input_diagnostics(&self, view: &clbb_moba_core::controller::view::View) -> serde_json::Value {
         let hero=view.heroId_;
         serde_json::json!({"hero":hero,"ready":view.ready_,"enabled":view.enabled_,"skill":view.coreSkill_,"touch":view.skillTouch_,"aim":view.aimReady_,"pending_release":view.pendingRelease_,"logical":view.logicalMode_,"source":view.logicalSource_.as_str(),"pointer":[view.pointer_.x,view.pointer_.y],"status":view.status_.as_str(),"navigation":view.navigationAvailable_,"reason":view.inputReason_.as_str(),"accepted":view.acceptedInput_,"raw":[view.traceRaw_.x,view.traceRaw_.y],"decoded":[view.traceDecoded_.x,view.traceDecoded_.y],"sent":[view.skillPoint_.x,view.skillPoint_.y],"direct":view.directGeometryFresh_,"pending_seq":view.pendingGoalSequence_,"matched_seq":view.traceMatchedSequence_,"source_aim":self.host.sample.as_ref().is_some_and(|s|s.aim.is_some()),"epoch":view.frameEpoch_.as_str(),"plan_revision":self.host.sample.as_ref().map(|s|s.plan_revision).unwrap_or(0),"direction_accepted":view.directionAccepted_,"direction_fresh":view.directionGeometryFresh_,"direction_matched_seq":view.directionMatchedSequence_,"movement_touch":view.movementTouch_,"movement_held":view.movementHeld_,"movement_pressed":view.movementPressed_,"movement_ready":view.movementReady_,"movement_status":view.movementStatus_.as_str()})
@@ -671,7 +723,7 @@ impl Runtime {
                     "pending_world_valid":view.pendingWorldValid_,"pending_world":[view.pendingWorld_.x,view.pendingWorld_.y],
                     "desired_valid":view.traceDesiredValid_,"desired":[view.traceDesired_.x,view.traceDesired_.y],
                     "pending_time_ns":view.pendingGoalTime_,
-                    "matched_seq":view.traceMatchedSequence_,"q_arming":view.qDragArming_,"q_recomputed":view.qDragRecomputeUsed_,
+                    "matched_seq":view.traceMatchedSequence_,"sent_seq":view.touchSequence_,"q_arming":view.qDragArming_,"q_recomputed":view.qDragRecomputeUsed_,
                     "range":view.direct.world_range,"center":[view.joystickCenter_.x,view.joystickCenter_.y],
                     "radius":[view.joystickRadius_.x,view.joystickRadius_.y],
                     "skill":view.coreSkill_,"touch":view.skillTouch_,"pending_release":view.pendingRelease_,
@@ -703,6 +755,7 @@ impl Runtime {
             let zero_native=self.host.sample.as_ref().is_some_and(|sample|sample.frame.direction_input.ready.get() && sample.frame.direction_input.raw_touch_xyz.values.iter().all(|v|v.value==0.));
             let reason=if v.skillTouch_>=0 && v.castStartedNs_>0 && now-v.castStartedNs_>50_000_000 && v.directionGeometryFresh_!=0 && v.directionAccepted_==0 && zero_native {Some("active_native_touch_zero_over_50ms")}
                 else if self.debug_pending_since!=0 && now-self.debug_pending_since>100_000_000 {Some("release_wait_over_100ms")}
+                else if primary_cancel_wait_over_100ms(&v,now) {Some("primary_cancel_wait_over_100ms")}
                 else if self.gestures.active.iter().any(|g|g.cancel_requested_ns.is_some_and(|t|now-t>100_000_000)) {Some("linked_cancel_wait_over_100ms")}
                 else if v.skillTouch_>=0 && now-v.lastFrameNs_>100_000_000 {Some("active_source_stale_over_100ms")}
                 else if self.debug_mismatch_since!=0 && now-self.debug_mismatch_since>150_000_000 {Some("sustained_aim_discrepancy")}
@@ -801,6 +854,14 @@ impl Runtime {
             "status"|"diagnostics.status"=>if !self.error.is_empty(){self.error.clone()}else if !self.host.settings.boolean("enabled",0){"Управление CLBB выключено".into()}else if self.host.fresh().is_none(){"Ожидаю матч и кнопки героя".into()}else if self.suspended{"Профиль готов · управление приостановлено".into()}else{view.status_.owned()},
             "diagnostics.input"=>self.input_diagnostics(&view).to_string(),
             "diagnostics.aim"=>self.aim_diagnostics(&view).to_string(),
+            "diagnostics.cancel"=>self.cancel_diagnostics(&view).to_string(),
+            "diagnostics.native_frame"=>self.host.fresh().map(|sample| {
+                use crate::flight_schema::Encode;
+                serde_json::json!({"fresh":true,"frame":sample.frame.encode(),
+                    "hero":sample.frame.hero_id.int(),"epoch":sample.frame.token.as_str(),
+                    "game_clock_ms":sample.game_clock_ms,"plan_revision":sample.plan_revision,
+                    "control_holds":sample.control_holds,"types":sample.control_types}).to_string()
+            }).unwrap_or_else(||"{\"fresh\":false}".into()),
             "diagnostics.cast_lock" => self.host.fresh().map(|sample| {
                 let state = &sample.frame.skill_state;
                 let buttons: Vec<_> = state.buttons.iter().take(state.count as usize).map(|button| {
@@ -1177,6 +1238,107 @@ mod tests {
         let pointer = runtime.read("diagnostics.controls");
         let stale: serde_json::Value = serde_json::from_str(unsafe { CStr::from_ptr(pointer) }.to_str().unwrap()).unwrap();
         assert_eq!(stale, serde_json::json!({"ready": false}));
+    }
+    #[test]
+    fn native_frame_diagnostic_uses_full_typed_source_only_while_fresh() {
+        let mut events=Vec::new();let mut runtime=fixture(&mut events);
+        let mut sample=template_sample(30,3,now_ns());
+        sample.game_clock_ms=42;sample.frame.game_clock_ms=crate::source::number(42.);
+        sample.control_holds.insert("skill:2".into(),true);
+        runtime.host.sample=Some(Arc::new(sample));
+        let pointer=runtime.read("diagnostics.native_frame");
+        let current:serde_json::Value=serde_json::from_str(unsafe{CStr::from_ptr(pointer)}.to_str().unwrap()).unwrap();
+        assert_eq!(current["fresh"],true);assert_eq!(current["hero"],30);
+        assert_eq!(current["game_clock_ms"],42);assert_eq!(current["frame"]["game_clock_ms"]["value"],42.);
+        assert_eq!(current["frame"]["cancel_state"]["cancelled"]["value"],-1);
+        assert_eq!(current["frame"]["ui"]["buttons"][0]["slot"]["value"],"skill:2");
+        assert_eq!(current["control_holds"]["skill:2"],true);assert_eq!(current["types"]["skill:2"],3);
+        runtime.host.sample=Some(Arc::new(template_sample(30,3,now_ns()-500_000_000)));
+        let pointer=runtime.read("diagnostics.native_frame");
+        let stale:serde_json::Value=serde_json::from_str(unsafe{CStr::from_ptr(pointer)}.to_str().unwrap()).unwrap();
+        assert_eq!(stale,serde_json::json!({"fresh":false}));
+    }
+    #[test]
+    fn aim_diagnostics_report_exact_sent_command_sequence_without_mutating_state() {
+        let mut events=Vec::new();let runtime=fixture(&mut events);
+        let mut view=clbb_moba_core::controller::view::View::default();
+        view.touchSequence_=u64::MAX;view.traceMatchedSequence_=7;view.traceSampleStart_=9_007_199_254_740_993;
+        let current=runtime.aim_diagnostics(&view);
+        assert_eq!(current["sent_seq"].as_u64(),Some(u64::MAX));
+        assert_eq!(current["matched_seq"],7);
+        assert_eq!(current["logical_start_ns"].as_i64(),Some(9_007_199_254_740_993));
+        assert_eq!(view.touchSequence_,u64::MAX);
+    }
+    #[test]
+    fn charge_decisions_keep_transient_proof_without_expanding_ordinary_input_rows() {
+        let mut view=clbb_moba_core::controller::view::View::default();
+        view.chargeStage_=6;view.chargeBase_=12620;view.chargeFuture_=12621;
+        view.chargeEndClock_=crate::source::number(u32::MAX as f64);
+        view.chargeEndSampleNs_=9_007_199_254_740_993;view.chargeLastSampleNs_=9_007_199_254_740_999;
+        for (event,reason) in [("charge_transition","native_form_cycle_and_two_empty_game_ticks"),
+            ("charge_tracking_revoked","charge_owner_or_policy_changed"),("release","auto_completed")] {
+            let row=core_decision_diagnostics(&view,event,reason);
+            assert_eq!(row["event"],event);assert_eq!(row["charge_stage"],6);
+            assert_eq!(row["charge_base"],12620);assert_eq!(row["charge_future"],12621);
+            assert_eq!(row["charge_end_clock"]["kind"],1);
+            assert_eq!(row["charge_end_clock"]["value"],u32::MAX as f64);
+            assert_eq!(row["charge_end_sample_ns"].as_i64(),Some(9_007_199_254_740_993));
+            assert_eq!(row["charge_last_sample_ns"].as_i64(),Some(9_007_199_254_740_999));
+        }
+        for (event,reason) in [("pointer_flush","latest_value"),("release","cast")] {
+            assert!(core_decision_diagnostics(&view,event,reason).get("charge_stage").is_none());
+        }
+        view.chargeEndClock_=Default::default();
+        assert_eq!(core_decision_diagnostics(&view,"charge_tracking_revoked","unavailable")["charge_end_clock"]["kind"],0);
+    }
+    #[test]
+    fn cancel_diagnostics_keep_source_native_clock_owner_and_controller_flags_independent() {
+        use crate::source::{flag,number,text,v2};
+        let mut events=Vec::new();let mut runtime=fixture(&mut events);let at=now_ns();
+        let mut sample=template_sample(30,2,at);
+        sample.frame.ui.cancel_uv=v2([0.9,0.2]);
+        sample.frame.cancel_state=clbb_moba_core::controller::snapshot::CancelState {
+            ready:flag(true),coherent:flag(true),source:text("UIKeySkill.bCancelSkill"),
+            token:sample.frame.token,hero_id:number(30.),slot:text("skill:1"),base_skill_id:number(3020.),
+            cancelled:flag(true),sample_start_ns:number((at-2_000_000)as f64),sample_end_ns:number((at-1_000_000)as f64),
+        };
+        let mut view=clbb_moba_core::controller::view::View::default();
+        view.heroId_=30;view.frameEpoch_=sample.frame.token;view.activeSlot_=text("skill:1");
+        view.skillCancelPending_=1;view.skillCancelSentNs_=at-120_000_000;view.skillTouch_=2;view.skillKey_=87;
+        runtime.host.sample=Some(Arc::new(sample.clone()));
+        let current=runtime.cancel_diagnostics(&view);
+        assert_eq!(current["available"],true);assert_eq!(current["source"]["fresh"],true);
+        assert_eq!(current["native_fresh"],true);assert_eq!(current["native_owner_matches"],true);
+        assert_eq!(current["native_slot_matches"],true);assert_eq!(current["native"]["cancelled"]["value"],1);
+        assert_eq!(current["native"]["source"]["value"],"UIKeySkill.bCancelSkill");
+        assert_eq!(current["controller"]["pending"],true);assert_eq!(current["controller"]["acknowledged"],false);
+        assert_eq!(current["cancel_uv_valid"],true);
+        sample.frame.cancel_state.sample_start_ns=number((at-151_000_000)as f64);
+        sample.frame.cancel_state.sample_end_ns=number((at-150_000_000)as f64);
+        runtime.host.sample=Some(Arc::new(sample.clone()));
+        let stale_native=runtime.cancel_diagnostics(&view);
+        assert_eq!(stale_native["source"]["fresh"],true);assert_eq!(stale_native["native_fresh"],false);
+        sample.frame.cancel_state.sample_start_ns=number((at-2_000_000)as f64);
+        sample.frame.cancel_state.sample_end_ns=number((at-1_000_000)as f64);
+        sample.frame.cancel_state.token=text("other-match");runtime.host.sample=Some(Arc::new(sample.clone()));
+        let foreign=runtime.cancel_diagnostics(&view);
+        assert_eq!(foreign["native_fresh"],true);assert_eq!(foreign["native_owner_matches"],false);
+        sample.frame.time_ns=number((at-500_000_000)as f64);runtime.host.sample=Some(Arc::new(sample));
+        let stale_source=runtime.cancel_diagnostics(&view);
+        assert_eq!(stale_source["available"],false);assert_eq!(stale_source["source"]["present"],true);
+        assert_eq!(stale_source["source"]["fresh"],false);assert!(stale_source["native"].is_null());
+        assert_eq!(stale_source["native_fresh"],false);assert_eq!(stale_source["controller"]["pending"],true);
+    }
+    #[test]
+    fn primary_cancel_wait_mark_requires_a_sent_move_and_more_than_100ms() {
+        let mut view=clbb_moba_core::controller::view::View::default();let sent=1_000_000_000;
+        view.skillCancelPending_=1;
+        assert!(!primary_cancel_wait_over_100ms(&view,sent+200_000_000));
+        view.skillCancelSentNs_=sent;
+        assert!(!primary_cancel_wait_over_100ms(&view,sent+100_000_000));
+        assert!(primary_cancel_wait_over_100ms(&view,sent+100_000_001));
+        view.skillCancelPending_=0;
+        assert!(!primary_cancel_wait_over_100ms(&view,sent+200_000_000));
     }
     #[test]
     fn resetting_an_unknown_cancel_contact_cancels_the_native_context_without_casting() {

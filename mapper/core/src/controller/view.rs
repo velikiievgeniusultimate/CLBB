@@ -48,6 +48,7 @@ pub struct VariantView {
     pub base: i32,
     pub active: i32,
     pub state_forbidden: super::snapshot::Flag,
+    pub charge_skill: super::snapshot::Flag,
 }
 #[repr(C)]
 #[derive(Default)]
@@ -90,6 +91,13 @@ pub struct View {
     pub skillExpectedAim_: u8,
     pub skillActivationObserved_: u8,
     pub skillStateForbiddenAtDown_: u8,
+    // Derived read-only lifecycle evidence; not a request to mutate the proof.
+    pub chargeStage_: u8,
+    pub chargeBase_: i32,
+    pub chargeFuture_: i32,
+    pub chargeEndClock_: super::snapshot::Number,
+    pub chargeEndSampleNs_: i64,
+    pub chargeLastSampleNs_: i64,
     pub pendingRelease_: u8,
     pub pendingWorldValid_: u8,
     pub movementReady_: u8,
@@ -256,6 +264,9 @@ impl View {
                 state_forbidden: super::snapshot::Flag {
                     value: v.state_forbidden.map_or(-1, |value| value as i32),
                 },
+                charge_skill: super::snapshot::Flag {
+                    value: v.charge_skill.map_or(-1, |value| value as i32),
+                },
             }
         }
         Self {
@@ -297,6 +308,13 @@ impl View {
             skillExpectedAim_: s.skillExpectedAim_ as u8,
             skillActivationObserved_: s.skillActivationObserved_ as u8,
             skillStateForbiddenAtDown_: s.skillStateForbiddenAtDown_ as u8,
+            chargeStage_: s.chargeGesture_.as_ref().map_or(0, |v| v.stage),
+            chargeBase_: s.chargeGesture_.as_ref().map_or(0, |v| v.base),
+            chargeFuture_: s.chargeGesture_.as_ref().map_or(0, |v| v.future),
+            chargeEndClock_: s.chargeGesture_.as_ref().and_then(|v| v.end_clock)
+                .map_or_else(super::snapshot::Number::default, |v| super::snapshot::Number { kind: 1, value: v as f64 }),
+            chargeEndSampleNs_: s.chargeGesture_.as_ref().map_or(0, |v| v.end_sample_ns),
+            chargeLastSampleNs_: s.chargeGesture_.as_ref().map_or(0, |v| v.last_sample_ns),
             pendingRelease_: s.pendingRelease_ as u8,
             pendingWorldValid_: s.pendingWorldValid_ as u8,
             movementReady_: s.movementReady_ as u8,
