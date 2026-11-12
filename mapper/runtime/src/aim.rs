@@ -134,7 +134,7 @@ fn additional_direction_template(motion:&str,package:&str,rect:i32,params:&[f64]
     let shape=match package {
         "IndicatorPackage_TwoPartAndPos_Direction" if matches!(rect,1|2)=>11.,
         "IndicatorPackage_Multi_JianTou" if rect==0=>7.,
-        "IndicatorPackage_TwoPart_Direction" if matches!(rect,1|19)=>6.,
+        "IndicatorPackage_TwoPart_Direction" if matches!(rect,0|1|19)=>6.,
         _=>return false,
     };
     motion=="IndicatorMotionRot" && params.len()>=2 && params[0]==shape
@@ -1645,6 +1645,22 @@ mod tests {
             r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&shape.to_le_bytes());
             assert!(additional_direction_contract(&mut r,128,12710,m,package,&mut Vec::new()).unwrap());
         }
+    }
+    #[test]
+    fn flameshot_shared_direction_uses_owned_shape_without_range() {
+        let m="IndicatorMotionRot";let p="IndicatorPackage_TwoPart_Direction";
+        let mut r=additional_direction_fixture();
+        for(at,value)in [(1056,20140i32),(1060,0)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        for(at,value)in [(1568,6f32),(1572,16.)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        let mut checks=Vec::new();
+        assert!(additional_direction_contract(&mut r,128,20140,m,p,&mut checks).unwrap());
+        assert!(verified_direction_geometry(20140,m,p,true));
+        assert_eq!(native_range_shape(m,p),None);
+        assert!(!additional_direction_template(m,p,2,&[6.,16.]));
+        assert!(!additional_direction_template(m,p,0,&[11.,16.]));
+        r.memory.0.borrow_mut()[1056..1060].copy_from_slice(&20080i32.to_le_bytes());
+        assert!(check(&r,&checks).is_err());
+        assert!(additional_direction_contract(&mut r,128,20140,m,p,&mut Vec::new()).is_err());
     }
     #[test]
     fn verified_additional_direction_uses_unit_receipt_independent_of_ratio() {
