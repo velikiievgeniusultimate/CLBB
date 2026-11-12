@@ -992,12 +992,13 @@ impl Runtime {
             code
         };
         let hero=self.core.inspect().heroId_;
-        if key!=0 && self.host.conflicts.contains_key(&key) && down {
+        let active_match=self.core.inspect().ready_!=0 && self.host.fresh().is_some();
+        if active_match && key!=0 && self.host.conflicts.contains_key(&key) && down {
             self.debug_route_reason="conflicting_binding_disabled";
             return true;
         }
         let keyboard=self.host.settings.integer("hero.movement.click_mode",hero)==2;
-        if keyboard {
+        if keyboard && (active_match || !down) {
             for (direction,name) in ["up","down","left","right"].iter().enumerate() {
                 if key!=0 && key==self.host.settings.integer(&format!("hero.movement.{name}"),hero) {
                     self.debug_route_reason="keyboard_movement";
@@ -1428,6 +1429,19 @@ mod tests {
         assert_eq!(r.host.binding(25,&b,"skill:1").key,87);
         r.host.settings.set("hero.movement.down","65",25).unwrap();
         assert_eq!(r.host.binding_conflicts(25).get(&65).unwrap().len(),2);
+    }
+    #[test]
+    fn cached_match_conflicts_never_capture_menu_typing_after_source_is_lost() {
+        let mut events=Vec::new();let mut r=fixture(&mut events);
+        let mut sample=template_sample(25,2,now_ns());
+        sample.frame.ui.buttons[0].slot=crate::source::text("skill:1");
+        r.host.settings.set("movement.click_mode","2",0).unwrap();
+        r.worker.shared.lock().unwrap().sample=Some(Arc::new(sample));
+        r.poll(1280.,720.);
+        assert!(r.host.conflicts.contains_key(&87));
+        r.host.sample=None;
+        assert!(!r.event_inner(1,87,true,false,Point::default()));
+        assert!(events.is_empty());
     }
     #[test]
     fn known_multi_form_actions_expose_two_versions_inside_one_role() {
