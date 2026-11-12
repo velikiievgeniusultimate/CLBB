@@ -21,10 +21,6 @@ impl Controller {
                 self.finish_skill(host, true);
                 return;
             }
-            if self.abort_retribution_touch(host) {
-                self.finish_skill(host, true);
-                return;
-            }
             if self.skillCancelSentNs_ == 0 {
                 if let Some(point) = self.selection_cancel_point() {
                     if !self.send_skill_cancel_point(host, point) {

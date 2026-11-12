@@ -682,14 +682,12 @@ impl Controller {
             }
             self.trace(host, "release", if auto_completed { "auto_completed" } else if cancel { "cancel" }
                 else if self.skillBehavior_==SkillBehavior::Selection {"selection_up_after_ui_ack"} else { "cast" });
-            if !cancel || self.skillCancelAcknowledged_ || !self.abort_retribution_touch(host) {
-                if cancel && !self.skillCancelPending_ {
-                    if let Some(point) = self.selection_cancel_point() {
-                        self.move_skill(host, point, false);
-                    }
+            if cancel && !self.skillCancelPending_ {
+                if let Some(point) = self.selection_cancel_point() {
+                    self.move_skill(host, point, false);
                 }
-                host.end(self.skillTouch_, self.skillPoint_);
             }
+            host.end(self.skillTouch_, self.skillPoint_);
             self.sync_clock(host);
             self.lastSkillEndNs_ = self.now_;
             if self.heroId_ == 25 && self.activeSlot_ == "skill:0" {
@@ -747,10 +745,6 @@ impl Controller {
         self.skillStarted_.invalidate();
         self.skillMoved_.invalidate();
     }
-    pub(crate) fn abort_retribution_touch(&self, host: &mut impl Host) -> bool {
-        self.find_button(&self.activeSlot_).is_some_and(Self::is_retribution)
-            && host.cancel_touch(self.skillTouch_, self.skillPoint_)
-    }
     pub(crate) fn request_skill_cancel(&mut self, host: &mut impl Host) {
         // Aimed basic attacks have no native cancel gesture. Never enter the
         // cancel-ACK wait or move their contact onto a skill cancel button.
@@ -772,10 +766,8 @@ impl Controller {
         }
         self.pendingWorldResolver_ = 0;
         self.releaseRequested_.invalidate();
-        if self.abort_retribution_touch(host) {
-            self.finish_skill(host, true);
-            return;
-        }
+        // Retribution and Execute also require this native cancel gesture:
+        // ACTION_CANCEL on their touch can be interpreted as a normal cast.
         if let Some(point) = self.selection_cancel_point() {
             if !self.send_skill_cancel_point(host, point) {
                 if self.skillBehavior_ == SkillBehavior::Selection {

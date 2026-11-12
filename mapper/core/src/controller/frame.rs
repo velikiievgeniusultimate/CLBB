@@ -335,6 +335,7 @@ mod movement_continuity_tests {
         ended: Vec<i32>,
         moved: Vec<i32>,
         stop_on_w: bool,
+        cancel_calls: usize,
     }
     impl Host for TouchHost {
         fn begin(&mut self, p: Point) -> i32 {
@@ -355,6 +356,10 @@ mod movement_continuity_tests {
         fn end(&mut self, id: i32, _: Point) {
             self.active.remove(&id);
             self.ended.push(id);
+        }
+        fn cancel_touch(&mut self, id:i32, _:Point) -> bool {
+            self.cancel_calls+=1;
+            self.active.remove(&id).is_some()
         }
         fn pointer_world(&mut self, _: Point) -> Option<Point> {
             None
@@ -616,13 +621,44 @@ mod movement_continuity_tests {
             if h.active.is_empty() {
                 assert!(c.begin_skill(&mut h, &button));
             }
+            c.cancelReady_=true;c.cancelPoint_=Point::new(0.9,0.2);
+            let contact=c.skillTouch_;
             c.request_skill_cancel(&mut h);
+            assert_eq!(h.cancel_calls,0,"system CANCEL may cast Retribution; use the native cross");
+            assert_eq!(h.active.get(&contact),Some(&c.cancelPoint_));
             assert!(c.skillCancelPending_);
             assert!(c.handle_key(&mut h, button.key, false, false));
             assert!(!h.active.is_empty());
             c.skillCancelAcknowledged_ = true;
             c.tick(&mut h);
             assert!(h.active.is_empty());
+        }
+    }
+    #[test]
+    fn battle_spell_cancel_waits_for_owned_native_flag_without_cancelling_other_fingers() {
+        for spell in [20020,20150] {
+            let start=1_000_000_000;let mut c=Controller::new();let mut h=TouchHost::default();
+            c.apply_input(&mut h,api::Input::Enabled(true),start);
+            let mut f=fresh(start,true);f.ui.buttons[0].slot=text("extra:2");
+            f.ui.buttons[0].kind=text("extra");f.ui.buttons[0].skill_id=n(spell as f64);
+            c.apply_snapshot(&mut h,&f,start);
+            let mut b=c.find_button("extra:2").unwrap().clone();b.aimType=2;b.castMode=0;
+            let other=h.begin(Point::new(0.1,0.1));assert!(c.begin_skill(&mut h,&b));
+            let finger=c.skillTouch_;c.cancelReady_=true;c.cancelPoint_=Point::new(0.9,0.2);
+            c.request_skill_cancel(&mut h);let sent=c.skillCancelSentNs_;
+            assert!(sent>0);assert!(c.handle_key(&mut h,b.key,false,false));
+            assert!(h.active.contains_key(&finger));assert!(h.active.contains_key(&other));
+            for (delta,slot,done) in [(10_000_000,"skill:0",false),(20_000_000,"extra:2",true)] {
+                let now=start+delta;f.time_ns=n(now as f64);f.ui.time_ns=f.time_ns;
+                f.cancel_state=snapshot::CancelState {ready:flag(true),coherent:flag(true),
+                    source:text("UIKeySkill.bCancelSkill"),token:f.token,hero_id:f.hero_id,
+                    slot:text(slot),base_skill_id:n(spell as f64),cancelled:flag(true),
+                    sample_start_ns:n(now as f64-1.),sample_end_ns:n(now as f64)};
+                c.apply_snapshot(&mut h,&f,now);c.tick(&mut h);
+                assert_eq!(!h.active.contains_key(&finger),done);
+                assert!(h.active.contains_key(&other));assert_eq!(h.cancel_calls,0);
+            }
+            assert_eq!(c.skillTouch_,-1);assert!(!c.skillCancelPending_);
         }
     }
     fn w_lock_frame(now: i64, form: i32, locked: bool) -> snapshot::Frame {
