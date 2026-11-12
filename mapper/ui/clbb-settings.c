@@ -641,15 +641,7 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
   }
   if (personal) for (guint n=first;n<s->controls->len;++n) add_inheritance(g_ptr_array_index(s->controls,n));
 }
-static void action_card(ClbbSettings *s,const char *slot,const char *config,const char *mode_config,int skill,int type,GHashTable *expanded,gboolean cancel) {
-  char *title;
-  if (!strcmp(slot,"extra:2")) {
-    const char *name=battle_spell_name(skill);
-    title=name?g_strdup_printf("Боевой навык - %s",name):g_strdup_printf("Боевой навык - №%d",skill);
-  } else title=g_strdup(cancel?"Отмена навыка":action_title(slot,skill,config));
-  GtkWidget *content=section(s->hero_box,title);g_free(title);
-  GtkWidget *card=gtk_widget_get_parent(gtk_widget_get_parent(content));
-  g_object_set_data_full(G_OBJECT(card),"clbb-control-slot",g_strdup(config),g_free);
+static void action_body(ClbbSettings *s,GtkWidget *content,const char *slot,const char *config,const char *mode_config,int type,gboolean cancel) {
   GtkWidget *flow=gtk_flow_box_new();
   gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(flow),GTK_SELECTION_NONE);
   gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(flow),1);
@@ -659,6 +651,17 @@ static void action_card(ClbbSettings *s,const char *slot,const char *config,cons
   gtk_box_append(GTK_BOX(content),flow);
   action_scope(s,flow,"common",config,mode_config,slot,type,cancel);
   action_scope(s,flow,"hero",config,mode_config,slot,type,cancel);
+}
+static void action_card(ClbbSettings *s,const char *slot,const char *config,const char *mode_config,int skill,int type,GHashTable *expanded,gboolean cancel) {
+  char *title;
+  if (!strcmp(slot,"extra:2")) {
+    const char *name=battle_spell_name(skill);
+    title=name?g_strdup_printf("Боевой навык - %s",name):g_strdup_printf("Боевой навык - №%d",skill);
+  } else title=g_strdup(cancel?"Отмена навыка":action_title(slot,skill,config));
+  GtkWidget *content=section(s->hero_box,title);g_free(title);
+  GtkWidget *card=gtk_widget_get_parent(gtk_widget_get_parent(content));
+  g_object_set_data_full(G_OBJECT(card),"clbb-control-slot",g_strdup(config),g_free);
+  action_body(s,content,slot,config,mode_config,type,cancel);
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(card)),g_hash_table_contains(expanded,config));
 }
 static void movement_scope(ClbbSettings *s,GtkWidget *flow,gboolean personal) {
@@ -719,6 +722,7 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
   gboolean valid=hero>0&&strlen(layout)<=16384&&lines[0]&&!strcmp(lines[0],expected);
   s->active_profile=valid;
   gboolean any=FALSE,can_cancel=FALSE;
+  GtkWidget *attack_group=NULL;
   GHashTable *seen=g_hash_table_new_full(g_str_hash,g_str_equal,g_free,NULL);
   if (valid) for (guint n=1;lines[n];++n) {
     if (!*lines[n]) continue;
@@ -728,7 +732,16 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
         (!strcmp(v[1],v[2])||(!strcmp(v[0],"extra:2")&&atoi(v[3])==20080&&!strcmp(v[2],"extra:2:20080")))&&!g_hash_table_contains(seen,v[0])) {
       g_hash_table_add(seen,g_strdup(v[0]));
       int type=CLAMP(atoi(v[5]),0,4);any=TRUE;can_cancel|=type>=2||g_str_has_prefix(v[0],"combo:");
-      action_card(s,v[0],v[0],v[2],atoi(v[3]),type,expanded,FALSE);
+      if (g_str_has_prefix(v[0],"attack")) {
+        if (!attack_group) {
+          attack_group=section(s->hero_box,"Атака");
+          GtkWidget *card=gtk_widget_get_parent(gtk_widget_get_parent(attack_group));
+          g_object_set_data_full(G_OBJECT(card),"clbb-control-slot",g_strdup("attacks"),g_free);
+          gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(card)),g_hash_table_contains(expanded,"attacks"));
+        }
+        gtk_box_append(GTK_BOX(attack_group),label(action_title(v[0],atoi(v[3]),v[0]),"clbb-section-title"));
+        action_body(s,attack_group,v[0],v[0],v[2],type,FALSE);
+      } else action_card(s,v[0],v[0],v[2],atoi(v[3]),type,expanded,FALSE);
     }
     g_strfreev(v);
   }

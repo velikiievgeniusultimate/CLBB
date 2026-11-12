@@ -32,6 +32,7 @@ mod tests {
         fail_down: bool,
         attack_key: i32,
         attack_mode: i32,
+        attack_aim: u8,
         clock: Option<i64>,
         abort_ok: bool,
         abort_calls: usize,
@@ -71,7 +72,7 @@ mod tests {
         fn navigation(&mut self, _: Point, p: Point, _: bool) -> Result<Vec<Point>, String> { Ok(vec![p]) }
         fn binding(&mut self, _: i32, b: &Button, _: &str) -> Binding {
             Binding { key: if b.kind == "attack" { self.attack_key } else { 81 },
-                aim_type: 2, cast_mode: if b.kind == "attack" { self.attack_mode } else { 0 }, stop_movement: false }
+                aim_type: if b.kind=="attack" { self.attack_aim } else {2}, cast_mode: if b.kind == "attack" { self.attack_mode } else { 0 }, stop_movement: false }
         }
         fn cancel_key(&mut self, _: i32) -> i32 { 84 }
         fn timer(&mut self, _: Timer, _: Option<i64>) {}
@@ -253,6 +254,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn attack_aim_is_opt_in_and_mode_revocation_retires_only_the_skill_contact() {
+        let(mut c,mut h)=setup(Some(false));let movement=c.movementTouch_;
+        key(&mut c,&mut h,60,32,true);
+        assert_eq!(c.skillTouch_,-1);assert_eq!(c.auxiliaryTaps_.len(),1);
+        key(&mut c,&mut h,61,32,false);
+        h.attack_aim=3;send(&mut c,&mut h,frame(65,Some(false)));
+        key(&mut c,&mut h,66,32,true);
+        let aim=c.skillTouch_;assert!(aim>=0);assert!(c.auxiliaryTaps_.is_empty());
+        h.attack_aim=1;send(&mut c,&mut h,frame(70,Some(false)));
+        assert_eq!(c.skillTouch_,-1);assert!(!h.active.contains_key(&aim));assert!(h.active.contains_key(&movement));
+        let count=h.next;key(&mut c,&mut h,71,32,true);assert_eq!(h.next,count);
+        key(&mut c,&mut h,72,32,false);key(&mut c,&mut h,73,32,true);
+        assert_eq!(c.skillTouch_,-1);assert_eq!(c.auxiliaryTaps_.len(),1);
+    }
     #[test]
     fn keyboard_movement_is_immediate_diagonal_normalized_and_independent_of_pointer_and_skills() {
         let (mut c, mut h) = setup(Some(false));

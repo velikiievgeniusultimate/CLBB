@@ -29,3 +29,5 @@ pub mod updater;
 #[cfg(target_os = "linux")]
 pub mod audio;
 pub mod playback;
+
+mod attack;

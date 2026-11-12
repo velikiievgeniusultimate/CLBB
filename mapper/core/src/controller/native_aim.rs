@@ -11,9 +11,11 @@ use std::collections::BTreeSet;
 const NS100: f64 = 100_000_000.;
 const NS250: f64 = 250_000_000.;
 const POINT_SOURCE: &str = "IndicatorMotionPos.m_vDragResult";
-fn direct_source(source:&str)->bool { matches!(source,Q_SOURCE_A | Q_SOURCE_B | POINT_SOURCE) }
+fn direct_source(source:&str)->bool { matches!(source,Q_SOURCE_A | Q_SOURCE_B | POINT_SOURCE | ATTACK_SOURCE) }
 const Q_SOURCE_A: &str = "IndicatorMotionFaTiaoQiu2.m_vDragResult";
 const Q_SOURCE_B: &str = "IndicatorMotionRotAndPosRot.m_vDragResult";
+const ATTACK_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult";
+const ATTACK_RANGE_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio";
 const RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]";
 fn known_direction_source(hero:i32,skill:i32,source:&str)->bool {
     source=="IndicatorMotionRot.m_vDragResult" || (hero==84&&skill==8410&&source=="KeySkilleCheckMesh.currentDirect")
@@ -466,7 +468,8 @@ impl Controller {
     pub(crate) fn select_logical_coordinates(&mut self, host: &mut impl Host, frame: &Frame) {
         let logical = &frame.logical;
         let source = logical.source.as_str();
-        let known = direct_source(source);
+        let known = direct_source(source) && (source!=ATTACK_SOURCE
+            || self.activeSlot_=="attack" && self.find_button("attack").is_some_and(|b|b.kind=="attack"&&b.aimType==3));
         let frame_skill = frame.skill_id.int();
         let same_skill = self.skillTouch_ >= 0
             && self.frameActiveSlot_ == self.activeSlot_
@@ -637,7 +640,7 @@ impl Controller {
         }
         if native_q || witness_fields {
             if witness_fields {
-                if logical.world_range_source.as_str() != RANGE_SOURCE
+                if logical.world_range_source.as_str() != if self.logicalSource_==ATTACK_SOURCE {ATTACK_RANGE_SOURCE}else{RANGE_SOURCE}
                     || (!native_q && !logical.world_range_source_present.get())
                     || !logical.world_range.is_number()
                     || !logical.world_range.value.is_finite()
@@ -668,7 +671,7 @@ impl Controller {
                 self.trace(host, "direct_metadata_rejected", "await_native_configuration_range");
                 return;
             }
-            self.directRangeSource_ = RANGE_SOURCE.into();
+            self.directRangeSource_ = if self.logicalSource_==ATTACK_SOURCE {ATTACK_RANGE_SOURCE}else{RANGE_SOURCE}.into();
         } else {
             let observed = self.logicalObserved_.length();
             // A protected/first-drag sample may retain an older processed

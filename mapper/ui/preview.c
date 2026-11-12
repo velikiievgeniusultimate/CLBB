@@ -275,6 +275,10 @@ int main(int argc, char **argv) {
     g_assert_false(gtk_widget_get_sensitive(reset));
     put(&p,"common.bindings.skill:0.key","81");
     clbb_settings_refresh(s);
+    GtkWidget *attack_reveal=gtk_widget_get_ancestor(find_control(clbb_settings_panel(s),"hero.bindings.attack.key"),GTK_TYPE_REVEALER);
+    g_assert_nonnull(attack_reveal);
+    g_assert_true(attack_reveal==gtk_widget_get_ancestor(find_control(clbb_settings_panel(s),"hero.bindings.attack:minion.key"),GTK_TYPE_REVEALER));
+    g_assert_true(attack_reveal==gtk_widget_get_ancestor(find_control(clbb_settings_panel(s),"hero.bindings.attack:tower.key"),GTK_TYPE_REVEALER));
     // Keyboard controls are mirrored, editable and visible only in keyboard mode.
     GtkWidget *mode_row=find_control(clbb_settings_panel(s),"movement.click_mode");
     GtkWidget *mode=find_type(mode_row,GTK_TYPE_DROP_DOWN);

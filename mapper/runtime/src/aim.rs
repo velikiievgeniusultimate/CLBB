@@ -14,6 +14,7 @@ pub struct MotionPlan {
     pub name: String,
     motion: u64,
     direction_geometry: bool,
+    attack_geometry: bool,
     fields: HashMap<String, u64>,
     circle: Option<Path>,
     circle_field: Option<u64>,
@@ -671,7 +672,51 @@ impl MotionPlan {
         check(r,&checks)?;Ok((checks,kind))
     }
     pub fn discover<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -> Result<Self> {
-        let (mut checks,comp,motion,package,motion_class,package_class)=Self::registry_owner(r,indicator,skill)?;
+        let owner=Self::registry_owner(r,indicator,skill)?;
+        Self::discover_owned(r,skill,owner,false)
+    }
+    pub fn audit_attack_preview<M:Memory>(r:&mut Reflection<M>,indicator:u64,skill:i32,base:i32)->Result<serde_json::Value>{
+        let mut checks=Vec::new();
+        let circle=owner(r,indicator,"m_CircleComp",&mut checks)?;
+        let comp=owner(r,circle,"m_BaseComp",&mut checks)?;
+        let config=owner(r,comp,"m_Config",&mut checks)?;
+        let id=typed_field(r,config,"m_SkillID",8)?;
+        let configured=i32_at(&capture(r,&mut checks,id,4)?,0);
+        let shape=native_rect_config(r,comp,configured,&mut checks)?;
+        let plan=Self::discover_attack(r,indicator,skill,base).map_err(|e|format!("{e}; base={base}, active={skill}, configured={configured}, shape={shape:?}"))?;
+        Ok(serde_json::json!({"motion":plan.name,"configured_skill":configured,"drag_gate":plan.audit_drag_gate(r)?}))
+    }
+    pub(crate) fn discover_attack<M:Memory>(r:&mut Reflection<M>,indicator:u64,skill:i32,base:i32)->Result<Self>{
+        let(mut checks,default,_,_,_,_)=Self::registry_owner(r,indicator,skill)?;
+        let circle=owner(r,indicator,"m_CircleComp",&mut checks)?;
+        let comp=owner(r,circle,"m_BaseComp",&mut checks)?;
+        if owner(r,comp,"m_DefBaseComp",&mut checks)?!=default{return Err("Attack preview default owner mismatch".into());}
+        let motion=owner(r,comp,"m_MontionBase",&mut checks)?;
+        let package=owner(r,comp,"m_PackageBase",&mut checks)?;
+        let mc=r.class(r.pointer(motion)?)?;let pc=r.class(r.pointer(package)?)?;
+        if mc.name!="IndicatorMotionPosSelectAndRotATK"||pc.name!="IndicatorPackage_JianTou_Yuan_SameLengthWithRange" {return Err("Unsupported attack preview".into());}
+        for(object,c)in[(comp,r.pointer(comp)?),(motion,mc.address),(package,pc.address)]{checks.push((object,c.to_le_bytes().to_vec()));}
+        let flag_at=typed_field(r,motion,"bCommonAtk",2)?;
+        if capture(r,&mut checks,flag_at,1)?!=[1]{return Err("Preview is not a common attack".into());}
+        if base<=0||base>10_000_000{return Err("Invalid attack base binding".into());}
+        // The game overlays a shared selection skill (currently28910), not
+        // the actual damage skill. The reciprocal/default owners bind it to
+        // this current attack; equating those two IDs rejects valid previews.
+        let config=owner(r,comp,"m_Config",&mut checks)?;
+        let cc=r.class(r.pointer(config)?)?;
+        if cc.name!="CData_Skill_Element"{return Err("Attack selector configuration type".into());}
+        checks.push((config,cc.address.to_le_bytes().to_vec()));
+        let id_at=typed_field(r,config,"m_SkillID",8)?;
+        let configured=i32_at(&capture(r,&mut checks,id_at,4)?,0);
+        if configured<=0||configured>10_000_000{return Err("Invalid attack selector identity".into());}
+        let(rect,params)=native_rect_config(r,comp,configured,&mut checks)?;
+        if rect!=0||params[0]!=14.||!params[1].is_finite()||params[1]<=0. {return Err("Unsupported attack configuration".into());}
+        let config=owner(r,comp,"m_Config",&mut checks)?;
+        if owner(r,motion,"m_Config",&mut checks)?!=config||owner(r,package,"m_Config",&mut checks)?!=config{return Err("Attack configuration ownership mismatch".into());}
+        Self::discover_owned(r,skill,(checks,comp,motion,package,mc,pc),true)
+    }
+    fn discover_owned<M:Memory>(r:&mut Reflection<M>,skill:i32,owned:(Checks,u64,u64,u64,crate::reflection::Class,crate::reflection::Class),attack_geometry:bool)->Result<Self>{
+        let(mut checks,comp,motion,package,motion_class,package_class)=owned;
         let name=motion_class.name.clone();
         let range_contract=native_range_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let configured_direction=fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
@@ -687,7 +732,7 @@ impl MotionPlan {
             20150 => Some(("IndicatorMotionRot", "IndicatorPackageEasy_ShanXing_Normal")),
             20020 => Some(("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal")),
             8430 => Some(("IndicatorMotionRot", "IndicatorPackageEasy")),
-            _ if configured_direction || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
+            _ if attack_geometry || configured_direction || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
             _ => None,
         };
         if expected.is_none_or(|(motion, package)| name != motion || package_class.name != package)
@@ -742,7 +787,7 @@ impl MotionPlan {
         let range_shape = range_contract.map(|(_,shape)|shape);
         let legacy_range=matches!(skill,2510|2511|8425);
         let mut protect = None;
-        if range_contract.is_some() {
+        if range_contract.is_some() || attack_geometry {
             for n in ["m_dragged", "m_bVaildDraged"] {
                 fields.insert(n.into(), typed_field(r,motion,n,2)?);
             }
@@ -768,6 +813,7 @@ impl MotionPlan {
             name,
             motion,
             direction_geometry,
+            attack_geometry,
             fields,
             circle,
             circle_field,
@@ -1070,6 +1116,14 @@ impl MotionPlan {
                     return Err("Native drag gate changed during sample".into());
                 }
             }
+            if self.attack_geometry && logical.ready.get() && ratio>=0.05 && ratio<=1.001 {
+                let range=result[0].hypot(result[2])/ratio;
+                if range.is_finite() && range>0. && range<=1e4 {
+                    logical.world_range=number(range);
+                    logical.world_range_source=text("IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio");
+                    logical.world_range_source_present=flag(true);
+                }
+            }
             if let Some(p) = aim {
                 logical.visual_plane_y = number(p[1]);
             }
@@ -1147,7 +1201,7 @@ mod tests {
             skill: 2510,
             name: "IndicatorMotionRotAndPosRot".into(),
             motion: 512,
-            direction_geometry:false,
+            direction_geometry:false, attack_geometry:false,
             fields,
             circle: None,
             circle_field: None,
@@ -1165,6 +1219,21 @@ mod tests {
             Reflection::new(MutableMemory(RefCell::new(bytes))).unwrap(),
             plan,
         )
+    }
+    #[test]
+    fn attack_range_is_measured_from_current_processed_drag_not_the_attack_distance_config() {
+        let(r,mut plan)=q_fixture();plan.attack_geometry=true;plan.range=None;
+        plan.name="IndicatorMotionPosSelectAndRotATK".into();
+        {let mut b=r.memory.0.borrow_mut();b[528..532].copy_from_slice(&3f32.to_le_bytes());b[532..536].copy_from_slice(&0f32.to_le_bytes());b[536..540].copy_from_slice(&4f32.to_le_bytes());b[576..580].copy_from_slice(&0.5f32.to_le_bytes());b[581]=1;b[1036]=0;}
+        let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();
+        assert!(f.logical.ready.get());assert_eq!(f.logical.world_range.value,10.);
+        assert_eq!(f.logical.world_range_source.as_str(),"IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio");
+        for ratio in [0.,0.01,1.1] {
+            r.memory.0.borrow_mut()[576..580].copy_from_slice(&(ratio as f32).to_le_bytes());
+            let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();assert!(f.logical.world_range.missing());
+        }
+        r.memory.0.borrow_mut()[576..580].copy_from_slice(&0.5f32.to_le_bytes());r.memory.0.borrow_mut()[581]=0;
+        let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();assert!(f.logical.world_range.missing());
     }
     #[test]
     fn live_arc_visual_parameters_share_the_outer_coherence_bracket() {

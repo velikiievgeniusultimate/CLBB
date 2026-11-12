@@ -44,7 +44,9 @@ typedef struct ClbbSettings ClbbSettings;
  * Slots: skill:0..3; skill:N:ID stores a native form mode/stop flag.
  * All versions of skill:N share its key; unset form fields inherit that role.
  * extra:0 (recall), extra:1 (regen), extra:2 (battle spell), extra:3;
- * attack, attack:minion, attack:tower, shop:quick, upgrade:0..3.
+ * attack, attack:minion, attack:tower (one Attack group), shop:quick, upgrade:0..3.
+ * Main attack aims only with a current positive native attack-position setting
+ * and qualified native attack preview. Normal/unknown attack stays a plain button.
  * An unset key is "0". Duplicate active bindings are shown as conflicts and
  * disabled until resolved (including keyboard movement directions).
  * bindings.conflicts: read-only key-code TAB owner labels LF, active match only.

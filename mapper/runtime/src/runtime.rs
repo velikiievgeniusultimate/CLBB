@@ -733,10 +733,14 @@ impl Runtime {
             if self.host.fresh().is_some() {
                 self.host.settings.observe_native_templates(sample.frame.hero_id.int(), &sample.control_types);
                 self.host.settings.observe_native_holds(sample.frame.hero_id.int(), &sample.control_holds);
-                if sample.frame.skill_state.ready.get() {
+                if sample.frame.skill_state.ready.get()
+                    && sample.frame.skill_state.hero_id.int()==sample.frame.hero_id.int()
+                    && sample.frame.skill_state.token.as_str()==sample.frame.token.as_str() {
                     let forms=self.host.settings.observed_forms.entry(sample.frame.hero_id.int()).or_default();
                     for v in sample.frame.skill_state.buttons.iter().take(sample.frame.skill_state.count.min(32) as usize) {
-                        if v.slot.as_str().starts_with("skill:") && v.active_skill_id.int()>0 && forms.len()<32 {
+                        let owned=sample.frame.ui.buttons.iter().take(sample.frame.ui.button_count.min(32) as usize)
+                            .any(|b|b.kind.as_str()=="skill"&&b.slot.as_str()==v.slot.as_str()&&b.skill_id.int()==v.base_skill_id.int());
+                        if owned && v.slot.as_str().starts_with("skill:") && v.active_skill_id.int()>0 && forms.len()<32 {
                             let ids=forms.entry(v.slot.owned()).or_default();
                             if ids.len()<16 {ids.insert(v.active_skill_id.int());}
                         }
@@ -1404,6 +1408,20 @@ mod tests {
             projection: [0.; 16], logic: [0.; 2], indicator: 0,
             aim: None, direction_visual: None,
             control_types: BTreeMap::from([("skill:2".into(), kind)]), control_holds: BTreeMap::new(), linked: None,
+        }
+    }
+    #[test]
+    fn stale_foreign_hero_forms_cannot_pollute_the_current_hero_settings() {
+        use crate::source::{flag,number,text};
+        let mut events=Vec::new();let mut r=fixture(&mut events);
+        for case in 0..4 {
+            let mut sample=template_sample(18,2,now_ns());
+            sample.frame.skill_state.ready=flag(true);sample.frame.skill_state.hero_id=number(if case==0{84.}else{18.});
+            sample.frame.skill_state.token=if case==1{text("other-match")}else{sample.frame.token};
+            sample.frame.skill_state.count=1;sample.frame.skill_state.buttons[0]=clbb_moba_core::controller::snapshot::Variant{
+                slot:text("skill:2"),base_skill_id:number(if case==2{8430.}else{1830.}),active_skill_id:number(1831.),..Default::default()};
+            r.worker.shared.lock().unwrap().sample=Some(Arc::new(sample));r.poll(1280.,720.);
+            assert_eq!(r.host.settings.observed_forms.get(&18).is_some_and(|v|v.get("skill:2").is_some_and(|s|s.contains(&1831))),case==3);
         }
     }
     #[test]

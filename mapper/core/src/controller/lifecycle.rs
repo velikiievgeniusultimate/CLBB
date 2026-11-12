@@ -6,7 +6,8 @@ impl Controller {
             && b.slot == format!("upgrade:{}", b.index))
             || (b.kind == "quick_buy" && b.slot == "shop:quick")
             || (b.kind == "attack"
-                && ["attack", "attack:minion", "attack:tower"].contains(&b.slot.as_str()))
+                && ["attack", "attack:minion", "attack:tower"].contains(&b.slot.as_str())
+                && !(b.slot=="attack" && b.aimType==3))
             || (b.kind == "extra" && ["extra:0", "extra:1"].contains(&b.slot.as_str()))
     }
     pub(crate) fn is_retribution(b: &Button) -> bool {

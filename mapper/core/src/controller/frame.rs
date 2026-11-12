@@ -184,6 +184,11 @@ impl Controller {
             }
         }
         self.buttons_ = fresh;
+        if self.activeSlot_=="attack" && self.skillTouch_>=0
+            && !self.buttons_.iter().any(|b|b.slot=="attack"&&b.aimType==3) {
+            self.contextIgnoredKeys_.insert(self.skillKey_);
+            self.finish_skill(host,true);
+        }
         self.changed_ = true;
         self.frameActiveSlot_ = ui.active_slot.owned();
         self.joystickReady_ = false;

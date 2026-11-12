@@ -650,7 +650,7 @@ impl UiPlan {
                 Some(a) => integer(r, consumed, a)?,
                 None => 0,
             };
-            if button.kind == "skill" {
+            if button.kind == "skill" || button.kind == "attack" {
                 let cast_locked = button
                     .cast_lock
                     .and_then(|address| boolean(r, consumed, address).ok())
@@ -812,6 +812,9 @@ struct Plan {
     clock: u64,
     ui: UiPlan,
     motions: std::collections::HashMap<i32, crate::aim::MotionPlan>,
+    attack_mode: Option<crate::attack::ModePlan>,
+    attack_mode_retry:i64,
+    attack_motion:Option<crate::aim::MotionPlan>,
     behaviors: std::collections::HashMap<i32,(Checks,u8)>,
     behavior_retry: std::collections::HashMap<i32,i64>,
 }
@@ -1128,7 +1131,7 @@ impl<M: Memory> Source<M> {
             skill,
             clock,
             ui,
-            motions,
+            motions, attack_mode:None,attack_mode_retry:0,attack_motion:None,
             behaviors: Default::default(),
             behavior_retry: Default::default(),
         })
@@ -1224,6 +1227,22 @@ impl<M: Memory> Source<M> {
             consumed.extend(c);Some(v)} else {None};
         let mut control_types=std::collections::BTreeMap::new();
         let mut control_holds = std::collections::BTreeMap::new();
+        let checkpoint=consumed.len();
+        let mut attack_mode=plan.attack_mode.as_ref().and_then(|p|p.sample(r,&mut consumed).ok());
+        if attack_mode.is_none() {
+            consumed.truncate(checkpoint);plan.attack_mode=None;
+            if now>=plan.attack_mode_retry {
+                plan.attack_mode=crate::attack::ModePlan::discover(r,hero).ok();
+                plan.attack_mode_retry=now+20_000_000;
+                attack_mode=plan.attack_mode.as_ref().and_then(|p|p.sample(r,&mut consumed).ok());
+                if attack_mode.is_none(){consumed.truncate(checkpoint);}
+            }
+        }
+        let plain_owner=plan.ui.buttons.iter().find(|b|b.slot=="attack")
+            .and_then(|b|r.pointer(b.object).and_then(|c|r.class(c)).ok()).is_some_and(|c|c.name=="CommonAttack");
+        let aimed_attack=attack_mode==Some(true)&&plain_owner;
+        if let Some(mode)=attack_mode {control_types.insert("attack".into(),if mode&&plain_owner {3}else{1});}
+
         let mut selection_observations=Vec::new();
         let mut selection_variant_unknown=false;
         for button in plan.ui.buttons.iter_mut().filter(|button| button.kind == "skill") {
@@ -1435,7 +1454,22 @@ impl<M: Memory> Source<M> {
             }
         }
         let mut aim = None;
-        if skill > 0 {
+        let attack_binding=frame.ui.active_slot.as_str()=="attack"&&frame.skill_state.ready.get()
+            && frame.skill_state.buttons.iter().take(frame.skill_state.count.min(32)as usize)
+                .any(|v|v.slot.as_str()=="attack"&&v.active_skill_id.int()==skill&&skill>0);
+        if aimed_attack && attack_binding {
+            if plan.attack_motion.as_ref().is_none_or(|m|m.skill!=skill||m.validate(r).is_err()) {
+                plan.attack_motion=crate::aim::MotionPlan::discover_attack(r,plan.indicator,skill,frame.ui.buttons.iter().take(frame.ui.button_count.min(32)as usize).find(|b|b.slot.as_str()=="attack").map(|b|b.skill_id.int()).unwrap_or(0)).ok();
+            }
+            let checkpoint=consumed.len();
+            if let Some(m)=plan.attack_motion.as_mut() {
+                m.refresh_visual(r);
+                match m.sample_bracketed_with_fixed_range(r,&mut frame,&mut consumed,false) {
+                    Ok(value)=>aim=value,
+                    Err(_)=>{consumed.truncate(checkpoint);m.unavailable(&mut frame);plan.attack_motion=None;}
+                }
+            }
+        } else if skill > 0 {
             if !plan.motions.contains_key(&skill) {
                 if let Ok(m) = crate::aim::MotionPlan::discover(r, plan.indicator, skill) {
                     plan.motions.insert(skill, m);
@@ -1757,7 +1791,7 @@ fn attach_owned_direction_geometry(
         return;
     }
     let actual_owned = match button.kind.as_str() {
-        "skill" => {
+        "skill" | "attack" => {
             let state = &frame.skill_state;
             if !state.ready.get() || state.count > 32
                 || state.source.as_str() != "ShowSkillData.m_TranID"

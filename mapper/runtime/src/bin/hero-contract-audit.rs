@@ -483,6 +483,7 @@ fn main() -> Result<()> {
         contracts.insert(skill.to_string(),json!({
             "start_ns":start,
             "identity":MotionPlan::audit_registry_identity(&mut source.reflection,sample.indicator,skill),
+            "attack_preview":MotionPlan::audit_attack_preview(&mut source.reflection,sample.indicator,skill,frame.ui.buttons.iter().take(frame.ui.button_count.min(32)as usize).find(|b|b.slot.as_str()=="attack").map(|b|b.skill_id.int()).unwrap_or(0)),
             "values":MotionPlan::audit_registry_values(&mut source.reflection,sample.indicator,skill),
             "configuration":config_values(&mut source.reflection,sample.indicator,skill),
             "drag_gate":MotionPlan::discover(&mut source.reflection,sample.indicator,skill)
