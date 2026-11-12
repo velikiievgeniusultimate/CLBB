@@ -5,6 +5,7 @@ libportal-gtk4
 sdl3
 pipewire-alsa
 libx11
+libxfixes
 libunwind
 libbsd
 libelf

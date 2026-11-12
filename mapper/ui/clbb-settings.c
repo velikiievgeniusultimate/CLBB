@@ -1324,7 +1324,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
            "Системные действия можно назначить на удобные кнопки.");
   card = section(b, "Окно и курсор");
   bind_control(s, card, "Открыть настройки", "hotkeys.settings", KEY_F1 + 6);
-  bind_control(s, card, "Ограничить курсор окном игры", "hotkeys.confine",
+  bind_control(s, card, "Ограничить курсор игровой областью", "hotkeys.confine",
                KEY_F1 + 11);
   bind_control(s, card, "Полноэкранный режим", "hotkeys.fullscreen",
                KEY_F1 + 10);

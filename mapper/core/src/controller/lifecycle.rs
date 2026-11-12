@@ -752,7 +752,9 @@ impl Controller {
             && host.cancel_touch(self.skillTouch_, self.skillPoint_)
     }
     pub(crate) fn request_skill_cancel(&mut self, host: &mut impl Host) {
-        if self.skillTouch_ < 0 || self.skillCancelPending_ {
+        // Aimed basic attacks have no native cancel gesture. Never enter the
+        // cancel-ACK wait or move their contact onto a skill cancel button.
+        if self.activeSlot_ == "attack" || self.skillTouch_ < 0 || self.skillCancelPending_ {
             return;
         }
         self.charge_cancel_requested();

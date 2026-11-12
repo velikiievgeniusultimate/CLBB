@@ -270,6 +270,29 @@ mod tests {
         assert_eq!(c.skillTouch_,-1);assert_eq!(c.auxiliaryTaps_.len(),1);
     }
     #[test]
+    fn aimed_attack_ignores_cancel_without_moving_contact_or_blocking_physical_up() {
+        let (mut c, mut h) = setup(Some(false));
+        h.attack_aim = 3;
+        send(&mut c, &mut h, frame(65, Some(false)));
+        key(&mut c, &mut h, 66, 32, true);
+        let contact = c.skillTouch_;
+        assert!(contact >= 0);
+        let point = h.active[&contact];
+        let movement = c.movementTouch_;
+        for ms in 67..75 {
+            key(&mut c, &mut h, ms, 84, true);
+            key(&mut c, &mut h, ms, 84, false);
+            assert!(!c.skillCancelPending_);
+            assert_eq!(h.active[&contact], point);
+            assert_eq!(c.skillTouch_, contact);
+        }
+        // Test the UP routing separately from native direction readiness.
+        key(&mut c, &mut h, 76, 32, false);
+        assert!(!c.skillKeyHeld_);
+        assert!(!c.skillCancelPending_);
+        assert!(h.active.contains_key(&movement));
+    }
+    #[test]
     fn keyboard_movement_is_immediate_diagonal_normalized_and_independent_of_pointer_and_skills() {
         let (mut c, mut h) = setup(Some(false));
         c.apply_input(&mut h, Input::MovementMode(2), T + 55 * MS);
