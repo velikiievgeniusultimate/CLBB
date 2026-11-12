@@ -808,7 +808,7 @@ impl Runtime {
             }
         });
         self.gestures.poll(&mut self.host,sample.as_ref().map(|s|s.frame.token.as_str()).unwrap_or(""),sample.as_ref().and_then(|s|s.linked.as_ref()),sample.as_ref().map(|s|s.frame.skill_id.int()).unwrap_or(0),sample.as_ref().map(|s|s.frame.skill_state.sample_start_ns.value as i64).unwrap_or(0),now,cancel_feedback);
-        self.portrait.poll(&mut self.host,sample.as_ref().map(|s|s.frame.token.as_str()).unwrap_or(""),sample.as_ref().and_then(|s|s.portrait.as_ref()),sample.as_ref().map(|s|s.frame.time_ns.value as i64).unwrap_or(0),now);
+        self.portrait.poll(&mut self.host,sample.as_ref().map(|s|s.frame.token.as_str()).unwrap_or(""),sample.as_ref().and_then(|s|s.portrait.as_ref()),sample.as_ref().map(|s|s.frame.skill_state.sample_start_ns.value as i64).unwrap_or(0),now);
         self.reconcile_native_reset();
         self.debug_observe();
     }

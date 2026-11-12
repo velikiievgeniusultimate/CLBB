@@ -208,6 +208,19 @@ impl Picker {
                 )
             })
             .unwrap_or(h.neutral);
+        // Keep an already safe point inside the same native portrait. Cosmetic
+        // icon animation must not restart the final MOVE acknowledgement on
+        // every sample, or hold the skill until that animation settles.
+        if h.move_ns != 0 && h.goal == goal {
+            if let Some(c) = target {
+                let r = c.source;
+                let dx = (h.point.x - r[0] - r[2] / 2.) / (r[2] / 2.);
+                let dy = (h.point.y - r[1] - r[3] / 2.) / (r[3] / 2.);
+                if dx * dx + dy * dy <= 0.36 {
+                    point = h.point;
+                }
+            }
+        }
         if !h.pressed && now - h.release_ns > 500_000_000 {
             goal = None;
             point = h.neutral;
@@ -427,5 +440,19 @@ mod tests {
         o.held = true;
         p.poll(&mut w, "match", Some(&o), 7, 8);
         assert!(p.held.is_none());
+    }
+    #[test]
+    fn cosmetic_icon_motion_does_not_postpone_release_ack() {
+        let (mut p, mut w, mut o) = begin();
+        p.pointer = center(&p.held.as_ref().unwrap().copies[0]);
+        p.poll(&mut w, "match", Some(&o), 4, 5);
+        p.release(69, 6);
+        let count = w.events.len();
+        o.selected = 0;
+        o.portraits[0].center[0] += 0.001;
+        p.poll(&mut w, "match", Some(&o), 7, 8);
+        assert!(p.held.is_none());
+        assert_eq!(w.events.len(), count + 1);
+        assert_eq!(w.events.last().unwrap().0, 2);
     }
 }
