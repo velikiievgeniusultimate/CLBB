@@ -236,11 +236,15 @@ pub struct OptionalUi {
     roots: Checks,
     active_frames_field: u64,
     frames: Vec<u64>,
+    frame_membership: Checks,
     upgrades: Family,
     shop: Family,
     attacks: Family,
 }
 impl OptionalUi {
+    pub(crate) fn active_frames(&self) -> &[u64] {&self.frames}
+    pub(crate) fn active_frame_checks(&self) -> &Checks {&self.frame_membership}
+
     pub fn prepare<M: Memory>(
         r: &mut Reflection<M>,
         ui_key_skill: u64,
@@ -277,6 +281,7 @@ impl OptionalUi {
             roots,
             active_frames_field,
             frames: active_frames.to_vec(),
+            frame_membership:Vec::new(),
             upgrades: Family::default(),
             shop: Family::default(),
             attacks: Family::default(),
@@ -294,6 +299,7 @@ impl OptionalUi {
         projection: &[f64; 16],
         ui: &mut s::Ui,
     ) -> Result<()> {
+        self.frame_membership.clear();
         if !current(r, &self.roots) {
             return Err("Optional UI root owner changed".into());
         }
@@ -360,6 +366,7 @@ impl OptionalUi {
         if !current(r, &self.roots) || !current(r, &membership) {
             return Ok(());
         }
+        self.frame_membership=membership;
         discovered.sort_by(|a, b| a.slot.as_str().cmp(b.slot.as_str()));
         for button in discovered {
             append_button(ui, button);

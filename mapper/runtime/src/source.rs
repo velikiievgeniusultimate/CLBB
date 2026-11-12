@@ -171,6 +171,37 @@ fn read_movement_geometry<M: Memory>(
         reads,
     ))
 }
+#[derive(Default)]
+struct MovementPlan {
+    frames: Vec<u64>,
+    widget: Option<Widget>,
+    checks: Checks,
+}
+impl MovementPlan {
+    fn refresh<M: Memory>(&mut self, r: &mut Reflection<M>, frames: &[u64],
+        discover: impl FnOnce(&mut Reflection<M>, &[u64]) -> Result<(Widget, Checks)>) {
+        if self.frames == frames && self.widget.is_some() && check(r, &self.checks).is_ok() {return;}
+        self.frames = frames.to_vec();
+        self.widget = None;
+        self.checks.clear();
+        if let Ok((widget, checks)) = discover(r, frames) {
+            if check(r, &checks).is_ok() {self.widget=Some(widget);self.checks=checks;}
+        }
+    }
+}
+fn discover_movement<M: Memory>(r: &mut Reflection<M>, frames: &[u64]) -> Result<(Widget, Checks)> {
+    let mut owners=Vec::new();
+    for owner in frames.iter().copied().filter(|v| *v!=0) {
+        if r.class(r.pointer(owner)?)?.name=="UIJoyStick" {owners.push(owner);}
+    }
+    if owners.len()!=1 {return Err("Waiting for one owned movement frame".into());}
+    let owner=owners[0];let mut checks=Vec::new();
+    pointer(r,&mut checks,owner)?;
+    let info=link(r,owner,"m_UIFrameInfo",&mut checks)?;
+    let sprite=link(r,info,"m_Sprite1",&mut checks)?;
+    let widget=Widget::new(r,sprite)?;
+    Ok((widget,checks))
+}
 fn link<M: Memory>(
     r: &mut Reflection<M>,
     object: u64,
@@ -217,8 +248,7 @@ pub struct UiPlan {
     pub buttons: Vec<ButtonPlan>,
     pub wheel: Widget,
     pub cancel: Widget,
-    pub movement: Option<Widget>,
-    pub movement_owner: u64,
+    movement: MovementPlan,
     pub matrix: u64,
     pub camera_object: u64,
     pub current: u64,
@@ -464,17 +494,6 @@ impl UiPlan {
         }
         let native = link(r, camera, "m_CachedPtr", &mut checks)?;
         let matrix = native + unity::ui_matrix_offset(&r.read(native, 4096)?)? as u64;
-        let mut movement = None;
-        let mut movement_owner = 0;
-        for obj in &objects {
-            if *obj != 0 && r.class(r.pointer(*obj)?)?.name == "UIJoyStick" {
-                let info = link(r, *obj, "m_UIFrameInfo", &mut checks)?;
-                let sprite = link(r, info, "m_Sprite1", &mut checks)?;
-                movement = Some(Widget::new(r, sprite)?);
-                movement_owner = *obj;
-                break;
-            }
-        }
         let current = r.field(object, "m_curVirtualButton")?;
         let held = [
             r.field(object, "_bPressSkill")?,
@@ -497,8 +516,7 @@ impl UiPlan {
             buttons,
             wheel,
             cancel,
-            movement,
-            movement_owner,
+            movement: MovementPlan::default(),
             matrix,
             camera_object:camera,
             current,
@@ -700,7 +718,14 @@ impl UiPlan {
         if unity::onscreen(cancel) {
             ui.cancel_uv = v2(cancel);
         }
-        if let Some(movement) = &mut self.movement {
+        // UIJoyStick can be allocated AFTER the first coherent skill frame.
+        // Refresh only this optional plan from current, fenced membership;
+        // never freeze its absence for the rest of the match.
+        self.movement.refresh(r,self.optional.active_frames(),discover_movement);
+        if self.objects!=self.optional.active_frames() {self.objects=self.optional.active_frames().to_vec();}
+        if let Some(movement) = &mut self.movement.widget {
+            let membership=self.optional.active_frame_checks();
+            let membership_ready=!membership.is_empty() && check(r,membership).is_ok();
             // canUse is the game's temporary permission to move (for example
             // during Kagura's dash), not ownership or validity of this widget.
             // Keeping the real finger down lets movement resume after the dash.
@@ -708,8 +733,12 @@ impl UiPlan {
             // feedback while this widget is briefly hidden/reparented.
             if let Some((geometry, reads)) = read_movement_geometry(r, movement, &view, &projection)
             {
-                consumed.extend(reads);
-                ui.movement = geometry;
+                if membership_ready && check(r,&self.movement.checks).is_ok() {
+                    consumed.extend(membership.iter().cloned());
+                    consumed.extend(self.movement.checks.iter().cloned());
+                    consumed.extend(reads);
+                    ui.movement = geometry;
+                }
             }
         }
         let cancel_state = if let (Some(a), Some(id)) = (self.cancel_flag, self.cancel_id) {
@@ -2200,6 +2229,24 @@ mod tests {
         projection[0] = 0.1;
         projection[5] = 0.1;
         (r, widget, view, projection)
+    }
+    #[test]
+    fn late_movement_frame_and_native_allocation_recover_without_restarting_skill_source() {
+        let (mut r,widget,view,projection)=movement_fixture();
+        let mut plan=MovementPlan::default();
+        plan.refresh(&mut r,&[],|_,_|Err("not created".into()));
+        assert!(plan.widget.is_none());
+        // The active frame appears before its native transform is initialized.
+        plan.refresh(&mut r,&[16],|_,_|Err("transform pending".into()));
+        assert!(plan.widget.is_none());
+        plan.refresh(&mut r,&[16],|_,frames|{assert_eq!(frames,&[16]);Ok((widget.clone(),vec![(32,vec![0;8])]))});
+        assert!(read_movement_geometry(&mut r,plan.widget.as_mut().unwrap(),&view,&projection).unwrap().0.ready.get());
+        plan.refresh(&mut r,&[16],|_,_|panic!("stable widget should not be rediscovered"));
+        r.memory.0.borrow_mut()[32]=1;
+        plan.refresh(&mut r,&[16],|_,_|Err("owner replaced".into()));
+        assert!(plan.widget.is_none());
+        plan.refresh(&mut r,&[],|_,_|Err("frame removed".into()));
+        assert!(plan.widget.is_none());
     }
     #[test]
     fn temporary_movement_permission_does_not_hide_owned_geometry() {

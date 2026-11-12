@@ -510,7 +510,7 @@ fn main() -> Result<()> {
         "format":"clbb-hero-contract-audit","version":1,"pid":pid,"birth":identity.0,"executable":identity.1,
         "start_ns":start_ns,"end_ns":now_ns(),"hero":hero,"epoch":frame.token.as_str(),"resolution":size,
         "sample_ns":frame.time_ns.value,"active_skill":frame.skill_id.int(),"active_slot":frame.ui.active_slot.as_str(),
-        "read_ms":frame.sample_duration_ms.value,"types":sample.control_types,"buttons":buttons,"variants":variants,
+        "movement":{"ready":frame.ui.movement.ready.value,"press":frame.ui.movement.press_uv.values.map(|v|v.value),"center":frame.ui.movement.center_uv.values.map(|v|v.value),"radius":frame.ui.movement.radius_uv.values.map(|v|v.value)},"read_ms":frame.sample_duration_ms.value,"types":sample.control_types,"buttons":buttons,"variants":variants,
         "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"hero_level":hero_level,"sample_rejections":errors,
         "same_match_at_end":same_match,"final_sample_error":final_sample.err(),"final_sample_attempts":final_sample_attempts,
         "scope":"read-only owned gameplay controls/configuration; no memory writes, input or production template authorization",
