@@ -3,6 +3,12 @@
 #include <X11/extensions/XTest.h>
 #include <assert.h>
 #include <stdio.h>
+static void shape(Display*d,Window w,int x,int y,int width,int height) {
+    int count=0,ordering=0;
+    XRectangle *rects=XShapeGetRectangles(d,w,ShapeInput,&count,&ordering);assert(count==1);
+    assert(rects[0].x==x && rects[0].y==y && rects[0].width==width && rects[0].height==height);
+    XFree(rects);
+}
 static void move(Display*d,int dx,int dy,int left,int top,int right,int bottom) {
     XTestFakeRelativeMotionEvent(d,dx,dy,CurrentTime);XSync(d,False);
     Window root,child;int x,y,wx,wy;unsigned mask;
@@ -16,6 +22,7 @@ int main(void) {
     XMapWindow(d,w);XSync(d,False);
     ClbbPointerFence f={0};
     assert(clbb_pointer_fence_update(d,w,200,47,400,500,&f));
+    shape(d,w,200,47,400,500);
     XWarpPointer(d,None,root,0,0,0,0,400,300);XSync(d,False);
     // Simulate toolkit grabbing the WHOLE window then releasing on button UP.
     assert(XGrabPointer(d,w,True,0,GrabModeAsync,GrabModeAsync,w,None,CurrentTime)==GrabSuccess);
@@ -26,11 +33,17 @@ int main(void) {
     // Window move and new geometry must not leave the old barriers behind.
     XMoveWindow(d,w,100,100);XSync(d,False);
     assert(clbb_pointer_fence_update(d,w,100,80,300,300,&f));
+    shape(d,w,100,80,300,300);
     XWarpPointer(d,None,root,0,0,0,0,300,300);XSync(d,False);
     move(d,1500,1500,200,180,500,480);move(d,-1500,-1500,200,180,500,480);
     clbb_pointer_fence_clear(d,&f);XSync(d,False);
-    assert(!f.edges[0]);
+    assert(!f.edges[0]);shape(d,w,0,0,800,600);
+    // Existing non-default input regions must be restored exactly too.
+    XRectangle custom={5,7,700,550};XserverRegion r=XFixesCreateRegion(d,&custom,1);
+    XFixesSetWindowShapeRegion(d,w,ShapeInput,0,0,r);XFixesDestroyRegion(d,r);
+    assert(clbb_pointer_fence_update(d,w,100,80,300,300,&f));
+    clbb_pointer_fence_clear(d,&f);shape(d,w,5,7,700,550);
     XTestFakeRelativeMotionEvent(d,1000,0,CurrentTime);XSync(d,False);
-    Window r,c;int x,y,a,b;unsigned mask;XQueryPointer(d,root,&r,&c,&x,&y,&a,&b,&mask);assert(x>=500);
+    Window query_root,c;int x,y,a,b;unsigned mask;XQueryPointer(d,root,&query_root,&c,&x,&y,&a,&b,&mask);assert(x>=500);
     XDestroyWindow(d,w);XCloseDisplay(d);puts("CLBB_POINTER_FENCE_OK toolkit_regrab resize move unlock");
 }

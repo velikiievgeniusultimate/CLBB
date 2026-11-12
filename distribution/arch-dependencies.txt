@@ -6,6 +6,7 @@ sdl3
 pipewire-alsa
 libx11
 libxfixes
+libxext
 libunwind
 libbsd
 libelf

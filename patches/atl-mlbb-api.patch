@@ -1,5 +1,5 @@
 diff --git a/meson.build b/meson.build
-index 2c31844..b789845 100644
+index 2c31844..ee46de8 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -107,6 +107,13 @@ upcalls_header = declare_dependency(sources: upcalls_header_tgt)
@@ -62,7 +62,7 @@ index 2c31844..b789845 100644
                                          install: true,
                                          dependencies: [
 -                                        	dependency('gtk4'), dependency('jni'), declare_dependency(link_with: libtranslationlayer_so), libart_dep, dependency('dl'), libdl_bio_dep, libc_bio_dep, dependency('libportal'), dependency('fontconfig'), upcalls_header
-+                                        	dependency('gtk4'), dependency('jni'), declare_dependency(link_with: libtranslationlayer_so), libart_dep, dependency('dl'), libdl_bio_dep, libc_bio_dep, dependency('libportal'), dependency('fontconfig'), dependency('x11'), dependency('xfixes'), cc.find_library('m'), upcalls_header
++                                        	dependency('gtk4'), dependency('jni'), declare_dependency(link_with: libtranslationlayer_so), libart_dep, dependency('dl'), libdl_bio_dep, libc_bio_dep, dependency('libportal'), dependency('fontconfig'), dependency('x11'), dependency('xfixes'), dependency('xext'), cc.find_library('m'), upcalls_header
                                          ],
                                          link_args: [
                                          	'-rdynamic'
@@ -7139,10 +7139,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..27f8285
+index 0000000..7931b12
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1104 @@
+@@ -0,0 +1,1115 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7423,6 +7423,7 @@ index 0000000..27f8285
 +    }
 +}
 +static void confine(ClbbHost *h) {
++    if (!gtk_window_is_active(h->window) || clbb_settings_is_visible(h->settings)) return;
 +    if (h->locked) {
 +        unlock(h);
 +        return;
@@ -7512,6 +7513,15 @@ index 0000000..27f8285
 +    if (h->dispatching || h->closing)
 +        return FALSE;
 +    GdkEventType type = gdk_event_get_event_type(event);
++    if(type==GDK_FOCUS_CHANGE && !gdk_focus_event_get_in(event)) unlock(h);
++    if(type==GDK_KEY_PRESS) {
++        guint value=gdk_key_event_get_keyval(event);
++        GdkModifierType state=gdk_event_get_modifier_state(event);
++        if(value==GDK_KEY_Super_L || value==GDK_KEY_Super_R ||
++           value==GDK_KEY_Meta_L || value==GDK_KEY_Meta_R ||
++           ((value==GDK_KEY_Tab || value==GDK_KEY_ISO_Left_Tab) && (state&GDK_ALT_MASK)))
++            unlock(h);
++    }
 +    gboolean panel_visible = clbb_settings_is_visible(h->settings);
 +    if (panel_visible && (clbb_settings_is_capturing(h->settings) ||
 +        (type != GDK_KEY_PRESS && type != GDK_KEY_RELEASE)))
@@ -7762,7 +7772,7 @@ index 0000000..27f8285
 +        h->agent_until = 0;
 +        gtk_widget_queue_draw(h->cursor_layer);
 +    }
-+    if (!active)
++    if (!gtk_window_is_active(h->window) || clbb_settings_is_visible(h->settings))
 +        unlock(h);
 +    else if (h->locked)
 +        refresh_confine(h);
@@ -7914,10 +7924,11 @@ index 0000000..27f8285
 +                   strcmp(args[1], "diagnostics.cursor_fence") == 0) {
 +            GdkRectangle rect; Window xid; Display *display;
 +            gboolean valid = fence_geometry(h, &rect, &xid, &display);
-+            reply = valid ? g_strdup_printf("{\"rect\":[%d,%d,%d,%d],\"locked\":%s,\"scale\":%d,\"barriers\":%s}",
++            reply = valid ? g_strdup_printf("{\"rect\":[%d,%d,%d,%d],\"locked\":%s,\"scale\":%d,\"barriers\":%s,\"surface_region\":%s}",
 +                rect.x,rect.y,rect.width,rect.height,h->locked ? "true":"false",
 +                gdk_surface_get_scale_factor(gtk_native_get_surface(GTK_NATIVE(h->window))),
-+                h->pointer_fence.edges[0] ? "true":"false")
++                h->pointer_fence.edges[0] ? "true":"false",
++                h->pointer_fence.saved_input ? "true":"false")
 +                : g_strdup("{\"rect\":null,\"locked\":false}");
 +        } else if (count == 2 && strcmp(args[0], "fullscreen") == 0 &&
 +                   (strcmp(args[1], "1") == 0 || strcmp(args[1], "0") == 0)) {
