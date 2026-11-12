@@ -203,6 +203,29 @@ int main(int argc, char **argv) {
     clbb_settings_refresh(s);
   }
   if (selftest) {
+    GtkWidget *stack = find_type(clbb_settings_panel(s), GTK_TYPE_STACK);
+    g_assert_nonnull(gtk_stack_get_child_by_name(GTK_STACK(stack), "controls"));
+    g_assert_null(gtk_stack_get_child_by_name(GTK_STACK(stack), "hero"));
+    GtkWidget *skill_row = find_control(clbb_settings_panel(s), "hero.bindings.skill:0.key");
+    GtkWidget *common_row = find_control(clbb_settings_panel(s), "common.bindings.extra:2.key");
+    GtkWidget *controls_page = gtk_stack_get_child_by_name(GTK_STACK(stack), "controls");
+    g_assert_true(gtk_widget_is_ancestor(skill_row, controls_page));
+    g_assert_true(gtk_widget_is_ancestor(common_row, controls_page));
+    GtkWidget *group = gtk_widget_get_ancestor(skill_row, GTK_TYPE_REVEALER);
+    g_assert_nonnull(group);
+    GtkWidget *heading = gtk_widget_get_first_child(gtk_widget_get_parent(group));
+    g_assert_false(gtk_revealer_get_reveal_child(GTK_REVEALER(group)));
+    guint before_expand = p.writes;
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(heading), TRUE);
+    clbb_settings_refresh(s);
+    g_assert_true(gtk_revealer_get_reveal_child(GTK_REVEALER(group)));
+    GtkWidget *capture_button = find_type(skill_row, GTK_TYPE_BUTTON);
+    g_signal_emit_by_name(capture_button, "clicked");
+    g_assert_true(clbb_settings_is_capturing(s));
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(heading), FALSE);
+    g_assert_false(clbb_settings_is_capturing(s));
+    g_assert_cmpuint(p.writes, ==, before_expand);
+    g_print("CLBB_COLLAPSIBLE_CONTROLS_OK merged page, initially collapsed, refresh preserves state, no settings writes\n");
     const char *volume_keys[]={"audio.volume","audio.game_volume","audio.voice_volume"};
     for (guint i=0;i<G_N_ELEMENTS(volume_keys);i++) {
       GtkWidget *row=find_control(clbb_settings_panel(s),volume_keys[i]);
@@ -488,7 +511,7 @@ int main(int argc, char **argv) {
             "atomic display apply, preserved draft, atomic FPS VSync, "
             "visibility\n");
   } else {
-    const char *tabs[] = {"main", "controls", "hero", "sound", "hotkeys"};
+    const char *tabs[] = {"main", "controls", "sound", "hotkeys"};
     GtkWidget *nav =
         find_type(GTK_WIDGET(clbb_settings_panel(s)), GTK_TYPE_LIST_BOX);
     for (guint n = 0; n < G_N_ELEMENTS(tabs); ++n)

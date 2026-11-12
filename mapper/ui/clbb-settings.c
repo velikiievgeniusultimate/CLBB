@@ -90,8 +90,10 @@ static const char css[] =
     ".clbb-muted { color: #b4a8b3; font-size: 13px; }"
     ".clbb-section { background: #211c23; border: 1px solid #49313e; "
     "border-radius: 7px; margin-top: 17px; padding: 18px; }"
-    ".clbb-section-title { font-weight: 750; font-size: 16px; margin-bottom: "
-    "9px; }"
+    ".clbb-section-title { font-weight: 750; font-size: 16px; }"
+    "button.clbb-section-heading { background: transparent; background-image: none; border: none; box-shadow: none; padding: 4px 0; color: #f2edf0; }"
+    "button.clbb-section-heading:hover { color: #ff668d; }"
+    ".clbb-section-content { margin-top: 12px; }"
     ".clbb-row { padding: 7px 0; border-bottom: 1px solid alpha(#927a8c, "
     "0.12); } .clbb-row:last-child { border-bottom: none; }"
     ".clbb-label { font-weight: 550; } .clbb-bind { min-width: 92px; "
@@ -344,13 +346,50 @@ static GtkWidget *wrap_label(const char *text, const char *style) {
   gtk_label_set_wrap_mode(GTK_LABEL(w), PANGO_WRAP_WORD_CHAR);
   return w;
 }
+static void stop_capture(ClbbSettings *s);
+static void section_toggled(GtkToggleButton *button, gpointer data) {
+  gboolean open = gtk_toggle_button_get_active(button);
+  gtk_revealer_set_reveal_child(GTK_REVEALER(data), open);
+  ClbbSettings *s = g_object_get_data(G_OBJECT(data), "clbb-settings-owner");
+  if (!open && s && s->capture && gtk_widget_is_ancestor(s->capture->row, GTK_WIDGET(data)))
+    stop_capture(s);
+  GtkWidget *arrow = g_object_get_data(G_OBJECT(button), "clbb-chevron");
+  gtk_image_set_from_icon_name(GTK_IMAGE(arrow), open ? "pan-down-symbolic" : "pan-end-symbolic");
+}
+static gboolean section_is_open(GtkWidget *container) {
+  GtkWidget *card = gtk_widget_get_first_child(container);
+  return card && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(card)));
+}
+static void section_set_open(GtkWidget *container, gboolean open) {
+  GtkWidget *card = gtk_widget_get_first_child(container);
+  if (card) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(card)), open);
+}
 static GtkWidget *section(GtkWidget *box, const char *title) {
-  GtkWidget *w = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-  gtk_widget_add_css_class(w, "clbb-section");
-  if (title)
-    gtk_box_append(GTK_BOX(w), label(title, "clbb-section-title"));
-  gtk_box_append(GTK_BOX(box), w);
-  return w;
+  GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  gtk_widget_add_css_class(card, "clbb-section");
+  GtkWidget *header = gtk_toggle_button_new();
+  gtk_widget_add_css_class(header, "clbb-section-heading");
+  GtkWidget *heading = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+  GtkWidget *text = label(title ? title : "Настройки", "clbb-section-title");
+  gtk_widget_set_hexpand(text, TRUE);
+  gtk_box_append(GTK_BOX(heading), text);
+  GtkWidget *arrow = gtk_image_new_from_icon_name("pan-end-symbolic");
+  gtk_box_append(GTK_BOX(heading), arrow);
+  gtk_button_set_child(GTK_BUTTON(header), heading);
+  gtk_box_append(GTK_BOX(card), header);
+  // Revealer retains widget ancestry while closed: hidden bind controls remain
+  // reachable for refresh and are removed safely when the hero profile changes.
+  GtkWidget *revealer = gtk_revealer_new();
+  gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), FALSE);
+  gtk_revealer_set_transition_duration(GTK_REVEALER(revealer), 120);
+  GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  gtk_widget_add_css_class(content, "clbb-section-content");
+  gtk_revealer_set_child(GTK_REVEALER(revealer), content);
+  gtk_box_append(GTK_BOX(card), revealer);
+  g_object_set_data(G_OBJECT(header), "clbb-chevron", arrow);
+  g_signal_connect(header, "toggled", G_CALLBACK(section_toggled), revealer);
+  gtk_box_append(GTK_BOX(box), card);
+  return content;
 }
 static GtkWidget *page(ClbbSettings *s, const char *name, const char *title,
                        const char *subtitle) {
@@ -376,6 +415,8 @@ static Control *new_control(ClbbSettings *s, GtkWidget *box, const char *title,
                             const char *key, ControlKind kind, int fallback) {
   Control *c = g_new0(Control, 1);
   c->owner = s;
+  GtkWidget *group = gtk_widget_get_ancestor(box, GTK_TYPE_REVEALER);
+  if (group) g_object_set_data(G_OBJECT(group), "clbb-settings-owner", s);
   c->key = g_strdup(key);
   c->kind = kind;
   c->fallback = fallback;
@@ -555,6 +596,8 @@ static void clear_dynamic(ClbbSettings *s, GtkWidget *box) {
     gtk_box_remove(GTK_BOX(box), w);
 }
 static void build_hero(ClbbSettings *s, int hero) {
+  gboolean keep_personal = hero == s->hero && section_is_open(s->hero_box);
+  gboolean keep_overrides = hero == s->hero && section_is_open(s->common_box);
   clear_dynamic(s, s->hero_box);
   clear_dynamic(s, s->common_box);
   s->hero = hero;
@@ -588,7 +631,7 @@ static void build_hero(ClbbSettings *s, int hero) {
                 FALSE, FALSE);
   }
   bind_control(s, b, "Отмена навыка", "hero.cancel_key", 'T');
-  gtk_box_append(GTK_BOX(s->hero_box),
+  gtk_box_append(GTK_BOX(b),
                  wrap_label("Одинаковые клавиши допустимы: активная форма "
                             "героя определяет навык. Режим «При отпускании» "
                             "сохраняет предпросмотр до отпускания или отмены.",
@@ -612,6 +655,8 @@ static void build_hero(ClbbSettings *s, int hero) {
   for (guint i = 0; i < G_N_ELEMENTS(slots); ++i)
     add_binding(s, g, titles[i], "hero", slots[i], keys[i], 0, i != 2 && i != 3,
                 TRUE);
+  section_set_open(s->hero_box, keep_personal);
+  section_set_open(s->common_box, keep_overrides);
 }
 static gboolean on_key(GtkEventControllerKey *controller, guint keyval,
                        guint keycode, GdkModifierType state, gpointer data) {
@@ -691,9 +736,9 @@ static void nav_selected(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
   if (!row)
     return;
   ClbbSettings *s = data;
-  const char *names[] = {"main", "controls", "hero", "sound", "hotkeys"};
+  const char *names[] = {"main", "controls", "sound", "hotkeys"};
   int i = gtk_list_box_row_get_index(row);
-  if (i >= 0 && i < 5) {
+  if (i >= 0 && i < (int)G_N_ELEMENTS(names)) {
     stop_capture(s);
     gtk_stack_set_visible_child_name(s->stack, names[i]);
     clbb_settings_refresh(s);
@@ -1109,7 +1154,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_widget_add_css_class(sidebar, "clbb-sidebar");
   gtk_widget_set_size_request(sidebar, 185, -1);
   gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar), GTK_SELECTION_SINGLE);
-  const char *items[] = {"Основное", "Управление", "Герой", "Звук",
+  const char *items[] = {"Основное", "Управление", "Звук",
                          "Горячие клавиши"};
   for (guint i = 0; i < G_N_ELEMENTS(items); ++i)
     gtk_list_box_append(GTK_LIST_BOX(sidebar),
@@ -1137,7 +1182,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   display_card(s,b);
 
   b = page(s, "controls", "Управление",
-           "Общие кнопки применяются ко всем героям.");
+           "Передвижение, общие кнопки и навыки выбранного героя.");
   card = section(b, "Передвижение");
   bind_control(s, card, "Кнопка передвижения", "movement.button",
                KEY_MOUSE | 2);
@@ -1178,8 +1223,6 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   for (guint i = 0; i < G_N_ELEMENTS(slots); ++i)
     add_binding(s, card, titles[i], "common", slots[i], keys[i], 0,
                 i != 2 && i != 3, FALSE);
-  b = page(s, "hero", "Профиль героя",
-           "Персональные навыки и исключения из общих назначений.");
   s->hero_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
   gtk_box_append(GTK_BOX(b), s->hero_box);
   s->common_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
