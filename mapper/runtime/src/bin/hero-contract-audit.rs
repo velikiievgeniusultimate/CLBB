@@ -84,30 +84,37 @@ fn typed_instance<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks, name: &
     Ok(value)
 }
 
+fn capture_local_match<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks) -> Result<([u64; 4], i32)> {
+    let battle = typed_instance(r, checks, "BattleManager")?;
+    let manager = typed_instance(r, checks, "LogicBattleManager")?;
+    let (show_link, _, _) = typed_instance_field(r, checks, battle, "m_LocalPlayerShow", &[18, 21], None)?;
+    let show = u64_at(&capture(r, checks, show_link, 8)?, 0);
+    let (actor_link, _, _) = typed_instance_field(r, checks, manager, "<m_LocalPlayerLogic>k__BackingField", &[18, 21], None)?;
+    let actor = u64_at(&capture(r, checks, actor_link, 8)?, 0);
+    let owners = [battle, manager, show, actor];
+    if owners.contains(&0) { return Err("Local hero owner unavailable".into()); }
+    let (hero_at, hero_kind, _) = typed_instance_field(r, checks, actor, "m_ID", &[8, 9], None)?;
+    let hero = primitive(hero_kind, &capture(r, checks, hero_at, 4)?)?.as_i64().ok_or("Invalid local hero ID")?;
+    if !(1..10000).contains(&hero) { return Err("Invalid local Actor hero identity".into()); }
+    Ok((owners, hero as i32))
+}
+
 /// This reads the local Actor's actual level property, not EntityBase._level,
 /// skill levels, experience, UI labels or an inference from upgrade buttons.
 /// The independent local ShowEntity.m_Level must agree in the same bracket.
 fn local_hero_level<M: Memory>(r: &mut Reflection<M>, expected: Option<([u64; 4], i32)>) -> Result<Value> {
     let start = now_ns();
     let mut checks = Vec::new();
-    let battle = typed_instance(r, &mut checks, "BattleManager")?;
-    let manager = typed_instance(r, &mut checks, "LogicBattleManager")?;
-    let (show_link, _, _) = typed_instance_field(r, &mut checks, battle, "m_LocalPlayerShow", &[18, 21], None)?;
-    let show = u64_at(&capture(r, &mut checks, show_link, 8)?, 0);
-    let (actor_link, _, _) = typed_instance_field(r, &mut checks, manager, "<m_LocalPlayerLogic>k__BackingField", &[18, 21], None)?;
-    let actor = u64_at(&capture(r, &mut checks, actor_link, 8)?, 0);
-    let owners = [battle, manager, show, actor];
-    if owners.contains(&0) || expected.is_some_and(|(owned, _)| owned != owners) {
+    let (owners, hero) = capture_local_match(r, &mut checks)?;
+    if expected.is_some_and(|(owned, _)| owned != owners) {
         return Err("Local hero owners changed during level observation".into());
     }
-    let (hero_at, hero_kind, _) = typed_instance_field(r, &mut checks, actor, "m_ID", &[8, 9], None)?;
-    let hero = primitive(hero_kind, &capture(r, &mut checks, hero_at, 4)?)?.as_i64().ok_or("Invalid local hero ID")?;
-    if !(1..10000).contains(&hero) || expected.is_some_and(|(_, id)| i64::from(id) != hero) {
+    if expected.is_some_and(|(_, id)| id != hero) {
         return Err("Local Actor hero changed during level observation".into());
     }
-    let (level_at, kind, declaring) = typed_instance_field(r, &mut checks, actor,
+    let (level_at, kind, declaring) = typed_instance_field(r, &mut checks, owners[3],
         "<m_Level>k__BackingField", &[8], Some("EntityBase"))?;
-    let (show_at, show_kind, show_declaring) = typed_instance_field(r, &mut checks, show,
+    let (show_at, show_kind, show_declaring) = typed_instance_field(r, &mut checks, owners[2],
         "m_Level", &[8], Some("ShowEntity"))?;
     let value = i32_at(&capture(r, &mut checks, level_at, 4)?, 0);
     let show_level = i32_at(&capture(r, &mut checks, show_at, 4)?, 0);
@@ -122,6 +129,50 @@ fn local_hero_level<M: Memory>(r: &mut Reflection<M>, expected: Option<([u64; 4]
         "field":"<m_Level>k__BackingField","kind":kind,"show_declaring_class":show_declaring,
         "show_field":"m_Level","show_kind":show_kind,"coherent":true,"local_owner_verified":true,
         "start_ns":start,"end_ns":end}))
+}
+
+fn final_match_anchor<M: Memory>(r: &mut Reflection<M>, pid: u32, identity: &(u64, PathBuf),
+    owners: [u64; 4], hero: i32) -> Result<()> {
+    if process_identity(pid)? != *identity { return Err("Runtime identity changed during final audit".into()); }
+    let mut checks = Vec::new();
+    if capture_local_match(r, &mut checks)? != (owners, hero) {
+        return Err("Local hero/owners changed during final audit".into());
+    }
+    check(r, &checks)?;
+    if process_identity(pid)? != *identity { return Err("Runtime identity changed during final audit".into()); }
+    Ok(())
+}
+
+// These exact Source errors describe an overlapping dynamic observation, not
+// permission to retry ownership changes, missing fields or failed reads.
+fn transient_final_sample_error(error: &str) -> bool {
+    matches!(error, "Camera/actor/UI/native feedback changed during sample"
+        | "Native camera pose does not match its matrix"
+        | "Source coherence phase exceeded 100 ms"
+        | "Wall selection/visual not yet coherent")
+}
+
+fn final_sample_with_retry<T>(mut probe: impl FnMut() -> (Result<T>, Option<String>),
+    same_match: impl Fn(&T) -> bool) -> (Result<T>, Vec<Value>) {
+    let started = Instant::now();
+    let mut attempts = Vec::new();
+    let mut last = Err("Final sample was not attempted".into());
+    for attempt in 1..=4 {
+        if attempt > 1 && started.elapsed() >= Duration::from_millis(200) { break; }
+        let start = now_ns();
+        let (result, source_error) = probe();
+        last = result.and_then(|value| if same_match(&value) { Ok(value) }
+            else { Err("Final coherent sample has different match owners, hero or indicator".into()) });
+        let error = last.as_ref().err().cloned();
+        let retryable = error.as_deref().is_some_and(transient_final_sample_error);
+        attempts.push(json!({"attempt":attempt,"start_ns":start,"end_ns":now_ns(),
+            "error":error,"source_error":source_error,"retryable_coherence_error":retryable}));
+        if !retryable { break; }
+        if attempt < 4 && started.elapsed() < Duration::from_millis(195) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    (last, attempts)
 }
 
 fn write_output(path: &str, value: &Value) -> Result<()> {
@@ -442,8 +493,17 @@ fn main() -> Result<()> {
     let controls=source.audit_control_state();let ui=source.audit_ui_input();
     let charge_lifecycle=charge_lifecycle(&mut source.reflection,sample.match_owners[2]);
     let hero_level=local_hero_level(&mut source.reflection,Some((sample.match_owners,hero)));
-    let final_sample=source.sample(now_ns(),size);
-    let same_match=final_sample.as_ref().is_ok_and(|value|value.match_owners==sample.match_owners&&value.indicator==sample.indicator&&value.frame.hero_id.int()==hero);
+    let (final_sample, final_sample_attempts)=final_sample_with_retry(|| {
+        let guard=final_match_anchor(&mut source.reflection,pid,&identity,sample.match_owners,hero);
+        if let Err(error)=guard { return (Err(format!("Final audit anchor rejected: {error}")),None); }
+        let result=source.sample(now_ns(),size);
+        let source_error=result.as_ref().err().cloned();
+        if let Err(error)=final_match_anchor(&mut source.reflection,pid,&identity,sample.match_owners,hero) {
+            return (Err(format!("Final audit anchor rejected: {error}")),source_error);
+        }
+        (result,source_error)
+    }, |value|value.match_owners==sample.match_owners&&value.indicator==sample.indicator&&value.frame.hero_id.int()==hero);
+    let same_match=final_sample.is_ok();
     if process_identity(pid)?!=identity {return Err("Runtime identity changed during audit".into());}
     let output=json!({
         "format":"clbb-hero-contract-audit","version":1,"pid":pid,"birth":identity.0,"executable":identity.1,
@@ -451,7 +511,7 @@ fn main() -> Result<()> {
         "sample_ns":frame.time_ns.value,"active_skill":frame.skill_id.int(),"active_slot":frame.ui.active_slot.as_str(),
         "read_ms":frame.sample_duration_ms.value,"types":sample.control_types,"buttons":buttons,"variants":variants,
         "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"hero_level":hero_level,"sample_rejections":errors,
-        "same_match_at_end":same_match,"final_sample_error":final_sample.err(),
+        "same_match_at_end":same_match,"final_sample_error":final_sample.err(),"final_sample_attempts":final_sample_attempts,
         "scope":"read-only owned gameplay controls/configuration; no memory writes, input or production template authorization",
     });
     write_output(&args[2], &output)?;
@@ -540,5 +600,53 @@ mod tests {
         assert!(primitive(13,&f64::INFINITY.to_le_bytes()).is_err());
         assert_eq!(primitive(2,&[1]).unwrap(),json!(true));
         assert_eq!(primitive(8,&(-7i32).to_le_bytes()).unwrap(),json!(-7));
+    }
+    #[test]
+    fn final_sample_retries_only_documented_dynamic_coherence_and_preserves_rejections() {
+        for transient in ["Camera/actor/UI/native feedback changed during sample",
+            "Native camera pose does not match its matrix", "Source coherence phase exceeded 100 ms",
+            "Wall selection/visual not yet coherent"] {
+            let mut calls=0;
+            let (result, attempts)=final_sample_with_retry(|| {
+                calls+=1;
+                if calls==1 {(Err(transient.into()),Some(transient.into()))}
+                else {(Ok((OWNERS,97,0x9000)),None)}
+            }, |key|*key==(OWNERS,97,0x9000));
+            assert!(result.is_ok()); assert_eq!(calls,2);
+            assert_eq!(attempts[0]["error"],transient);
+            assert_eq!(attempts[0]["source_error"],transient);
+            assert_eq!(attempts[0]["retryable_coherence_error"],true);
+            assert_eq!(attempts[1]["error"],Value::Null);
+        }
+        let transient="Camera/actor/UI/native feedback changed during sample";
+        let mut calls=0;
+        let (result, attempts)=final_sample_with_retry::<()>(|| {
+            calls+=1; (Err(transient.into()),Some(transient.into()))
+        }, |_|true);
+        assert_eq!(result.unwrap_err(),transient); assert_eq!(calls,4); assert_eq!(attempts.len(),4);
+    }
+    #[test]
+    fn final_sample_never_retries_owner_pid_metadata_or_successful_match_mismatches() {
+        for error in ["Match source ownership changed", "Invalid hero identity", "Source plan unavailable",
+            "Read failed", "Final audit anchor rejected: Runtime identity changed during final audit",
+            "Final audit anchor rejected: Local hero/owners changed during final audit"] {
+            let mut calls=0;
+            let (result, attempts)=final_sample_with_retry::<()>(|| {
+                calls+=1; (Err(error.into()),Some("Camera/actor/UI/native feedback changed during sample".into()))
+            }, |_|true);
+            assert_eq!(result.unwrap_err(),error); assert_eq!(calls,1);
+            assert_eq!(attempts[0]["retryable_coherence_error"],false);
+            assert_eq!(attempts[0]["source_error"],"Camera/actor/UI/native feedback changed during sample");
+        }
+        for changed in [(OWNERS,25,0x9000),([0x8000,0x8100,0x8301,0x8200],97,0x9000),(OWNERS,97,0x9001)] {
+            let mut calls=0;
+            let (result, attempts)=final_sample_with_retry(|| {
+                calls+=1;
+                if calls==1 {(Err("Camera/actor/UI/native feedback changed during sample".into()),None)}
+                else {(Ok(changed),None)}
+            }, |key|*key==(OWNERS,97,0x9000));
+            assert!(result.unwrap_err().contains("different match owners, hero or indicator"));
+            assert_eq!(calls,2); assert_eq!(attempts[1]["retryable_coherence_error"],false);
+        }
     }
 }

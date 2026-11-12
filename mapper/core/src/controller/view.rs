@@ -98,6 +98,18 @@ pub struct View {
     pub chargeEndClock_: super::snapshot::Number,
     pub chargeEndSampleNs_: i64,
     pub chargeLastSampleNs_: i64,
+    pub selectionOwner_: u64,
+    pub selectionRevoked_: u8,
+    pub selectionGeometryFresh_: u8,
+    pub selectionAccepted_: u8,
+    pub selectionMatchedSequence_: u64,
+    pub selectionSampleStartNs_: i64,
+    pub selectionSampleEndNs_: i64,
+    pub selectionOption_: i32,
+    pub selectionGoalSequence_: u64,
+    pub selectionCaptured_: u8,
+    pub selectionEndClock_: super::snapshot::Number,
+    pub selectionEndSampleNs_: i64,
     pub pendingRelease_: u8,
     pub pendingWorldValid_: u8,
     pub movementReady_: u8,
@@ -318,6 +330,19 @@ impl View {
                 .map_or_else(super::snapshot::Number::default, |v| super::snapshot::Number { kind: 1, value: v as f64 }),
             chargeEndSampleNs_: s.chargeGesture_.as_ref().map_or(0, |v| v.end_sample_ns),
             chargeLastSampleNs_: s.chargeGesture_.as_ref().map_or(0, |v| v.last_sample_ns),
+            selectionOwner_: s.selection_.owner,
+            selectionRevoked_: s.selection_.revoked as u8,
+            selectionGeometryFresh_: s.selection_.geometry_fresh as u8,
+            selectionAccepted_: s.selection_.accepted as u8,
+            selectionMatchedSequence_: s.selection_.matched_sequence,
+            selectionSampleStartNs_: s.selection_.sample_start_ns,
+            selectionSampleEndNs_: s.selection_.sample_end_ns,
+            selectionOption_: s.selection_.option,
+            selectionGoalSequence_: s.selection_.goal_sequence,
+            selectionCaptured_: s.selection_.captured as u8,
+            selectionEndClock_: s.selection_.end_clock.map_or_else(super::snapshot::Number::default,
+                |v|super::snapshot::Number{kind:1,value:v as f64}),
+            selectionEndSampleNs_: s.selection_.end_sample_ns,
             pendingRelease_: s.pendingRelease_ as u8,
             pendingWorldValid_: s.pendingWorldValid_ as u8,
             movementReady_: s.movementReady_ as u8,
@@ -537,6 +562,26 @@ impl View {
         self.skillExpectedAim_ = s.skillExpectedAim_ as u8;
         self.skillActivationObserved_ = s.skillActivationObserved_ as u8;
         self.skillStateForbiddenAtDown_ = s.skillStateForbiddenAtDown_ as u8;
+        self.chargeStage_ = s.chargeGesture_.as_ref().map_or(0, |v| v.stage);
+        self.chargeBase_ = s.chargeGesture_.as_ref().map_or(0, |v| v.base);
+        self.chargeFuture_ = s.chargeGesture_.as_ref().map_or(0, |v| v.future);
+        self.chargeEndClock_ = s.chargeGesture_.as_ref().and_then(|v| v.end_clock)
+            .map_or_else(super::snapshot::Number::default, |v| super::snapshot::Number { kind: 1, value: v as f64 });
+        self.chargeEndSampleNs_ = s.chargeGesture_.as_ref().map_or(0, |v| v.end_sample_ns);
+        self.chargeLastSampleNs_ = s.chargeGesture_.as_ref().map_or(0, |v| v.last_sample_ns);
+        self.selectionOwner_ = s.selection_.owner;
+        self.selectionRevoked_ = s.selection_.revoked as u8;
+        self.selectionGeometryFresh_ = s.selection_.geometry_fresh as u8;
+        self.selectionAccepted_ = s.selection_.accepted as u8;
+        self.selectionMatchedSequence_ = s.selection_.matched_sequence;
+        self.selectionSampleStartNs_ = s.selection_.sample_start_ns;
+        self.selectionSampleEndNs_ = s.selection_.sample_end_ns;
+        self.selectionOption_ = s.selection_.option;
+        self.selectionGoalSequence_ = s.selection_.goal_sequence;
+        self.selectionCaptured_ = s.selection_.captured as u8;
+        self.selectionEndClock_ = s.selection_.end_clock.map_or_else(super::snapshot::Number::default,
+            |v|super::snapshot::Number{kind:1,value:v as f64});
+        self.selectionEndSampleNs_ = s.selection_.end_sample_ns;
         self.pendingRelease_ = s.pendingRelease_ as u8;
         self.pendingWorldValid_ = s.pendingWorldValid_ as u8;
         self.movementReady_ = s.movementReady_ as u8;

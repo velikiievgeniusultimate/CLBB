@@ -94,6 +94,130 @@ pub(crate) fn state_forbid_address<M: Memory>(r: &mut Reflection<M>, object: u64
         .then(|| object + field.offset)
 }
 
+/// UI option selection is a separate family. Its XY vector and option enum
+/// must never be interpreted as a world-space directional skill result.
+#[derive(Clone)]
+pub(crate) struct ChoicePlan {
+    checks: Checks,
+    button: u64,
+    data: u64,
+    base: u64,
+    active: u64,
+    current: u64,
+    held: u64,
+    drag: u64,
+    panel: u64,
+    hover: u64,
+    direction: u64,
+    options: Vec<i32>,
+}
+pub(crate) struct ChoiceObservation {
+    pub owner: u64,
+    pub base: i32,
+    pub active: i32,
+    pub current: bool,
+    pub panel: bool,
+    pub drag: bool,
+    pub hover: i32,
+    pub selected: Option<i32>,
+    pub direction: [f64; 3],
+}
+impl ChoicePlan {
+    pub(crate) fn is_family<M:Memory>(r:&mut Reflection<M>,class:&crate::reflection::Class)->Result<bool> {
+        let mut class=class.clone();
+        for _ in 0..16 {
+            if class.name=="KeySkillMultiChoice" {return Ok(true);}
+            if class.parent==0 {return Ok(false);}
+            class=r.class(class.parent)?;
+        }
+        Err("Selection button ancestry exceeds bounds".into())
+    }
+    pub(crate) fn discover<M:Memory>(r:&mut Reflection<M>,ui:u64,button:u64,data:u64,local_show:u64)->Result<Self> {
+        let mut checks=Vec::new();
+        let class=r.class(r.pointer(button)?)?;
+        if !Self::is_family(r,&class)? {return Err("Not a native UI selection button".into());}
+        let(_,button_fields)=fields(r,button,&mut checks)?;
+        let(data_class,data_fields)=fields(r,data,&mut checks)?;
+        let(ui_class,ui_fields)=fields(r,ui,&mut checks)?;
+        let(_,show_fields)=fields(r,local_show,&mut checks)?;
+        if data_class!="ShowSkillData"||ui_class!="UIKeySkill" {return Err("Selection UI/data class changed".into());}
+        let address=|object:u64,metadata:&HashMap<String,Field>,name:&str,kind:u8|->Result<u64>{
+            let f=metadata.get(name).ok_or_else(||format!("Selection field absent:{name}"))?;
+            if f.is_static||f.kind!=kind||f.offset>1_048_576 {return Err(format!("Selection field type changed:{name}"));}
+            object.checked_add(f.offset).ok_or("Selection field overflow".into())
+        };
+        let reference=|r:&Reflection<M>,checks:&mut Checks,at:u64,expected:u64|->Result<()> {
+            if expected==0||u64_at(&capture(r,checks,at,8)?,0)!=expected{return Err("Selection local ownership changed".into());}Ok(())
+        };
+        reference(r,&mut checks,address(button,&button_fields,"m_SkillData",18)?,data)?;
+        reference(r,&mut checks,address(button,&button_fields,"m_pOwner",18)?,local_show)?;
+        let local_comp=u64_at(&capture(r,&mut checks,address(local_show,&show_fields,"m_SkillComp",18)?,8)?,0);
+        reference(r,&mut checks,address(data,&data_fields,"m_SkillComp",18)?,local_comp)?;
+        let(comp_class,comp_fields)=fields(r,local_comp,&mut checks)?;
+        if comp_class!="ShowSkillComp" {return Err("Selection local component class changed".into());}
+        reference(r,&mut checks,address(local_comp,&comp_fields,"m_pOwner",18)?,local_show)?;
+        // Root references must be live native GameObjects owned by this exact
+        // managed object. A naked coordinate or recycled pointer is insufficient.
+        let native_root=|r:&mut Reflection<M>,checks:&mut Checks,root:u64|->Result<()> {
+            let(name,metadata)=fields(r,root,checks)?;
+            if name!="GameObject" {return Err("Selection root is not a GameObject".into());}
+            let native=u64_at(&capture(r,checks,address(root,&metadata,"m_CachedPtr",24)?,8)?,0);
+            reference(r,checks,native.checked_add(40).ok_or("Selection native overflow")?,root)
+        };
+        let root=u64_at(&capture(r,&mut checks,address(button,&button_fields,"m_choiceRoot",18)?,8)?,0);
+        native_root(r,&mut checks,root)?;
+        let list=u64_at(&capture(r,&mut checks,address(button,&button_fields,"m_choiceOptions",21)?,8)?,0);
+        let(list_class,list_fields)=fields(r,list,&mut checks)?;
+        if list_class!="List`1" {return Err("Selection options list class changed".into());}
+        let count=i32_at(&capture(r,&mut checks,address(list,&list_fields,"_size",8)?,4)?,0);
+        // Only the measured two-choice enum contract is currently qualified.
+        if count!=2 {return Err("Selection option count is unqualified".into());}
+        let _version=capture(r,&mut checks,address(list,&list_fields,"_version",8)?,4)?;
+        let array=u64_at(&capture(r,&mut checks,address(list,&list_fields,"_items",29)?,8)?,0);
+        let header=capture(r,&mut checks,array,32)?;
+        if u64_at(&header,24)<count as u64||u64_at(&header,24)>64{return Err("Selection options capacity changed".into());}
+        let array_class=capture(r,&mut checks,u64_at(&header,0),0x50)?;
+        if r.cstring(u64_at(&array_class,16))?!="ChoiceOption[]"||r.class(u64_at(&array_class,0x40))?.name!="ChoiceOption" {
+            return Err("Selection options array type changed".into());
+        }
+        let entries=capture(r,&mut checks,array+32,count as usize*8)?;
+        let mut options=Vec::new();
+        for entry in entries.chunks_exact(8) {
+            let option=u64_at(entry,0);let(name,metadata)=fields(r,option,&mut checks)?;
+            if name!="ChoiceOption" {return Err("Selection option owner changed".into());}
+            let direction=i32_at(&capture(r,&mut checks,address(option,&metadata,"Direction",17)?,4)?,0);
+            if !matches!(direction,1|2)||options.contains(&direction){return Err("Selection option enum is unqualified or ambiguous".into());}
+            let root=u64_at(&capture(r,&mut checks,address(option,&metadata,"Root",18)?,8)?,0);
+            native_root(r,&mut checks,root)?;options.push(direction);
+        }
+        let plan=Self {checks,button,data,
+            base:address(data,&data_fields,"m_InitSkillID",8)?,active:address(data,&data_fields,"m_TranID",8)?,
+            current:address(ui,&ui_fields,"m_curVirtualButton",18)?,held:address(ui,&ui_fields,"_bPressSkill",2)?,
+            drag:address(button,&button_fields,"m_hasDrag",2)?,panel:address(button,&button_fields,"m_panelVisible",2)?,
+            hover:address(button,&button_fields,"m_hoverIndex",8)?,direction:address(button,&button_fields,"m_lastDragDir",17)?,options};
+        check(r,&plan.checks)?;Ok(plan)
+    }
+    pub(crate) fn validate<M:Memory>(&self,r:&Reflection<M>)->Result<()> {check(r,&self.checks)}
+    pub(crate) fn sample<M:Memory>(&self,r:&Reflection<M>,consumed:&mut Checks)->Option<ChoiceObservation> {
+        let checkpoint=consumed.len();
+        let read=(||->Result<ChoiceObservation>{
+            self.validate(r)?;consumed.extend(self.checks.iter().cloned());
+            let base=i32_at(&capture(r,consumed,self.base,4)?,0);let active=i32_at(&capture(r,consumed,self.active,4)?,0);
+            if !(1..=clbb_moba_core::controller::MAX_SKILL_ID).contains(&base)||!(1..=clbb_moba_core::controller::MAX_SKILL_ID).contains(&active){return Err("Selection skill IDs unavailable".into());}
+            let current=u64_at(&capture(r,consumed,self.current,8)?,0);
+            let held=capture(r,consumed,self.held,1)?[0];let drag=capture(r,consumed,self.drag,1)?[0];let panel=capture(r,consumed,self.panel,1)?[0];
+            if [held,drag,panel].iter().any(|v|*v>1){return Err("Selection flags unavailable".into());}
+            let hover=i32_at(&capture(r,consumed,self.hover,4)?,0);
+            if hover< -1||hover>=self.options.len() as i32{return Err("Selection hover index is outside owned options".into());}
+            let direction=crate::source::vec3(&capture(r,consumed,self.direction,12)?)?;
+            if direction.iter().any(|v|v.abs()>1e6){return Err("Selection UI direction unavailable".into());}
+            let selected=(hover>=0).then(||self.options[hover as usize]);
+            Ok(ChoiceObservation {owner:self.data,base,active,current:current==self.button&&held==1,panel:panel==1,drag:drag==1,hover,selected,direction})
+        })();
+        match read {Ok(value)=>Some(value),Err(_)=>{consumed.truncate(checkpoint);None}}
+    }
+}
+
 /// Charge lifecycle belongs to the button's local ShowSkillData, independently
 /// of whether its visual indicator is a point, direction, or range template.
 #[derive(Clone)]
@@ -290,7 +414,7 @@ mod charge_tests {
     struct TestMemory(RefCell<Vec<u8>>);
     impl Memory for TestMemory {
         fn regions(&self) -> Result<Vec<crate::platform::Region>> {
-            Ok(vec![crate::platform::Region { start: 0, end: 0x4000, readable: true, writable: true, name: String::new() }])
+            Ok(vec![crate::platform::Region { start: 0, end: self.0.borrow().len()as u64, readable: true, writable: true, name: String::new() }])
         }
         fn read(&self, address: u64, size: usize) -> Result<Vec<u8>> {
             self.0.borrow().get(address as usize..address as usize + size).map(|v| v.to_vec()).ok_or("Unreadable test memory".into())
@@ -333,6 +457,73 @@ mod charge_tests {
         bytes[DATA as usize + 24] = 1;
         bytes[DATA as usize + 28..DATA as usize + 32].copy_from_slice(&12618_i32.to_le_bytes());
         Reflection::new(TestMemory(RefCell::new(bytes))).unwrap()
+    }
+    const CHOICE: u64=0x4000;
+    const CHOICE_DATA:u64=0x4100;
+    const CHOICE_SHOW:u64=0x4200;
+    const CHOICE_COMP:u64=0x4300;
+    const CHOICE_UI:u64=0x4400;
+    fn choice_fixture()->Reflection<TestMemory> {
+        let mut b=vec![0;0x10000];let mut next=0x6000;
+        class(&mut b,&mut next,0x100,"KeySkillMultiChoice",&[("m_choiceOptions",21,32),("m_choiceRoot",18,40),
+            ("m_lastDragDir",17,48),("m_hasDrag",2,60),("m_panelVisible",2,61),("m_hoverIndex",8,64)]);
+        class(&mut b,&mut next,0x300,"SkillButton",&[("m_SkillData",18,16),("m_pOwner",18,24)]);put(&mut b,0x158,0x300);
+        class(&mut b,&mut next,0x500,"ShowSkillData",&[("m_SkillComp",18,16),("m_InitSkillID",8,24),("m_TranID",8,28)]);
+        class(&mut b,&mut next,0x700,"LocalShow",&[("m_SkillComp",18,16)]);
+        class(&mut b,&mut next,0x900,"ShowSkillComp",&[("m_pOwner",18,16)]);
+        class(&mut b,&mut next,0xb00,"UIKeySkill",&[("m_curVirtualButton",18,16),("_bPressSkill",2,24)]);
+        class(&mut b,&mut next,0xd00,"List`1",&[("_items",29,16),("_size",8,24),("_version",8,28)]);
+        class(&mut b,&mut next,0xf00,"ChoiceOption",&[("Root",18,16),("Direction",17,24)]);
+        class(&mut b,&mut next,0x1100,"GameObject",&[("m_CachedPtr",24,16)]);
+        for(object,identity)in[(CHOICE,0x100),(CHOICE_DATA,0x500),(CHOICE_SHOW,0x700),(CHOICE_COMP,0x900),(CHOICE_UI,0xb00),
+            (0x4500,0x1100),(0x4700,0xd00),(0x4900,0xf00),(0x4a00,0xf00),(0x4b00,0x1100),(0x4c00,0x1100)]{put(&mut b,object,identity);}
+        for(at,value)in[(CHOICE+16,CHOICE_DATA),(CHOICE+24,CHOICE_SHOW),(CHOICE+32,0x4700),(CHOICE+40,0x4500),
+            (CHOICE_DATA+16,CHOICE_COMP),(CHOICE_SHOW+16,CHOICE_COMP),(CHOICE_COMP+16,CHOICE_SHOW),
+            (CHOICE_UI+16,CHOICE),(0x4510,0x4600),(0x4628,0x4500),(0x4710,0x4800),(0x4800,0x1300),
+            (0x4818,2),(0x4820,0x4900),(0x4828,0x4a00),(0x4910,0x4b00),(0x4a10,0x4c00),
+            (0x4b10,0x4d00),(0x4d28,0x4b00),(0x4c10,0x4e00),(0x4e28,0x4c00),(0x1340,0xf00)]{put(&mut b,at,value);}
+        let name=string(&mut b,&mut next,"ChoiceOption[]");put(&mut b,0x1310,name);
+        for(at,value)in[(0x4718,2i32),(0x471c,1),(0x4918,1),(0x4a18,2),(CHOICE_DATA+24,13130),(CHOICE_DATA+28,13130),(CHOICE+64,0)] {
+            b[at as usize..at as usize+4].copy_from_slice(&value.to_le_bytes());
+        }
+        for(at,value)in[(CHOICE+48,0.6f32),(CHOICE+52,0.8),(CHOICE+56,0.)]{b[at as usize..at as usize+4].copy_from_slice(&value.to_le_bytes());}
+        b[CHOICE_UI as usize+24]=1;b[CHOICE as usize+60]=1;b[CHOICE as usize+61]=1;
+        Reflection::new(TestMemory(RefCell::new(b))).unwrap()
+    }
+    #[test]
+    fn selection_metadata_and_owned_enum_zero_index_are_distinct_from_world_direction() {
+        let mut r=choice_fixture();let plan=ChoicePlan::discover(&mut r,CHOICE_UI,CHOICE,CHOICE_DATA,CHOICE_SHOW).unwrap();
+        let mut consumed=Vec::new();let value=plan.sample(&r,&mut consumed).unwrap();
+        assert_eq!(value.owner,CHOICE_DATA);assert_ne!(value.owner,CHOICE);assert_eq!(value.selected,Some(1));assert_eq!(value.hover,0);
+        assert!(value.current&&value.panel&&value.drag);assert_eq!(value.base,13130);assert!(check(&r,&consumed).is_ok());
+        r.memory.0.borrow_mut()[CHOICE as usize+64..CHOICE as usize+68].copy_from_slice(&1i32.to_le_bytes());
+        assert!(check(&r,&consumed).is_err());assert_eq!(plan.sample(&r,&mut Vec::new()).unwrap().selected,Some(2));
+        r.memory.0.borrow_mut()[CHOICE as usize+64..CHOICE as usize+68].copy_from_slice(&(-1i32).to_le_bytes());
+        let idle=plan.sample(&r,&mut Vec::new()).unwrap();assert_eq!(idle.selected,None);assert_eq!(idle.hover,-1);
+        r.memory.0.borrow_mut()[CHOICE_DATA as usize+28..CHOICE_DATA as usize+32].copy_from_slice(&2_013_132i32.to_le_bytes());
+        r.memory.0.borrow_mut()[CHOICE as usize+61]=0;
+        let future=plan.sample(&r,&mut Vec::new()).unwrap();
+        assert_eq!(future.owner,CHOICE_DATA);assert_eq!(future.base,13130);assert_eq!(future.active,2_013_132);
+        assert!(!future.panel,"fresh data ownership remains observable after the panel closes and native form advances");
+    }
+    #[test]
+    fn selection_foreign_rebound_unknown_and_unqualified_metadata_revoke_only_optional_receipt() {
+        let mut r=choice_fixture();let plan=ChoicePlan::discover(&mut r,CHOICE_UI,CHOICE,CHOICE_DATA,CHOICE_SHOW).unwrap();
+        let retained=vec![(CHOICE,0x100u64.to_le_bytes().to_vec())];
+        for(at,raw)in[(CHOICE+60,vec![2]),(CHOICE+64,8i32.to_le_bytes().to_vec()),
+            (CHOICE+48,f32::NAN.to_le_bytes().to_vec()),(CHOICE+16,0x4150u64.to_le_bytes().to_vec()),
+            (CHOICE_COMP+16,0x4250u64.to_le_bytes().to_vec())] {
+            let old=r.read(at,raw.len()).unwrap();r.memory.0.borrow_mut()[at as usize..at as usize+raw.len()].copy_from_slice(&raw);
+            let mut consumed=retained.clone();assert!(plan.sample(&r,&mut consumed).is_none());assert_eq!(consumed,retained);
+            r.memory.0.borrow_mut()[at as usize..at as usize+old.len()].copy_from_slice(&old);
+        }
+        for(at,raw)in[(0x4a18,3i32.to_le_bytes().to_vec()),(0x4d28,0x4c00u64.to_le_bytes().to_vec())] {
+            let mut changed=choice_fixture();changed.memory.0.borrow_mut()[at..at+raw.len()].copy_from_slice(&raw);
+            assert!(ChoicePlan::discover(&mut changed,CHOICE_UI,CHOICE,CHOICE_DATA,CHOICE_SHOW).is_err());
+        }
+        let mut wrong=choice_fixture();let table=wrong.pointer(0x1100+0x78).unwrap();let ty=wrong.pointer(table+8).unwrap();
+        wrong.memory.0.borrow_mut()[ty as usize+8..ty as usize+12].copy_from_slice(&(18u32<<16).to_le_bytes());
+        assert!(ChoicePlan::discover(&mut wrong,CHOICE_UI,CHOICE,CHOICE_DATA,CHOICE_SHOW).is_err(),"native cached pointer kind24 must not become managed reference18");
     }
     #[test]
     fn discovery_requires_typed_button_data_and_its_local_skill_component() {

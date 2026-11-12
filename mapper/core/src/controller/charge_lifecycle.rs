@@ -31,6 +31,7 @@ impl Controller {
         self.skillVariants_.iter().find(|v| v.slot == button.slot && v.base == button.skillId)
     }
     pub(crate) fn arm_charge_gesture(&mut self, button: &Button) {
+        if self.skillBehavior_==SkillBehavior::Selection {self.chargeGesture_=None;return;}
         self.chargeGesture_ = self.fresh_charge_variant(button, 0)
             .filter(|v| v.charge_skill == Some(true) && v.active == button.skillId)
             .filter(|_| self.coreSkill_ == 0 && self.frameActiveSlot_.is_empty() && !self.frameEpoch_.is_empty())

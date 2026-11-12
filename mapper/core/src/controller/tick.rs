@@ -48,6 +48,11 @@ impl Controller {
             && self.releaseRequested_.valid()
             && self.releaseRequested_.elapsed(self.now_) >= 1500
         {
+            if self.skillBehavior_==SkillBehavior::Selection {
+                self.request_skill_cancel(host);
+                self.set_status("F7: выбор не подтверждён — ожидаю отмену игры");
+                return;
+            }
             self.finish_skill(host, true);
             self.set_status(
                 "F7: не удалось подтвердить наведение — отложенное применение отменено",
@@ -108,6 +113,10 @@ impl Controller {
             } else {
                 host.timer(Timer::Tap, Some(16 - elapsed))
             }
+            return;
+        }
+        if self.skillBehavior_ == SkillBehavior::Selection {
+            self.tick_selection(host);
             return;
         }
         if self.skillBehavior_ == SkillBehavior::Direction {

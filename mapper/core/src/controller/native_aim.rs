@@ -132,6 +132,7 @@ impl Controller {
             1 => return SkillBehavior::Tap,
             2 => return SkillBehavior::Direction,
             3 => return SkillBehavior::Range,
+            4 => return SkillBehavior::Selection,
             _ => {},
         }
         if self.heroId_ != 25 || (button.skillId != 2520 && button.skillId != 2530) {

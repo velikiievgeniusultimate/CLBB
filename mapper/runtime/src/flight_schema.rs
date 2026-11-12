@@ -321,6 +321,7 @@ impl Encode for s::Frame {
         out.insert("skill_state".into(), self.skill_state.encode());
         out.insert("active_joystick".into(), self.active_joystick.encode());
         out.insert("direction_input".into(), self.direction_input.encode());
+        out.insert("selection_input".into(), self.selection_input.encode());
         out.insert("cancel_state".into(), self.cancel_state.encode());
         out.insert("logical".into(), self.logical.encode());
         out.insert("motion".into(), self.motion.encode());
@@ -331,6 +332,20 @@ impl Encode for s::Frame {
 impl Encode for u8 {
     fn encode(&self) -> Value {
         json!(self)
+    }
+}
+
+impl Encode for s::SelectionInput {
+    fn encode(&self)->Value {
+        json!({"ready":self.ready.encode(),"coherent":self.coherent.encode(),"input_ready":self.input_ready.encode(),
+            "panel_visible":self.panel_visible.encode(),"has_drag":self.has_drag.encode(),
+            "selected_option_valid":self.selected_option_valid.encode(),"source":self.source.encode(),"reason":self.reason.encode(),
+            "token":self.token.encode(),"slot":self.slot.encode(),"hero_id":self.hero_id.encode(),
+            "base_skill_id":self.base_skill_id.encode(),"active_skill_id":self.active_skill_id.encode(),
+            "native_skill_id":self.native_skill_id.encode(),"owner_id":self.owner_id.encode(),"owner_hex":format!("0x{:x}",self.owner_id),
+            "sample_start_ns":self.sample_start_ns.encode(),"sample_end_ns":self.sample_end_ns.encode(),
+            "hover_index":self.hover_index.encode(),"selected_option":self.selected_option.encode(),
+            "raw_touch_xyz":self.raw_touch_xyz.encode(),"drag_direction_xy":self.drag_direction_xy.encode()})
     }
 }
 impl Encode for u64 {
@@ -592,6 +607,19 @@ impl Encode for clbb_moba_core::controller::view::View {
         );
         out.insert("touchSequence_".into(), self.touchSequence_.encode());
         out.insert("sentTimeNs_".into(), self.sentTimeNs_.encode());
+        out.insert("selectionOwner_".into(), self.selectionOwner_.encode());
+        out.insert("selectionOwnerHex_".into(),json!(format!("0x{:x}",self.selectionOwner_)));
+        out.insert("selectionRevoked_".into(), self.selectionRevoked_.encode());
+        out.insert("selectionGeometryFresh_".into(), self.selectionGeometryFresh_.encode());
+        out.insert("selectionAccepted_".into(), self.selectionAccepted_.encode());
+        out.insert("selectionMatchedSequence_".into(), self.selectionMatchedSequence_.encode());
+        out.insert("selectionGoalSequence_".into(), self.selectionGoalSequence_.encode());
+        out.insert("selectionSampleStartNs_".into(), self.selectionSampleStartNs_.encode());
+        out.insert("selectionSampleEndNs_".into(), self.selectionSampleEndNs_.encode());
+        out.insert("selectionOption_".into(), self.selectionOption_.encode());
+        out.insert("selectionCaptured_".into(), self.selectionCaptured_.encode());
+        out.insert("selectionEndClock_".into(), self.selectionEndClock_.encode());
+        out.insert("selectionEndSampleNs_".into(), self.selectionEndSampleNs_.encode());
         out.insert(
             "verifiedTransportSequence_".into(),
             self.verifiedTransportSequence_.encode(),
@@ -764,6 +792,24 @@ impl Encode for clbb_moba_core::controller::view::View {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn selection_recording_preserves_unknown_flags_zero_hover_and_full_u64_owner() {
+        let mut frame=s::Frame::default();
+        let value=frame.encode();let empty=&value["selection_input"];
+        assert_eq!(empty["ready"]["value"],-1);assert_eq!(empty["selected_option_valid"]["value"],-1);
+        assert_eq!(empty["selected_option"]["kind"],0);assert_eq!(empty["sample_end_ns"]["kind"],0);
+        frame.selection_input=s::SelectionInput {ready:crate::source::flag(true),coherent:crate::source::flag(true),
+            source:crate::source::text("KeySkillMultiChoice.m_lastDragDir"),reason:crate::source::text("ready"),
+            owner_id:9_007_199_254_740_993,hover_index:crate::source::number(0.),
+            selected_option:crate::source::number(1.),selected_option_valid:crate::source::flag(true),..Default::default()};
+        let encoded=frame.encode();let raw=serde_json::to_vec(&encoded).unwrap();let value:Value=serde_json::from_slice(&raw).unwrap();
+        assert_eq!(value,encoded);let selected=&value["selection_input"];
+        assert_eq!(selected["owner_id"].as_u64(),Some(9_007_199_254_740_993));
+        assert_eq!(selected["owner_hex"],"0x20000000000001");
+        assert_eq!(selected["hover_index"]["value"],0.);assert_eq!(selected["selected_option"]["value"],1.);
+        assert_eq!(selected["selected_option_valid"]["value"],1);
+        assert_eq!(value["direction_input"]["ready"]["value"],-1);
+    }
     #[test]
     fn covered_direction_recording_keeps_unknown_binding_and_exact_source_separate_from_native_ack() {
         let mut input=s::Direction::default();let missing=input.encode();

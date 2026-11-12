@@ -197,6 +197,13 @@ pub struct ButtonPlan {
     pub state_forbid: Option<u64>,
     pub(crate) charge: Option<crate::control_audit::ChargePlan>,
     charge_retry: i64,
+    choice_family: bool,
+    choice: Option<crate::control_audit::ChoicePlan>,
+    choice_retry: i64,
+    choice_touch: Option<crate::aim::SelectionTouchPlan>,
+    choice_touch_retry: i64,
+    choice_touch_attempts: u8,
+    choice_touch_held: bool,
     pub timer: Option<u64>,
     pub widget: Option<Widget>,
 }
@@ -218,6 +225,7 @@ pub struct UiPlan {
     pub optional: crate::optional_ui::OptionalUi,
     pub linked: Option<crate::control_audit::CurvePlan>,
     linked_retry: i64,
+    last_choice_slot: String,
 }
 pub(crate) fn skill_button_class<M: Memory>(r: &mut Reflection<M>, class: &crate::reflection::Class) -> Result<bool> {
     let mut ancestry = vec![class.name.clone()];
@@ -237,6 +245,38 @@ fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
         return "extra";
     }
     if ancestry.iter().any(|name| name == "SkillButton") { "skill" } else { "extra" }
+}
+
+/// A specialized choice button may become an ordinary native follow-up form.
+/// Unknown current form is not permission to fall back to the base Tap class.
+fn choice_selector_phase(ui:&s::Ui,state:&s::VariantState,slot:&str)->Option<bool> {
+    if !ui.ready.get()||!state.ready.get()||!ui.hero_id.is_number()||ui.hero_id.int()<=0
+        ||state.hero_id.kind!=ui.hero_id.kind||state.hero_id.value!=ui.hero_id.value{return None;}
+    let mut buttons=ui.buttons.iter().take(ui.button_count.min(32)as usize).filter(|b|b.slot.as_str()==slot);
+    let button=buttons.next()?;
+    if buttons.next().is_some()||!button.active.get()||!button.skill_id.is_number()||button.skill_id.int()<=0{return None;}
+    let mut variants=state.buttons.iter().take(state.count.min(32)as usize).filter(|v|v.slot.as_str()==slot);
+    let variant=variants.next()?;
+    if variants.next().is_some()||!variant.base_skill_id.is_number()||!variant.active_skill_id.is_number()
+        ||variant.base_skill_id.int()!=button.skill_id.int()||variant.active_skill_id.int()<=0{return None;}
+    Some(variant.active_skill_id.int()==variant.base_skill_id.int())
+}
+fn selection_plan_retry_delay(attempts:u8,held:bool)->i64 {
+    if !held {1_000_000_000}else if attempts<=3 {0}else{20_000_000}
+}
+fn choice_control_type(phase:Option<bool>,verified_future:Option<u8>)->u8 {
+    match (phase,verified_future) {
+        (Some(false),Some(kind @ 1..=3))=>kind,
+        // Known class + unknown form/receipt is still Selection, not aim_type0
+        // (which the generic mapper interprets as Range) or implicit Tap.
+        _=>4,
+    }
+}
+fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
+    control_types:&mut std::collections::BTreeMap<String,u8>)->Option<bool> {
+    let phase=choice_selector_phase(ui,state,slot);
+    control_types.insert(slot.to_owned(),choice_control_type(phase,None));
+    phase
 }
 
 #[cfg(test)]
@@ -367,6 +407,8 @@ impl UiPlan {
             } else {
                 None
             };
+            let choice_family=kind=="skill"&&crate::control_audit::ChoicePlan::is_family(r,&class)?;
+            let choice=if choice_family {crate::control_audit::ChoicePlan::discover(r,object,button,data,local_show).ok()}else{None};
             checks.push((button, class.address.to_le_bytes().to_vec()));
             checks.push((at, index.to_le_bytes().to_vec()));
             buttons.push(ButtonPlan {
@@ -382,6 +424,7 @@ impl UiPlan {
                 state_forbid,
                 charge,
                 charge_retry: 0,
+                choice_family,choice,choice_retry:0,choice_touch:None,choice_touch_retry:0,choice_touch_attempts:0,choice_touch_held:false,
                 timer,
                 widget: None,
             });
@@ -441,7 +484,7 @@ impl UiPlan {
         let optional = crate::optional_ui::OptionalUi::prepare(r, object, &objects, local_show)?;
         let linked=crate::control_audit::CurvePlan::discover(r,object,&buttons).ok();
         Ok(Self {
-            linked, linked_retry:0,
+            linked, linked_retry:0,last_choice_slot:String::new(),
             object,
             checks,
             objects,
@@ -1130,6 +1173,8 @@ impl<M: Memory> Source<M> {
             consumed.extend(c);Some(v)} else {None};
         let mut control_types=std::collections::BTreeMap::new();
         let mut control_holds = std::collections::BTreeMap::new();
+        let mut selection_observations=Vec::new();
+        let mut selection_variant_unknown=false;
         for button in plan.ui.buttons.iter_mut().filter(|button| button.kind == "skill") {
             if button.charge.is_none() && now >= button.charge_retry {
                 button.charge = crate::control_audit::ChargePlan::discover(r, button.object, button.data, plan.match_owners[2]).ok();
@@ -1137,6 +1182,46 @@ impl<M: Memory> Source<M> {
             }
             if let Some(value) = button.charge.as_ref().and_then(|charge| charge.sample(r, &mut consumed)) {
                 control_holds.insert(button.slot.clone(), value);
+            }
+            if button.choice_family {
+                // Family identity is fenced by the owned UiPlan. Optional
+                // feedback/form failure must never fall into generic Range or
+                // instant Tap. A verified future template may override4 below.
+                let phase=retain_choice_family(&ui,&skill_state,&button.slot,&mut control_types);
+                let Some(selector_phase)=phase else{selection_variant_unknown=true;continue;};
+                if button.choice.as_ref().is_some_and(|choice|choice.validate(r).is_err()) {
+                    button.choice=None;button.choice_touch=None;
+                }
+                if button.choice.is_none()&&now>=button.choice_retry {
+                    button.choice=crate::control_audit::ChoicePlan::discover(r,plan.ui.object,button.object,button.data,plan.match_owners[2]).ok();
+                    button.choice_retry=now.saturating_add(1_000_000_000);
+                }
+                if let Some(observation)=button.choice.as_ref().and_then(|choice|choice.sample(r,&mut consumed)) {
+                    let current=ui.buttons.iter().take(ui.button_count.min(32)as usize).find(|b|b.slot.as_str()==button.slot)
+                        .is_some_and(|b|b.skill_id.int()==observation.base);
+                    let same_form=skill_state.buttons.iter().take(skill_state.count.min(32)as usize).find(|v|v.slot.as_str()==button.slot)
+                        .is_some_and(|v|v.base_skill_id.int()==observation.base&&v.active_skill_id.int()==observation.active);
+                    if current&&same_form {
+                        if selector_phase {
+                            if observation.current&&!button.choice_touch_held {
+                                button.choice_touch_retry=0;button.choice_touch_attempts=0;
+                            }
+                            if button.choice_touch.as_ref().is_some_and(|touch|touch.skill!=observation.active||touch.validate(r).is_err()) {
+                                button.choice_touch=None;button.choice_touch_retry=0;button.choice_touch_attempts=0;
+                            }
+                            // Resolve small typed plans while idle too. A cold
+                            // first MOVE must not inherit an idle one-second
+                            // retry deadline when the native registry appears.
+                            if button.choice_touch.is_none()&&now>=button.choice_touch_retry {
+                                button.choice_touch=crate::aim::SelectionTouchPlan::discover(r,plan.indicator,observation.active).ok();
+                                button.choice_touch_attempts=button.choice_touch_attempts.saturating_add(1);
+                                button.choice_touch_retry=now.saturating_add(selection_plan_retry_delay(button.choice_touch_attempts,observation.current));
+                            }
+                        }
+                        button.choice_touch_held=observation.current&&selector_phase;
+                        selection_observations.push((button.slot.clone(),observation));
+                    }
+                }
             }
         }
         // Charge flags share the same owner-fenced bracket as the local
@@ -1146,17 +1231,20 @@ impl<M: Memory> Source<M> {
                 .copied().map(flag).unwrap_or_default();
         }
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill" || b.kind.as_str()=="extra") {
+            let choice_family=plan.ui.buttons.iter().any(|b|b.slot==entry.slot.as_str()&&b.choice_family);
+            if choice_family
+                &&choice_selector_phase(&ui,&skill_state,entry.slot.as_str())!=Some(false){continue;}
             let id=skill_state.buttons.iter().take(skill_state.count.min(32) as usize)
                 .find(|v|v.slot.as_str()==entry.slot.as_str() && v.base_skill_id.int()==entry.skill_id.int())
                 .map(|v|v.active_skill_id.int()).filter(|id|*id>0).unwrap_or(entry.skill_id.int());
             if id<=0 {continue;}
-            if hero == 84 && entry.slot.as_str() == "skill:2" && id == 8430 {
+            if !choice_family && hero == 84 && entry.slot.as_str() == "skill:2" && id == 8430 {
                 // Ling's ultimate rotates its blade landing arrangement even
                 // though its generic package is also used by plain tap skills.
                 control_types.insert(entry.slot.owned(), 2);
                 continue;
             }
-            if hero == 25 && entry.slot.as_str() == "skill:2" && matches!(id, 2530 | 2531) {
+            if !choice_family && hero == 25 && entry.slot.as_str() == "skill:2" && matches!(id, 2530 | 2531) {
                 // The umbrella's second form has a directional indicator
                 // package, but the ultimate itself uses a button press.
                 control_types.insert(entry.slot.owned(), 1);
@@ -1171,7 +1259,7 @@ impl<M: Memory> Source<M> {
             }
             if let Some((checks,kind))=plan.behaviors.get(&id) {
                 consumed.extend(checks.iter().cloned());
-                control_types.insert(entry.slot.owned(),*kind);
+                control_types.insert(entry.slot.owned(),if choice_family{choice_control_type(Some(false),Some(*kind))}else{*kind});
             }
         }
         let point =
@@ -1310,6 +1398,44 @@ impl<M: Memory> Source<M> {
                     }
                 }
             }
+        }
+        // Choice feedback is native UI XY, never a world-space Direction ACK.
+        frame.selection_input.reason=text(if selection_variant_unknown{"choice_variant_unknown"}else{"owner_receipt_unavailable"});
+        if selection_observations.iter().any(|(slot,_)|slot==frame.ui.active_slot.as_str()) {
+            if plan.ui.last_choice_slot!=frame.ui.active_slot.as_str(){plan.ui.last_choice_slot=frame.ui.active_slot.owned();}
+        }
+        if let Some((slot,observation))=selection_observations.into_iter().min_by_key(|(slot,_)| {
+            if slot==frame.ui.active_slot.as_str(){0}else if slot==&plan.ui.last_choice_slot{1}else{2}
+        }) {
+            let selected=observation.selected;
+            let unit=observation.direction[0].hypot(observation.direction[1]);
+            let direction_valid=(unit-1.).abs()<=0.01&&observation.direction[2].abs()<=0.01;
+            let mut selection=s::SelectionInput {
+                ready:flag(true),coherent:flag(true),input_ready:flag(false),
+                reason:text(if observation.active==observation.base{"inactive_choice"}else{"selector_phase_complete"}),
+                panel_visible:flag(observation.panel),has_drag:flag(observation.drag),
+                selected_option_valid:flag(selected.is_some()),source:text("KeySkillMultiChoice.m_lastDragDir"),
+                token:frame.token,slot:text(&slot),hero_id:frame.hero_id,
+                base_skill_id:number(observation.base as f64),active_skill_id:number(observation.active as f64),
+                native_skill_id:frame.skill_id,owner_id:observation.owner,
+                sample_start_ns:number(now as f64),sample_end_ns:number(now as f64),hover_index:number(observation.hover as f64),
+                selected_option:selected.map(|v|number(v as f64)).unwrap_or_default(),
+                drag_direction_xy:if direction_valid {v2([observation.direction[0],observation.direction[1]])}else{Default::default()},
+                ..Default::default()
+            };
+            if observation.active==observation.base&&observation.current&&slot==frame.ui.active_slot.as_str()&&skill==observation.active {
+                selection.reason=text("awaiting_native_touch");
+                if let Some(button)=plan.ui.buttons.iter_mut().find(|button|button.slot==slot&&button.choice_family) {
+                    let checkpoint=consumed.len();
+                    if let Some(raw)=button.choice_touch.as_ref().and_then(|touch|touch.sample(r,&mut consumed).ok()) {
+                        selection.raw_touch_xyz=v3(raw);
+                        let ready=observation.panel&&observation.drag&&selected.is_some()&&direction_valid;
+                        selection.input_ready=flag(ready);
+                        selection.reason=text(if ready{"ready"}else{"invalid_ui_feedback"});
+                    }else{consumed.truncate(checkpoint);}
+                }
+            }
+            frame.selection_input=selection;
         }
         // A verified direction joystick may need its first MOVE before the
         // motion publishes a unit vector. UI ownership/geometry are sampled
@@ -1579,6 +1705,10 @@ fn stamp_frame(frame: &mut s::Frame, begin: i64, end: i64) {
     frame.motion.sample_end_ns = finish;
     frame.direction_input.sample_start_ns = start;
     frame.direction_input.sample_end_ns = finish;
+    if frame.selection_input.ready.get() {
+        frame.selection_input.sample_start_ns=start;
+        frame.selection_input.sample_end_ns=finish;
+    }
 }
 
 #[cfg(test)]
@@ -1809,6 +1939,86 @@ mod tests {
             assert_eq!(a.value, begin as f64);
             assert_eq!(b.value, end as f64);
         }
+    }
+    #[test]
+    fn unknown_selection_does_not_gain_a_fresh_receipt_when_global_frame_is_stamped() {
+        let mut frame=s::Frame::default();
+        frame.selection_input.reason=text("owner_receipt_unavailable");
+        stamp_frame(&mut frame,1000,1200);
+        assert!(frame.selection_input.ready.missing());
+        assert!(frame.selection_input.input_ready.missing());
+        assert!(frame.selection_input.sample_start_ns.missing());
+        assert!(frame.selection_input.sample_end_ns.missing());
+        assert!(frame.selection_input.selected_option_valid.missing());
+        assert!(frame.direction_input.ready.missing());
+        frame.selection_input=s::SelectionInput {ready:flag(true),coherent:flag(true),input_ready:flag(false),
+            owner_id:140_128_804_941_248,hover_index:number(-1.),selected_option_valid:flag(false),
+            reason:text("inactive_choice"),..Default::default()};
+        stamp_frame(&mut frame,2000,2500);
+        assert_eq!(frame.selection_input.sample_start_ns.value,2000.);
+        assert_eq!(frame.selection_input.sample_end_ns.value,2500.);
+        assert!(!frame.selection_input.input_ready.get());
+        assert!(frame.selection_input.selected_option.missing());
+        assert!(frame.selection_input.raw_touch_xyz.values.iter().all(|v|v.missing()));
+        assert!(frame.direction_input.ready.missing(),"Selection ownership must not publish a world direction ACK");
+    }
+    #[test]
+    fn selection_family_overrides_base_tap_only_for_the_fresh_exact_selector_form() {
+        let mut ui=s::Ui {ready:flag(true),hero_id:number(131.),button_count:1,..Default::default()};
+        ui.buttons[0]=s::Button {slot:text("skill:2"),skill_id:number(13130.),active:flag(true),..Default::default()};
+        let mut state=s::VariantState {ready:flag(true),hero_id:ui.hero_id,count:1,..Default::default()};
+        state.buttons[0]=s::Variant {slot:text("skill:2"),base_skill_id:number(13130.),active_skill_id:number(13130.),..Default::default()};
+        assert_eq!(choice_selector_phase(&ui,&state,"skill:2"),Some(true));
+        for actual in [1_013_132.,2_013_132.,42.] {
+            state.buttons[0].active_skill_id=number(actual);
+            assert_eq!(choice_selector_phase(&ui,&state,"skill:2"),Some(false),"follow-up form must use its actual native template, never numeric hero arithmetic");
+        }
+        for case in 0..8 {
+            let mut u=ui;let mut v=state;
+            match case {
+                0=>v.ready=Default::default(),1=>v.hero_id=number(25.),2=>v.buttons[0].base_skill_id=number(999.),
+                3=>v.buttons[0].active_skill_id=Default::default(),4=>v.count=0,
+                5=>{v.buttons[1]=v.buttons[0];v.count=2;},6=>u.buttons[0].active=flag(false),
+                _=>{u.buttons[1]=u.buttons[0];u.button_count=2;}
+            }
+            assert_eq!(choice_selector_phase(&u,&v,"skill:2"),None,"case{case}: unknown form must not restore base Tap fallback");
+        }
+    }
+    #[test]
+    fn unknown_choice_phase_retains_selection_until_future_native_template_is_positively_verified() {
+        let unknown=s::SelectionInput {reason:text("choice_variant_unknown"),..Default::default()};
+        for phase in [None,Some(true)] {
+            for future in [None,Some(0),Some(1),Some(2),Some(3),Some(4)] {
+                assert_eq!(choice_control_type(phase,future),4,"unknown/selector phase cannot use a future/base template");
+            }
+        }
+        for unverified in [None,Some(0),Some(4),Some(255)] {
+            assert_eq!(choice_control_type(Some(false),unverified),4,"unknown future must never expose aim_type0/generic Range or implicit Tap");
+        }
+        for native in [1,2,3] {assert_eq!(choice_control_type(Some(false),Some(native)),native);}
+        assert_eq!(choice_control_type(Some(false),Some(1)),1,"a positively verified follow-up Tap remains Tap");
+        assert!(unknown.ready.missing());assert!(unknown.input_ready.missing());
+        assert!(unknown.sample_start_ns.missing());assert!(unknown.sample_end_ns.missing());
+        assert_eq!(unknown.reason.as_str(),"choice_variant_unknown");
+        let mut ui=s::Ui {ready:flag(true),hero_id:number(131.),button_count:1,..Default::default()};
+        ui.buttons[0]=s::Button {slot:text("skill:2"),active:flag(true),skill_id:number(13130.),..Default::default()};
+        let mut state=s::VariantState {ready:flag(true),hero_id:ui.hero_id,count:1,..Default::default()};
+        state.buttons[0]=s::Variant {slot:text("skill:2"),base_skill_id:number(13130.),..Default::default()};
+        let mut published=std::collections::BTreeMap::new();
+        assert_eq!(retain_choice_family(&ui,&state,"skill:2",&mut published),None);
+        assert_eq!(published.get("skill:2"),Some(&4),"the production pre-discovery path must publish4 before rejecting an unknown variant");
+        assert!(unknown.ready.missing());
+        state.buttons[0].active_skill_id=number(2_013_132.);
+        assert_eq!(retain_choice_family(&ui,&state,"skill:2",&mut published),Some(false));
+        assert_eq!(published.get("skill:2"),Some(&4),"a known future ID still needs independently verified native geometry");
+        published.insert("skill:2".into(),choice_control_type(Some(false),Some(1)));
+        assert_eq!(published.get("skill:2"),Some(&1));
+    }
+    #[test]
+    fn cold_selection_registry_retries_do_not_inherit_idle_delay_or_spin_without_bound() {
+        for attempt in 1..=3 {assert_eq!(selection_plan_retry_delay(attempt,true),0,"first held discovery failures must retry on the next real Source sample");}
+        for attempt in [4,5,100,u8::MAX] {assert_eq!(selection_plan_retry_delay(attempt,true),20_000_000,"persistent missing metadata must be throttled after the bounded cold burst");}
+        assert_eq!(selection_plan_retry_delay(1,false),1_000_000_000,"idle discovery remains infrequent and does not change active input cadence");
     }
     fn movement_fixture() -> (Reflection<MutableMemory>, Widget, [f64; 16], [f64; 16]) {
         let mut bytes = vec![0; 512];

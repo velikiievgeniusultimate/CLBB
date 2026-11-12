@@ -227,7 +227,7 @@ impl Settings {
                 }
                 match self.native_skill_types.get(&hero).and_then(|types| types.get(slot)) {
                     Some(1) => return "1".into(),
-                    Some(2 | 3) => return "0".into(),
+                    Some(2 | 3 | 4) => return "0".into(),
                     _ => {},
                 }
             }
@@ -267,7 +267,7 @@ impl Settings {
             return;
         }
         let verified = || types.iter().filter(|(slot, kind)| {
-            native_skill_slot(slot) && matches!(**kind, 1..=3)
+            native_skill_slot(slot) && matches!(**kind, 1..=4)
         });
         let count = verified().count();
         if self.native_skill_types.get(&hero).is_some_and(|cached| {
@@ -542,6 +542,20 @@ mod tests {
         assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
         s.observe_native_templates(30, &BTreeMap::new());
         assert_eq!(s.binding(30, "skill:0").cast_mode, 0);
+    }
+    #[test]
+    fn native_selection_defaults_to_release_and_verified_next_form_reverts_to_its_template() {
+        let mut s=Settings::default();
+        s.observe_native_templates(131,&BTreeMap::from([("skill:2".into(),4)]));
+        assert_eq!(s.binding(131,"skill:2").cast_mode,0);
+        assert_eq!(s.binding(25,"skill:2").cast_mode,1);
+        s.observe_native_templates(131,&BTreeMap::from([("skill:2".into(),1)]));
+        assert_eq!(s.binding(131,"skill:2").cast_mode,1);
+        s.set("hero.bindings.skill:2.cast_mode","1",131).unwrap();
+        s.observe_native_templates(131,&BTreeMap::from([("skill:2".into(),4)]));
+        assert_eq!(s.binding(131,"skill:2").cast_mode,1,"a native default must preserve an explicit user's mode");
+        s.observe_native_templates(131,&BTreeMap::new());
+        assert_eq!(s.binding(131,"skill:2").cast_mode,1);
     }
     #[test]
     fn native_skill_defaults_never_change_common_controls_or_kagura_away_form() {

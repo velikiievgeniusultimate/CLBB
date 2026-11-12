@@ -182,6 +182,31 @@ def observed_cell_geometry(cell):
     return point, value.get("visible") is True and value.get("onscreen") is True
 
 
+# Conservative, root-observed interior of this training hero grid. A rendered
+# portrait may straddle its edge while still exposing a large clickable area.
+PICKER_CLIP = (.24, .21, .97, .74)
+
+
+def visible_cell_press(cell):
+    point, visible = observed_cell_geometry(cell)
+    if point is None or not visible:
+        return None
+    left, top, right, bottom = PICKER_CLIP
+    if left <= point[0] <= right and top <= point[1] <= bottom:
+        return point
+    radius = cell["button_geometry"].get("radius_uv")
+    if not isinstance(radius, (list, tuple)) or len(radius) != 2 or any(
+            isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not 0 < v < .4 for v in radius):
+        return None
+    x0, x1 = max(left, point[0] - radius[0]), min(right, point[0] + radius[0])
+    y0, y1 = max(top, point[1] - radius[1]), min(bottom, point[1] + radius[1])
+    # Do not target a one-pixel sliver. At least25% of each measured widget
+    # dimension must remain within the conservative grid interior.
+    if x1 - x0 < 2 * radius[0] * .25 or y1 - y0 < 2 * radius[1] * .25:
+        return None
+    return [(x0 + x1) / 2, (y0 + y1) / 2]
+
+
 class Selector:
     def __init__(self, runtime, directory):
         self.runtime = runtime
@@ -282,9 +307,9 @@ class Selector:
                 point, visible = observed_cell_geometry(cell)
                 if point is not None:
                     points.append(point)
-                if cell["hero_id"] == hero and point is not None and visible \
-                        and 0.24 <= point[0] <= 0.97 and 0.21 <= point[1] <= 0.74:
-                    candidates.append(point)
+                press = visible_cell_press(cell)
+                if cell["hero_id"] == hero and press is not None:
+                    candidates.append(press)
             if len(candidates) > 1:
                 raise RuntimeError("Multiple rendered native cells claim the requested hero; refusing a click")
             if len(candidates) == 1:

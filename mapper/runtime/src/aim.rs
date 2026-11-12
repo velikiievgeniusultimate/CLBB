@@ -27,6 +27,53 @@ pub struct MotionPlan {
     direction_flags: Option<(u64,u64)>,
     direction_endpoint: Option<(u64,Path)>,
 }
+/// Input pixels for an independently qualified native UI-choice controller.
+/// This plan never produces Motion/Logical/Direction acknowledgements: the
+/// caller must join its UI owner, selected option and frame coherence fence.
+#[derive(Clone)]
+pub(crate) struct SelectionTouchPlan {
+    checks: Checks,
+    pub(crate) skill: i32,
+    address: u64,
+}
+impl SelectionTouchPlan {
+    pub(crate) fn discover<M:Memory>(r:&mut Reflection<M>,indicator:u64,skill:i32)->Result<Self> {
+        if !(1..=10_000_000).contains(&skill){return Err("Invalid selection touch identity".into());}
+        let(mut checks,comp,motion,package,mc,pc)=MotionPlan::registry_owner(r,indicator,skill)?;
+        if mc.name!="IndicatorMotionPos"||pc.name!="IndicatorPackageEasy_Yuan" {
+            return Err("Unverified native selection touch layout".into());
+        }
+        typed_field(r,comp,"m_Config",17)?;
+        let config=owner(r,comp,"m_Config",&mut checks)?;
+        typed_field(r,config,"m_ShowRectPara",29)?;
+        let(rect,params)=native_rect_config(r,comp,skill,&mut checks)?;
+        if !selection_touch_template(&mc.name,&pc.name,rect,&params) {
+            return Err("Unverified selection zero-extent configuration".into());
+        }
+        for(object,field,expected)in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
+            let at=typed_field(r,object,field,18)?;
+            if u64_at(&capture(r,&mut checks,at,8)?,0)!=expected{return Err("Selection touch owner mismatch".into());}
+        }
+        let address=typed_field(r,motion,"m_vDragTouchPos",17)?;
+        if address<motion||address.checked_add(12).is_none_or(|end|end>motion+4096) {
+            return Err("Selection touch outside native motion bounds".into());
+        }
+        check(r,&checks)?;
+        Ok(Self{checks,skill,address})
+    }
+    pub(crate) fn validate<M:Memory>(&self,r:&Reflection<M>)->Result<()> {check(r,&self.checks)}
+    /// The enclosing Source sample must check `consumed` after its UI reads.
+    /// A zero/idle value is valid raw data, never proof of delivered input.
+    pub(crate) fn sample<M:Memory>(&self,r:&Reflection<M>,consumed:&mut Checks)->Result<[f64;3]> {
+        self.validate(r)?;
+        consumed.extend(self.checks.iter().cloned());
+        source::vec3(&capture(r,consumed,self.address,12)?)
+    }
+}
+fn selection_touch_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
+    motion=="IndicatorMotionPos"&&package=="IndicatorPackageEasy_Yuan"
+        &&rect==11&&params.len()>=2&&params[0]==3.&&params[1]==0.
+}
 fn owner<M: Memory>(
     r: &mut Reflection<M>,
     obj: u64,
@@ -57,6 +104,7 @@ fn native_template(motion:&str,package:&str)->Option<u8> {
         ("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal") => Some(2),
         ("IndicatorMotionArcSurface", "IndicatorPackage_ArcSurface") => Some(2),
         ("IndicatorMotionPos", "IndicatorPackageEasy_Yuan") => Some(3),
+        ("IndicatorMotionRotAndPosRot","IndicatorPackage_JianTou_OtherPart") => Some(3),
         ("IndicatorMotionRotAndPosRot" | "IndicatorMotionFaTiaoQiu2","IndicatorPackage_JianTou_Yuan") => Some(3),
         _=>None,
     }
@@ -79,15 +127,28 @@ fn fixed_part_direction_template(motion:&str,package:&str,rect:i32,params:&[f64]
         && matches!(rect,0|11) && params.len()>=2 && params[0]==15.
         && params[1].is_finite() && params[1]>0. && params[1]<1e4
 }
+/// Unit-vector feedback measured independently of drag ratio for these exact
+/// native layouts. Similar motion names and other shapes remain unqualified.
+fn additional_direction_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
+    let shape=match package {
+        "IndicatorPackage_TwoPartAndPos_Direction" if matches!(rect,1|2)=>11.,
+        "IndicatorPackage_Multi_JianTou" if rect==0=>7.,
+        "IndicatorPackage_TwoPart_Direction" if rect==19=>6.,
+        _=>return false,
+    };
+    motion=="IndicatorMotionRot" && params.len()>=2 && params[0]==shape
+        && params[1].is_finite() && params[1]>0. && params[1]<1e4
+}
 fn native_range_shape(motion:&str,package:&str)->Option<f64> {
     match (motion,package) {
         ("IndicatorMotionRotAndPosRot"|"IndicatorMotionFaTiaoQiu2","IndicatorPackage_JianTou_Yuan")=>Some(8.),
         ("IndicatorMotionPos","IndicatorPackageEasy_Yuan")=>Some(3.),
+        ("IndicatorMotionRotAndPosRot","IndicatorPackage_JianTou_OtherPart")=>Some(9.),
         _=>None,
     }
 }
-fn verified_direction_geometry(skill:i32,motion:&str,package:&str,fixed_part_direction:bool)->bool {
-    native_template(motion,package)==Some(2)||fixed_part_direction
+fn verified_direction_geometry(skill:i32,motion:&str,package:&str,configured_direction:bool)->bool {
+    native_template(motion,package)==Some(2)||configured_direction
         ||(skill==8430&&motion=="IndicatorMotionRot"&&package=="IndicatorPackageEasy")
 }
 fn point_visual_fallback(motion:&str,package:&str)->bool {
@@ -102,6 +163,14 @@ fn valid_native_range(shape:f64,values:[f64;2])->bool {
 fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
     motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<(u64,f64)>> {
     let Some(shape)=native_range_shape(motion_name,package_name)else{return Ok(None)};
+    if shape==9. {
+        let(rect,params)=native_rect_config(r,comp,skill,checks)?;
+        if rect!=1||!valid_native_range(shape,params){return Err("Unverified shape-nine native range configuration".into());}
+    }
+    native_range_contract_for_shape(r,comp,motion,package,skill,shape,checks).map(Some)
+}
+fn native_range_contract_for_shape<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,
+    skill:i32,shape:f64,checks:&mut Checks)->Result<(u64,f64)> {
     let mut config=0;
     for object in [comp,motion,package] {
         let at=typed_field(r,object,"m_Config",17)?;
@@ -125,7 +194,17 @@ fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,pack
     if !valid_native_range(shape,[f32_at(&raw,0),f32_at(&raw,4)]) {return Err("Invalid native world range".into());}
     checks.push((address,raw[..4].to_vec()));
     if r.read(address,8)?!=raw{return Err("Native range changed during discovery".into());}
-    Ok(Some((address,shape)))
+    Ok((address,shape))
+}
+/// The independently measured shape-nine family retains its stricter rect
+/// witness in addition to the shared native Range owner/type contract.
+fn candidate_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
+    motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<(u64,f64)>> {
+    if motion_name!="IndicatorMotionRotAndPosRot"||package_name!="IndicatorPackage_JianTou_OtherPart" {return Ok(None);}
+    if !(1..=10_000_000).contains(&skill){return Err("Invalid candidate range identity".into());}
+    let(rect,params)=native_rect_config(r,comp,skill,checks)?;
+    if rect!=1||!valid_native_range(9.,params){return Err("Unverified candidate range configuration".into());}
+    native_range_contract_for_shape(r,comp,motion,package,skill,9.,checks).map(Some)
 }
 fn native_rect_config<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,checks:&mut Checks)->Result<(i32,[f64;2])> {
     let config=owner(r,comp,"m_Config",checks)?;
@@ -160,6 +239,23 @@ fn fixed_part_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     }
     Ok(true)
 }
+fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,motion:&str,package:&str,checks:&mut Checks)->Result<bool> {
+    if motion!="IndicatorMotionRot" || !matches!(package,"IndicatorPackage_TwoPartAndPos_Direction"
+        |"IndicatorPackage_Multi_JianTou"|"IndicatorPackage_TwoPart_Direction") {
+        return Ok(false);
+    }
+    if !(1..=10_000_000).contains(&skill) {return Err("Invalid additional direction identity".into());}
+    // The current registry comp owns the typed configuration. A package may
+    // share another form's config, so that pointer is not this skill's identity.
+    let config_at=typed_field(r,comp,"m_Config",17)?;
+    let config=u64_at(&capture(r,checks,config_at,8)?,0);
+    typed_field(r,config,"m_ShowRectPara",29)?;
+    let(rect,params)=native_rect_config(r,comp,skill,checks)?;
+    if !additional_direction_template(motion,package,rect,&params) {
+        return Err("Unverified additional direction configuration".into());
+    }
+    Ok(true)
+}
 /// This base motion has no m_OwnPackage field. It is a Tap only when both
 /// actual owners and all three configuration links prove the zero-extent
 /// contract; an unknown motion with a missing owner field remains rejected.
@@ -187,6 +283,26 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
     Ok(true)
 }
 impl MotionPlan {
+    /// Read-only proof for the separately measured shape-nine positional family.
+    /// No native motion, input, or persistent plan is modified.
+    pub fn audit_candidate_range_contract<M:Memory>(r:&mut Reflection<M>,indicator:u64,skill:i32)->Result<serde_json::Value> {
+        let elapsed=std::time::Instant::now();
+        let(mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
+        for(object,field,expected)in[(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
+            let at=typed_field(r,object,field,18)?;
+            if u64_at(&capture(r,&mut checks,at,8)?,0)!=expected{return Err("Candidate range motion owner changed".into());}
+        }
+        let(address,shape)=candidate_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?
+            .ok_or("Unqualified candidate range family")?;
+        let values=capture(r,&mut checks,address,8)?;
+        let range=f32_at(&values,4);
+        if !valid_native_range(shape,[f32_at(&values,0),range]){return Err("Candidate range changed during audit".into());}
+        check(r,&checks)?;
+        Ok(serde_json::json!({"skill":skill,"motion":mc.name,"package":pc.name,"rect":1,"shape":shape,
+            "world_range":range,"world_range_source":"CData_Skill_Element.m_ShowRectPara[1]",
+            "typed_config_owners_equal":true,"registry_owner_checked":true,"production_enabled":native_range_shape(&mc.name,&pc.name)==Some(shape),
+            "checks":checks.len(),"duration_ns":elapsed.elapsed().as_nanos()}))
+    }
     /// Separate read-only diagnostic bracket; does not alter live acknowledgement rules.
     pub fn audit_drag_gate<M: Memory>(&self, r: &mut Reflection<M>) -> Result<serde_json::Value> {
         check(r, &self.checks)?;
@@ -345,7 +461,15 @@ impl MotionPlan {
     /// Names and field types only; unverified motion classes never become live plans.
     pub fn audit_registry_identity<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -> Result<serde_json::Value> {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
+        let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
+            if base_tap&&object==motion&&field=="m_OwnPackage" {
+                match r.field(object,field) {
+                    Err(error)if error=="Missing reflected field m_OwnPackage"=>continue,
+                    Err(error)=>return Err(error),
+                    Ok(_)=>{typed_field(r,object,field,18)?;}
+                }
+            }
             if owner(r,object,field,&mut checks)?!=expected {return Err("Audit motion owner mismatch".into());}
         }
         let mut objects=vec![("motion",motion),("package",package),("comp",comp)];
@@ -377,13 +501,21 @@ impl MotionPlan {
     pub fn audit_registry_values<M: Memory>(r: &mut Reflection<M>, indicator:u64, skill:i32)->Result<serde_json::Value> {
         let elapsed=std::time::Instant::now();
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
-        if !["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
+        if !base_tap&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
+            if base_tap&&object==motion&&field=="m_OwnPackage" {
+                match r.field(object,field) {
+                    Err(error)if error=="Missing reflected field m_OwnPackage"=>continue,
+                    Err(error)=>return Err(error),
+                    Ok(_)=>{typed_field(r,object,field,18)?;}
+                }
+            }
             if owner(r,object,field,&mut checks)?!=expected {return Err("Audit motion owner mismatch".into());}
         }
         let mut values=serde_json::Map::new();
         for name in ["m_vDragResult","m_vDragTouchPos","m_vDragDir","m_vActiveDir"] {
-            let at=r.field(motion,name)?;
+            let at=if base_tap{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
             if at<motion || at+12>motion+4096 {return Err("Audit vector outside motion".into());}
             let raw=capture(r,&mut checks,at,12)?;
             values.insert(name.into(),serde_json::json!(source::vec3(&raw)?));
@@ -395,7 +527,7 @@ impl MotionPlan {
             }
         }
         for name in ["m_fDragRatio","m_dragged","m_bVaildDraged"] {
-            let at=r.field(motion,name)?;
+            let at=if base_tap{typed_field(r,motion,name,if name=="m_fDragRatio"{12}else{2})?}else{r.field(motion,name)?};
             let raw=capture(r,&mut checks,at,if name=="m_fDragRatio" {4}else{1})?;
             let value=if name=="m_fDragRatio" {
                 let v=f32_at(&raw,0);if !v.is_finite() || v<0. || v>=1e6{return Err("Invalid audit ratio".into());}serde_json::json!(v)
@@ -504,7 +636,8 @@ impl MotionPlan {
             kind
         }
         else if base_tap {1}
-        else if fixed_part_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)? {2}
+        else if fixed_part_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?
+            || additional_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)? {2}
         else if mc.name=="IndicatorMotionPos" && pc.name=="IndicatorPackage_TwoPartAndPos_Direction" {
             let (rect,params)=native_rect_config(r,comp,skill,&mut checks)?;
             if !zero_extent_template(&mc.name,&pc.name,rect,&params) {return Err("Unverified nonzero point template".into());}
@@ -526,8 +659,9 @@ impl MotionPlan {
         let (mut checks,comp,motion,package,motion_class,package_class)=Self::registry_owner(r,indicator,skill)?;
         let name=motion_class.name.clone();
         let range_contract=native_range_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
-        let fixed_part_direction=fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
-        let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,fixed_part_direction);
+        let configured_direction=fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
+            || additional_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
+        let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,configured_direction);
         let expected = match skill {
             2510 => Some((
                 "IndicatorMotionRotAndPosRot",
@@ -538,7 +672,7 @@ impl MotionPlan {
             20150 => Some(("IndicatorMotionRot", "IndicatorPackageEasy_ShanXing_Normal")),
             20020 => Some(("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal")),
             8430 => Some(("IndicatorMotionRot", "IndicatorPackageEasy")),
-            _ if fixed_part_direction || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
+            _ if configured_direction || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
             _ => None,
         };
         if expected.is_none_or(|(motion, package)| name != motion || package_class.name != package)
@@ -750,7 +884,7 @@ impl MotionPlan {
     pub fn unavailable(&self, frame: &mut s::Frame) {
         // A transient read cannot switch Q from relative to visual coordinates.
         // Keep verified identity while revoking every value and acknowledgement.
-        frame.logical = if !matches!(self.name.as_str(), "IndicatorMotionRot" | "IndicatorLieShaMotion" | "IndicatorMotionArcSurface") {
+        frame.logical = if !self.direction_geometry {
             s::Logical {
                 source: text(&format!("{}.m_vDragResult", self.name)),
                 skill_id: number(self.skill as f64),
@@ -842,7 +976,7 @@ impl MotionPlan {
         } else {
             None
         };
-        if matches!(self.name.as_str(), "IndicatorMotionRot" | "IndicatorLieShaMotion" | "IndicatorMotionArcSurface") {
+        if self.direction_geometry {
             if (result[0].hypot(result[2]) - 1.).abs() > 0.01 {
                 return Err("Native direction is not a unit vector".into());
             }
@@ -1038,7 +1172,7 @@ mod tests {
     #[test]
     fn ling_arc_unit_receipt_never_synthesizes_a_radial_target() {
         let (r,mut plan)=q_fixture();plan.skill=8410;plan.name="IndicatorMotionArcSurface".into();
-        plan.range=None;plan.protect=None;
+        plan.direction_geometry=true;plan.range=None;plan.protect=None;
         let set=|at:usize,v:f32|r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&v.to_le_bytes());
         set(528,0.6);set(536,0.8);
         for ratio in [0.2,0.8,1.] {
@@ -1279,6 +1413,28 @@ mod tests {
         // expanded: this Tap must pass the separate owner/configuration gate.
         assert_eq!(native_template(m,p),None);
     }
+    #[test]
+    fn additional_direction_requires_measured_exact_pair_rect_and_shape() {
+        let m="IndicatorMotionRot";let p="IndicatorPackage_TwoPartAndPos_Direction";
+        for rect in [1,2] {assert!(additional_direction_template(m,p,rect,&[11.,4.1]));}
+        for rect in [-1,0,3,6,7,9,11] {assert!(!additional_direction_template(m,p,rect,&[11.,4.1]));}
+        for values in [&[][..],&[11.][..],&[11.,0.][..],&[11.,-1.][..],&[11.,1e4][..],
+            &[11.,f64::NAN][..],&[11.,f64::INFINITY][..],&[7.,4.1][..],&[9.,4.1][..],&[f64::NAN,4.1][..]] {
+            assert!(!additional_direction_template(m,p,1,values));
+        }
+        for pair in [("IndicatorMotionPos",p),(m,"IndicatorPackageEasy_Yuan"),("Unknown",p),(m,"Unknown")] {
+            assert!(!additional_direction_template(pair.0,pair.1,1,&[11.,4.1]));
+        }
+        assert_eq!(native_template(m,p),None,"class names alone do not authorize this direction family");
+        for(package,rect,shape)in [("IndicatorPackage_Multi_JianTou",0,7.),("IndicatorPackage_TwoPart_Direction",19,6.)] {
+            assert!(additional_direction_template(m,package,rect,&[shape,5.2]));
+            assert!(!additional_direction_template(m,package,rect+1,&[shape,5.2]));
+            assert!(!additional_direction_template(m,package,rect,&[11.,5.2]));
+            assert!(!additional_direction_template(m,package,rect,&[shape,0.]));
+            assert!(!additional_direction_template(m,package,rect,&[shape,f64::NAN]));
+            assert!(!additional_direction_template("IndicatorMotionPos",package,rect,&[shape,5.2]));
+        }
+    }
     fn base_tap_fixture()->Reflection<MutableMemory> {
         fn put64(bytes:&mut[u8],at:usize,value:u64){bytes[at..at+8].copy_from_slice(&value.to_le_bytes());}
         fn class(bytes:&mut[u8],address:usize,name:&str,fields:&[(&str,u8,u32)],cursor:&mut usize){
@@ -1334,7 +1490,289 @@ mod tests {
         r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&(8u32<<16).to_le_bytes());
         assert!(zero_extent_base_tap_contract(&mut r,128,256,384,4030,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",&mut Vec::new()).is_err());
     }
+    fn additional_direction_fixture()->Reflection<MutableMemory> {
+        let r=base_tap_fixture();
+        for(at,value)in [(1056,12710i32),(1060,2)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        for(at,value)in [(1568,11f32),(1572,4.1)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        r
+    }
+    #[test]
+    fn additional_direction_contract_owns_typed_config_and_revokes_rebinding() {
+        let m="IndicatorMotionRot";let p="IndicatorPackage_TwoPartAndPos_Direction";
+        let mut r=additional_direction_fixture();let mut reads=Vec::new();
+        assert!(additional_direction_contract(&mut r,128,12710,m,p,&mut reads).unwrap());
+        assert!(check(&r,&reads).is_ok());
+        r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&7f32.to_le_bytes());
+        assert!(check(&r,&reads).is_err(),"a pooled plan may not keep its previous shape authorization");
+        for(at,bytes)in [
+            (160,0u64.to_le_bytes().to_vec()),
+            (1024,5120u64.to_le_bytes().to_vec()),
+            (1056,999i32.to_le_bytes().to_vec()),
+            (1060,11i32.to_le_bytes().to_vec()),
+            (1064,0u64.to_le_bytes().to_vec()),
+            (1536,5120u64.to_le_bytes().to_vec()),
+            (1560,1u64.to_le_bytes().to_vec()),
+            (1568,3f32.to_le_bytes().to_vec()),
+            (1572,0f32.to_le_bytes().to_vec()),
+            (1572,(-1f32).to_le_bytes().to_vec()),
+            (1572,f32::NAN.to_le_bytes().to_vec()),
+        ] {
+            let mut r=additional_direction_fixture();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(additional_direction_contract(&mut r,128,12710,m,p,&mut Vec::new()).is_err(),"case at {at}");
+        }
+        for(class,field)in [(3072,0usize),(4096,0),(4096,1),(4096,2)] {
+            let mut r=additional_direction_fixture();
+            let table=u64_at(&r.memory.0.borrow()[class+0x78..class+0x80],0)as usize;
+            let ty=u64_at(&r.memory.0.borrow()[table+field*32+8..table+field*32+16],0)as usize;
+            r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&(12u32<<16).to_le_bytes());
+            assert!(additional_direction_contract(&mut r,128,12710,m,p,&mut Vec::new()).is_err());
+        }
+        for skill in [0i32,-1,10_000_001] {
+            let mut r=additional_direction_fixture();r.memory.0.borrow_mut()[1056..1060].copy_from_slice(&skill.to_le_bytes());
+            assert!(additional_direction_contract(&mut r,128,skill,m,p,&mut Vec::new()).is_err());
+        }
+        for(package,rect,shape)in [("IndicatorPackage_Multi_JianTou",0i32,7f32),("IndicatorPackage_TwoPart_Direction",19,6.)] {
+            let mut r=additional_direction_fixture();
+            r.memory.0.borrow_mut()[1060..1064].copy_from_slice(&rect.to_le_bytes());
+            r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&shape.to_le_bytes());
+            assert!(additional_direction_contract(&mut r,128,12710,m,package,&mut Vec::new()).unwrap());
+        }
+    }
+    #[test]
+    fn verified_additional_direction_uses_unit_receipt_independent_of_ratio() {
+        let(r,mut plan)=q_fixture();plan.skill=12710;plan.name="IndicatorMotionRot".into();
+        plan.direction_geometry=true;plan.range=None;plan.protect=None;
+        for(at,value)in [(528,0.6f32),(536,0.8),(576,0.34)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        let mut frame=s::Frame::default();plan.sample(&r,&mut frame).unwrap();
+        assert!(frame.direction_input.ready.get()&&frame.direction_input.coherent.get());
+        assert!(!frame.logical.ready.get());assert!(frame.logical.world_range.missing());
+        assert!((frame.direction_input.direction_xz.values[0].value-0.6).abs()<1e-6);
+        plan.unavailable(&mut frame);assert!(!frame.direction_input.ready.get());assert!(frame.logical.source.missing());
+        r.memory.0.borrow_mut()[528..532].copy_from_slice(&0.3f32.to_le_bytes());
+        assert!(plan.sample(&r,&mut s::Frame::default()).is_err(),"direction authorization does not normalize a non-unit native result into an ACK");
+    }
+    fn candidate_range_fixture()->Reflection<MutableMemory> {
+        let r=base_tap_fixture();
+        for(at,value)in [(1056,12230i32),(1060,1)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        for(at,value)in [(1568,9f32),(1572,3.)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        r
+    }
+    #[test]
+    fn candidate_range_audit_requires_exact_family_rect_and_all_typed_config_owners() {
+        let m="IndicatorMotionRotAndPosRot";let p="IndicatorPackage_JianTou_OtherPart";
+        let mut r=candidate_range_fixture();let mut reads=Vec::new();
+        assert_eq!(candidate_range_contract(&mut r,128,256,384,12230,m,p,&mut reads).unwrap(),Some((1568,9.)));
+        assert!(check(&r,&reads).is_ok());
+        assert_eq!(native_range_shape(m,p),Some(9.));
+        assert_eq!(native_range_contract(&mut r,128,256,384,12230,m,p,&mut Vec::new()).unwrap(),Some((1568,9.)));
+        r.memory.0.borrow_mut()[288..296].copy_from_slice(&1280u64.to_le_bytes());
+        assert!(check(&r,&reads).is_err());
+        for(at,bytes)in [
+            (160,1280u64.to_le_bytes().to_vec()),
+            (288,1280u64.to_le_bytes().to_vec()),
+            (416,1280u64.to_le_bytes().to_vec()),
+            (1056,999i32.to_le_bytes().to_vec()),
+            (1060,2i32.to_le_bytes().to_vec()),
+            (1568,8f32.to_le_bytes().to_vec()),
+            (1572,0f32.to_le_bytes().to_vec()),
+            (1572,f32::INFINITY.to_le_bytes().to_vec()),
+        ] {
+            let mut r=candidate_range_fixture();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(candidate_range_contract(&mut r,128,256,384,12230,m,p,&mut Vec::new()).is_err(),"case at {at}");
+            assert!(native_range_contract(&mut r,128,256,384,12230,m,p,&mut Vec::new()).is_err(),"live range case at {at}");
+        }
+        let mut r=candidate_range_fixture();
+        let table=u64_at(&r.memory.0.borrow()[3072+0x78..3072+0x80],0)as usize;
+        let ty=u64_at(&r.memory.0.borrow()[table+8..table+16],0)as usize;
+        r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&(18u32<<16).to_le_bytes());
+        assert!(candidate_range_contract(&mut r,128,256,384,12230,m,p,&mut Vec::new()).is_err());
+        assert!(!additional_direction_template(m,p,1,&[9.,3.]));
+    }
 
+    fn selection_touch_fixture()->Reflection<MutableMemory> {
+        fn put64(bytes:&mut[u8],at:usize,value:u64){bytes[at..at+8].copy_from_slice(&value.to_le_bytes());}
+        fn class(bytes:&mut[u8],address:usize,name:&str,fields:&[(&str,u8,u32)],cursor:&mut usize){
+            let name_at=*cursor;bytes[name_at..name_at+name.len()].copy_from_slice(name.as_bytes());*cursor+=name.len()+1;
+            put64(bytes,address+16,name_at as u64);put64(bytes,address+0x40,address as u64);put64(bytes,address+0x48,address as u64);
+            let table=*cursor;*cursor+=fields.len()*32;put64(bytes,address+0x78,table as u64);
+            bytes[address+0x104..address+0x106].copy_from_slice(&(fields.len()as u16).to_le_bytes());
+            for(i,(name,kind,offset))in fields.iter().enumerate(){
+                let name_at=*cursor;bytes[name_at..name_at+name.len()].copy_from_slice(name.as_bytes());*cursor+=name.len()+1;
+                let ty=*cursor;*cursor+=16;bytes[ty+8..ty+12].copy_from_slice(&((*kind as u32)<<16).to_le_bytes());
+                let row=table+i*32;put64(bytes,row,name_at as u64);put64(bytes,row+8,ty as u64);put64(bytes,row+16,address as u64);
+                bytes[row+24..row+28].copy_from_slice(&offset.to_le_bytes());
+            }
+        }
+        let mut bytes=vec![0u8;65536];let mut cursor=32768;
+        class(&mut bytes,8192,"SkillIndicatorComp",&[("m_BaseCamp",18,16)],&mut cursor);
+        class(&mut bytes,8704,"Dictionary`2",&[("entries",29,16),("count",8,24)],&mut cursor);
+        class(&mut bytes,9216,"Entry[]",&[],&mut cursor);
+        class(&mut bytes,9728,"Entry",&[("hashCode",8,16),("next",8,20),("key",8,24),("value",18,32)],&mut cursor);
+        class(&mut bytes,10240,"IndicatorBaseComp",&[("m_Config",17,16),("m_MontionBase",18,24),("m_PackageBase",18,32)],&mut cursor);
+        class(&mut bytes,10752,"IndicatorMotionPos",&[("m_OwnComp",18,16),("m_OwnPackage",18,24),("m_vDragTouchPos",17,48)],&mut cursor);
+        class(&mut bytes,11264,"IndicatorPackageEasy_Yuan",&[("m_OwnComp",18,16)],&mut cursor);
+        class(&mut bytes,11776,"CData_Skill_Element",&[("m_SkillID",8,16),("m_RectType",8,20),("m_ShowRectPara",29,24)],&mut cursor);
+        class(&mut bytes,12288,"Single[]",&[],&mut cursor);
+        class(&mut bytes,12800,"Single",&[],&mut cursor);
+        for(at,value)in [(128,8192u64),(144,256),(256,8704),(272,512),(512,9216),(536,1),(9216+0x40,9728),
+                         (560,1024),(1024,10240),(1040,2560),(1048,1536),(1056,2048),(1536,10752),(1552,1024),(1560,2048),
+                         (2048,11264),(2064,1024),(2560,11776),(2584,3072),(3072,12288),(3096,4),(12288+0x40,12800)] {
+            put64(&mut bytes,at,value);
+        }
+        for(at,value)in [(280,1i32),(544,1),(548,-1),(552,13130),(2576,13130),(2580,11)]{bytes[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        for(at,value)in [(3104,3f32),(3108,0.),(3112,30000.),(3116,0.),(1584,3920.),(1588,1319.54),(1592,0.)] {
+            bytes[at..at+4].copy_from_slice(&value.to_le_bytes());
+        }
+        Reflection::new(MutableMemory(RefCell::new(bytes))).unwrap()
+    }
+    fn base_tap_registry_fixture()->Reflection<MutableMemory> {
+        fn put64(b:&mut[u8],at:usize,v:u64){b[at..at+8].copy_from_slice(&v.to_le_bytes());}
+        fn class(b:&mut[u8],address:usize,name:&str,fields:&[(&str,u8,u32)],cursor:&mut usize){
+            let name_at=*cursor;b[name_at..name_at+name.len()].copy_from_slice(name.as_bytes());*cursor+=name.len()+1;
+            put64(b,address+16,name_at as u64);put64(b,address+0x40,address as u64);put64(b,address+0x48,address as u64);
+            let table=*cursor;*cursor+=fields.len()*32;put64(b,address+0x78,table as u64);
+            b[address+0x104..address+0x106].copy_from_slice(&(fields.len()as u16).to_le_bytes());
+            for(i,(name,kind,offset))in fields.iter().enumerate(){
+                let name_at=*cursor;b[name_at..name_at+name.len()].copy_from_slice(name.as_bytes());*cursor+=name.len()+1;
+                let ty=*cursor;*cursor+=16;b[ty+8..ty+12].copy_from_slice(&((*kind as u32)<<16).to_le_bytes());
+                let row=table+i*32;put64(b,row,name_at as u64);put64(b,row+8,ty as u64);put64(b,row+16,address as u64);
+                b[row+24..row+28].copy_from_slice(&offset.to_le_bytes());
+            }
+        }
+        let r=selection_touch_fixture();let mut cursor=50000;
+        {
+            let mut b=r.memory.0.borrow_mut();
+            class(&mut b,10752,"IndicatorMotionBase",&[("m_OwnComp",18,16),("m_Config",17,32),("m_vDragTouchPos",17,48),
+                ("m_vDragResult",17,64),("m_vDragDir",17,80),("m_vActiveDir",17,96),("m_fDragRatio",12,108),
+                ("m_dragged",2,112),("m_bVaildDraged",2,113)],&mut cursor);
+            class(&mut b,11264,"IndicatorPackageEasy_Yuan",&[("m_OwnComp",18,16),("m_Config",17,24)],&mut cursor);
+            class(&mut b,11776,"CData_Skill_Element",&[("m_SkillID",8,16),("m_RectType",8,20),("m_ShowRectPara",29,24),("m_BaseType",8,32)],&mut cursor);
+            put64(&mut b,1568,2560);put64(&mut b,2072,2560);
+            for(at,value)in [(552,4030i32),(2576,4030),(2592,1)]{b[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        }
+        r
+    }
+    #[test]
+    fn base_tap_readonly_audits_allow_missing_own_package_only_after_full_contract() {
+        let mut r=base_tap_registry_fixture();
+        assert!(r.field(1536,"m_OwnPackage").is_err());
+        let identity=MotionPlan::audit_registry_identity(&mut r,128,4030).unwrap();
+        assert_eq!(identity["motion"],"IndicatorMotionBase");assert_eq!(identity["package"],"IndicatorPackageEasy_Yuan");
+        let values=MotionPlan::audit_registry_values(&mut r,128,4030).unwrap();
+        assert_eq!(values["values"]["m_vDragTouchPos"][0],3920.);
+        assert_eq!(values["values"]["m_ShowRectPara"][1],0.);
+        // Diagnostic recognition cannot authorize a positional/directional
+        // feedback plan for a Tap with no such native acknowledgement.
+        assert!(MotionPlan::discover(&mut r,128,4030).is_err());
+        assert_eq!(MotionPlan::discover_behavior(&mut r,128,4030).unwrap().1,1);
+    }
+    #[test]
+    fn base_tap_audits_reject_nonzero_foreign_config_and_unqualified_missing_owner() {
+        for(at,bytes)in [(1552,2048u64.to_le_bytes().to_vec()),(2064,1536u64.to_le_bytes().to_vec()),
+                         (1568,2048u64.to_le_bytes().to_vec()),(2072,2048u64.to_le_bytes().to_vec()),
+                         (2576,999i32.to_le_bytes().to_vec()),(2580,0i32.to_le_bytes().to_vec()),
+                         (3104,8f32.to_le_bytes().to_vec()),(3108,1f32.to_le_bytes().to_vec()),(3108,f32::NAN.to_le_bytes().to_vec())] {
+            let mut r=base_tap_registry_fixture();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(MotionPlan::audit_registry_identity(&mut r,128,4030).is_err(),"identity {at}");
+            assert!(MotionPlan::audit_registry_values(&mut r,128,4030).is_err(),"values {at}");
+        }
+        // A different Base package does not receive the missing-owner exception.
+        let mut r=base_tap_registry_fixture();let at=u64_at(&r.memory.0.borrow()[11264+16..11264+24],0)as usize;
+        r.memory.0.borrow_mut()[at..at+25].fill(0);r.memory.0.borrow_mut()[at..at+20].copy_from_slice(b"IndicatorPackageBase");
+        assert!(MotionPlan::audit_registry_identity(&mut r,128,4030).is_err());
+        assert!(MotionPlan::audit_registry_values(&mut r,128,4030).is_err());
+        // Pointer-looking bytes with a changed configuration kind remain invalid.
+        let mut r=base_tap_registry_fixture();let table=u64_at(&r.memory.0.borrow()[10752+0x78..10752+0x80],0)as usize;
+        let ty=u64_at(&r.memory.0.borrow()[table+32+8..table+32+16],0)as usize;
+        r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&(18u32<<16).to_le_bytes());
+        assert!(MotionPlan::audit_registry_identity(&mut r,128,4030).is_err());
+        assert!(MotionPlan::audit_registry_values(&mut r,128,4030).is_err());
+    }
+    #[test]
+    fn base_tap_audit_present_own_package_is_checked_instead_of_exempted() {
+        for(value,kind,accepted)in [(2048u64,18u32,true),(1024,18,false),(2048,8,false)] {
+            let mut r=base_tap_registry_fixture();
+            {
+                let mut b=r.memory.0.borrow_mut();let old=u64_at(&b[10752+0x78..10752+0x80],0)as usize;
+                let count=u16::from_le_bytes(b[10752+0x104..10752+0x106].try_into().unwrap())as usize;
+                let table=b[old..old+count*32].to_vec();b[60000..60000+table.len()].copy_from_slice(&table);
+                b[65000..65013].copy_from_slice(b"m_OwnPackage\0");b[65108..65112].copy_from_slice(&(kind<<16).to_le_bytes());
+                let row=60000+table.len();
+                for(at,pointer)in [(row,65000u64),(row+8,65100),(row+16,10752),(10752+0x78,60000),(1560,value)] {
+                    b[at..at+8].copy_from_slice(&pointer.to_le_bytes());
+                }
+                b[row+24..row+28].copy_from_slice(&24u32.to_le_bytes());
+                b[10752+0x104..10752+0x106].copy_from_slice(&((count+1)as u16).to_le_bytes());
+            }
+            assert_eq!(MotionPlan::audit_registry_identity(&mut r,128,4030).is_ok(),accepted);
+            assert_eq!(MotionPlan::audit_registry_values(&mut r,128,4030).is_ok(),accepted);
+        }
+    }
+    #[test]
+    fn selection_touch_reads_only_owned_raw_pixels_and_keeps_outer_fence() {
+        let mut r=selection_touch_fixture();let plan=SelectionTouchPlan::discover(&mut r,128,13130).unwrap();
+        assert_eq!(plan.skill,13130);assert!(plan.validate(&r).is_ok());
+        let mut reads=Vec::new();let touch=plan.sample(&r,&mut reads).unwrap();
+        assert_eq!(touch[0],3920.);assert!((touch[1]-1319.54).abs()<0.001);assert_eq!(touch[2],0.);
+        assert!(check(&r,&reads).is_ok());
+        // A later input value revokes the enclosing UI/selection receipt even
+        // though the native object and its plan remain correctly owned.
+        r.memory.0.borrow_mut()[1584..1588].copy_from_slice(&3000f32.to_le_bytes());
+        assert!(check(&r,&reads).is_err());assert!(plan.validate(&r).is_ok());
+        // Idle zeros remain raw data; no direction or result packet is produced.
+        r.memory.0.borrow_mut()[1584..1596].fill(0);
+        assert_eq!(plan.sample(&r,&mut Vec::new()).unwrap(),[0.;3]);
+    }
+    #[test]
+    fn selection_touch_rejects_missing_foreign_types_config_and_nonfinite_values() {
+        for skill in [0,-1,10_000_001,13131] {
+            assert!(SelectionTouchPlan::discover(&mut selection_touch_fixture(),128,skill).is_err());
+        }
+        for(at,value)in [(552,999i32),(2576,999),(2580,0)] {
+            let mut r=selection_touch_fixture();r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());
+            assert!(SelectionTouchPlan::discover(&mut r,128,13130).is_err());
+        }
+        for(at,value)in [(560,0u64),(1040,0),(1048,2048),(1056,1536),(1552,2048),(1560,1536),(2064,1536)] {
+            let mut r=selection_touch_fixture();r.memory.0.borrow_mut()[at..at+8].copy_from_slice(&value.to_le_bytes());
+            assert!(SelectionTouchPlan::discover(&mut r,128,13130).is_err(),"{at}");
+        }
+        for(at,value)in [(3104,8f32),(3108,1.),(3108,f32::NAN)] {
+            let mut r=selection_touch_fixture();r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());
+            assert!(SelectionTouchPlan::discover(&mut r,128,13130).is_err());
+        }
+        for(kind,static_field)in [(8u32,false),(17,true)] {
+            let mut r=selection_touch_fixture();let table=u64_at(&r.memory.0.borrow()[10752+0x78..10752+0x80],0)as usize;
+            let ty=u64_at(&r.memory.0.borrow()[table+64+8..table+64+16],0)as usize;
+            r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&((kind<<16)|if static_field{16}else{0}).to_le_bytes());
+            assert!(SelectionTouchPlan::discover(&mut r,128,13130).is_err());
+        }
+        for offset in [4090u32,1_048_577] {
+            let mut r=selection_touch_fixture();let table=u64_at(&r.memory.0.borrow()[10752+0x78..10752+0x80],0)as usize;
+            r.memory.0.borrow_mut()[table+64+24..table+64+28].copy_from_slice(&offset.to_le_bytes());
+            assert!(SelectionTouchPlan::discover(&mut r,128,13130).is_err());
+        }
+        let mut r=selection_touch_fixture();r.memory.0.borrow_mut()[10752+0x104..10752+0x106].copy_from_slice(&2u16.to_le_bytes());
+        assert!(SelectionTouchPlan::discover(&mut r,128,13130).is_err());
+        for value in [f32::NAN,f32::INFINITY,1_000_001.] {
+            let mut r=selection_touch_fixture();let plan=SelectionTouchPlan::discover(&mut r,128,13130).unwrap();
+            r.memory.0.borrow_mut()[1584..1588].copy_from_slice(&value.to_le_bytes());assert!(plan.sample(&r,&mut Vec::new()).is_err());
+        }
+        assert!(!selection_touch_template("IndicatorMotionRot","IndicatorPackageEasy_Yuan",11,&[3.,0.]));
+        assert!(!selection_touch_template("IndicatorMotionPos","IndicatorPackage_TwoPartAndPos_Direction",11,&[3.,0.]));
+    }
+    #[test]
+    fn selection_touch_cached_registry_and_config_owners_revoke_after_rebind() {
+        for(at,value)in [(144,384u64),(272,768),(560,2048),(1040,2304),(1048,2048),(1056,1536),
+                         (1536,11264),(1552,2048),(1560,1536),(2048,10752),(2064,1536),(2584,3328),(3072,9216)] {
+            let mut r=selection_touch_fixture();let plan=SelectionTouchPlan::discover(&mut r,128,13130).unwrap();let mut reads=Vec::new();
+            plan.sample(&r,&mut reads).unwrap();r.memory.0.borrow_mut()[at..at+8].copy_from_slice(&value.to_le_bytes());
+            assert!(plan.validate(&r).is_err(),"{at}");assert!(plan.sample(&r,&mut Vec::new()).is_err(),"{at}");assert!(check(&r,&reads).is_err(),"{at}");
+        }
+        for(at,value)in [(552,13131i32),(2576,13131),(2580,0)] {
+            let mut r=selection_touch_fixture();let plan=SelectionTouchPlan::discover(&mut r,128,13130).unwrap();
+            r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());assert!(plan.validate(&r).is_err());
+        }
+    }
     fn cover_fixture()->(Reflection<MutableMemory>,MotionPlan) {
         fn put64(bytes:&mut[u8],at:usize,value:u64){bytes[at..at+8].copy_from_slice(&value.to_le_bytes());}
         fn class(bytes:&mut[u8],address:usize,name:&str,fields:&[(&str,u8,u32)],cursor:&mut usize){

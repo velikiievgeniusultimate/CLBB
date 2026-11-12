@@ -57,6 +57,31 @@ class TrainingSelectorTests(unittest.TestCase):
         instance.runtime.swipe.assert_not_called()
         instance.runtime.tap.assert_called_once_with([.85, .56])
 
+    def test_partially_clipped_irithel_portrait_has_a_safe_native_hit_point(self):
+        point = [.5598946768987085, .20600478849114268]
+        snapshot = state(point)
+        snapshot["cells"][0]["button_geometry"]["radius_uv"] = [.03435135880955342, .04416760930325836]
+        press = selector.visible_cell_press(snapshot["cells"][0])
+        self.assertAlmostEqual(press[0], point[0])
+        self.assertAlmostEqual(press[1], .23008619889720052)
+        self.assertGreater(press[1], .21)
+        instance = harness([snapshot])
+        instance.choose(126, 0)
+        instance.runtime.swipe.assert_not_called()
+        instance.runtime.tap.assert_called_once_with(press)
+
+    def test_tiny_clipped_sliver_and_hidden_portraits_are_not_clicked(self):
+        snapshot = state([.56, .7763331031330196])
+        cell = snapshot["cells"][0]
+        cell["button_geometry"]["radius_uv"] = [.03435135880955342, .04416760930325836]
+        self.assertIsNone(selector.visible_cell_press(cell))
+        cell["button_geometry"]["center_uv"] = [.56, .206]
+        cell["button_geometry"]["visible"] = False
+        self.assertIsNone(selector.visible_cell_press(cell))
+        cell["button_geometry"]["visible"] = True
+        cell["button_geometry"]["radius_uv"] = [.034, -1.]
+        self.assertIsNone(selector.visible_cell_press(cell))
+
     def test_known_offscreen_geometry_preserves_correct_scroll_direction(self):
         for first_y, downward in ((.88, False), (.10, True)):
             with self.subTest(first_y=first_y):

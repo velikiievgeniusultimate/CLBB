@@ -321,6 +321,15 @@ fn core_decision_diagnostics(v:&clbb_moba_core::controller::view::View,event:&st
         object.insert("charge_end_sample_ns".into(),v.chargeEndSampleNs_.encode());
         object.insert("charge_last_sample_ns".into(),v.chargeLastSampleNs_.encode());
     }
+    if event.starts_with("selection_") || ((event=="release"||event=="cancel_acknowledged")&&v.selectionOwner_!=0) {
+        value.as_object_mut().unwrap().insert("selection".into(),serde_json::json!({
+            "owner":format!("0x{:x}",v.selectionOwner_),"revoked":v.selectionRevoked_,
+            "geometry_fresh":v.selectionGeometryFresh_,"accepted":v.selectionAccepted_,
+            "matched_seq":v.selectionMatchedSequence_,"sample_start_ns":v.selectionSampleStartNs_,
+            "sample_end_ns":v.selectionSampleEndNs_,"option":v.selectionOption_,"goal_seq":v.selectionGoalSequence_,
+            "captured":v.selectionCaptured_,"end_clock":crate::flight_schema::Encode::encode(&v.selectionEndClock_),"end_sample_ns":v.selectionEndSampleNs_
+        }));
+    }
     value
 }
 impl Host for Adapter {
@@ -724,6 +733,11 @@ impl Runtime {
                     "desired_valid":view.traceDesiredValid_,"desired":[view.traceDesired_.x,view.traceDesired_.y],
                     "pending_time_ns":view.pendingGoalTime_,
                     "matched_seq":view.traceMatchedSequence_,"sent_seq":view.touchSequence_,"sent_time_ns":(view.sentTimeNs_>0).then_some(view.sentTimeNs_),"q_arming":view.qDragArming_,"q_recomputed":view.qDragRecomputeUsed_,
+                    "selection":{"owner":format!("0x{:x}",view.selectionOwner_),"revoked":view.selectionRevoked_,
+                        "geometry_fresh":view.selectionGeometryFresh_,"accepted":view.selectionAccepted_,
+                        "matched_seq":view.selectionMatchedSequence_,"sample_start_ns":view.selectionSampleStartNs_,
+                        "sample_end_ns":view.selectionSampleEndNs_,"option":view.selectionOption_,"goal_seq":view.selectionGoalSequence_,
+                        "captured":view.selectionCaptured_,"end_clock":crate::flight_schema::Encode::encode(&view.selectionEndClock_),"end_sample_ns":view.selectionEndSampleNs_},
                     "range":view.direct.world_range,"center":[view.joystickCenter_.x,view.joystickCenter_.y],
                     "radius":[view.joystickRadius_.x,view.joystickRadius_.y],
                     "skill":view.coreSkill_,"touch":view.skillTouch_,"pending_release":view.pendingRelease_,
@@ -909,7 +923,10 @@ impl Runtime {
                 }).to_string()
             }).unwrap_or_else(|| "{\"ready\":false}".into()),
             "hero.linked_controls"=>if self.host.fresh().is_some_and(|s|s.linked.is_some()) {"1".into()}else{"0".into()},
-            "hero.skill0_type"=>self.host.fresh().and_then(|s|s.control_types.get("skill:0")).unwrap_or(&0).to_string(),
+            "hero.skill0_type"|"hero.skill1_type"|"hero.skill2_type"|"hero.skill3_type"=>{
+                let slot=format!("skill:{}",key.as_bytes()[10]as char);
+                self.host.fresh().and_then(|s|s.control_types.get(&slot)).unwrap_or(&0).to_string()
+            },
             "diagnostics.gestures"=>serde_json::json!({"active":self.gestures.active,"ignored":self.gestures.ignored_keys(),"linked":self.host.fresh().and_then(|s|s.linked.as_ref()),"cancel_uv":self.host.fresh().map(|s|serde_json::json!({"valid":s.frame.ui.cancel_uv.valid(),"point":s.frame.ui.cancel_uv.values.map(|v|v.value)})),"buttons":self.host.fresh().map(|s|s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill").map(|b|serde_json::json!({"slot":b.slot.as_str(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>())}).to_string(),
             "diagnostics.contacts"=>serde_json::json!({"rotation":self.host.rotate_contacts,"next":self.host.next_contact,"active":self.host.touches.iter().enumerate().filter_map(|(i,v)|v.then_some(i)).collect::<Vec<_>>()}).to_string(),
             "debug.status"=>self.recorder.status(),

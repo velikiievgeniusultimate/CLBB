@@ -64,6 +64,7 @@ struct ClbbSettings {
   GtkStack *stack;
   Control *capture;
   int hero;
+  int native_skill_types[4];
   gboolean linked_controls;
   gboolean refreshing;
 };
@@ -489,7 +490,16 @@ static void add_binding(ClbbSettings *s, GtkWidget *box, const char *title,
                         const char *prefix, const char *slot, int key, int mode,
                         gboolean tap, gboolean overrides) {
   char *k = g_strdup_printf("%s.bindings.%s.key", prefix, slot);
-  Control *c = bind_control(s, box, title, k, key);
+  char *selection_title = NULL;
+  if (!strcmp(prefix, "hero") && g_str_has_prefix(slot, "skill:") &&
+      slot[6] >= '0' && slot[6] <= '3' && slot[7] == '\0') {
+    char type_key[] = "hero.skill0_type";
+    type_key[10] = slot[6];
+    if (read_int(s, type_key, 0) == 4)
+      selection_title = g_strdup_printf("%s · Выбор варианта", title);
+  }
+  Control *c = bind_control(s, box, selection_title ? selection_title : title, k, key);
+  g_free(selection_title);
   g_free(k);
   if (overrides) {
     c->override_key = g_strdup_printf("hero.bindings.%s.override", slot);
@@ -541,6 +551,11 @@ static void build_hero(ClbbSettings *s, int hero) {
   clear_dynamic(s, s->hero_box);
   clear_dynamic(s, s->common_box);
   s->hero = hero;
+  for (int i = 0; i < 4; ++i) {
+    char type_key[] = "hero.skill0_type";
+    type_key[10] = '0' + i;
+    s->native_skill_types[i] = read_int(s, type_key, 0);
+  }
   s->linked_controls = read_int(s, "hero.linked_controls", 0) != 0;
   GtkWidget *b = section(s->hero_box, hero == 25 ? "Персональные навыки Кагуры"
                                                  : "Персональные навыки");
@@ -1249,7 +1264,13 @@ void clbb_settings_refresh(ClbbSettings *s) {
   display_refresh(s);
   pacing_refresh(s);
   int hero = read_int(s, "hero.id", 0);
-  if (hero != s->hero || (read_int(s, "hero.linked_controls", 0) != 0) != s->linked_controls)
+  gboolean native_types_changed = FALSE;
+  for (int i = 0; i < 4; ++i) {
+    char type_key[] = "hero.skill0_type";
+    type_key[10] = '0' + i;
+    native_types_changed |= read_int(s, type_key, 0) != s->native_skill_types[i];
+  }
+  if (hero != s->hero || native_types_changed || (read_int(s, "hero.linked_controls", 0) != 0) != s->linked_controls)
     build_hero(s, hero);
   char *t = read_text(s, "name", "CLBB");
   gtk_label_set_text(GTK_LABEL(s->brand), t);

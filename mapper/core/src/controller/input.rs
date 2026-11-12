@@ -66,6 +66,11 @@ impl Controller {
                 self.tick(host);
                 return true;
             }
+            if self.skillBehavior_ == SkillBehavior::Selection {
+                if !self.pendingRelease_ {self.freeze_selection_intent(host);}
+                self.tick(host);
+                return true;
+            }
             if self.skillBehavior_ == SkillBehavior::Direction
                 || self.skillBehavior_ == SkillBehavior::AwaitVariant
             {
@@ -143,6 +148,12 @@ impl Controller {
                     continue;
                 }
                 if pressed && !auto_repeat {
+                    if self.classify_skill(&b)==SkillBehavior::Selection&&!self.selection_phase_known(&b) {
+                        self.auxiliaryHeldKeys_.insert(key);
+                        self.trace(host,"selection_start_rejected","selector_phase_unconfirmed");
+                        self.set_status("F7: форма выбора ещё не подтверждена — повтори нажатие");
+                        return true;
+                    }
                     let cd = self.cooldown_block(&b, 0);
                     if !cd.is_empty() {
                         self.cooldownIgnoredKeys_.insert(key);

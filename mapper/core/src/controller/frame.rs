@@ -301,6 +301,7 @@ impl Controller {
         self.update_range_drag_arming(host, f);
         self.sample_accepted_input(f, host);
         self.sample_direction_input(host, f);
+        self.sample_selection_input(host, f);
         if self.acceptedInput_ || self.directionAccepted_ {
             self.skillActivationObserved_ = true;
         }

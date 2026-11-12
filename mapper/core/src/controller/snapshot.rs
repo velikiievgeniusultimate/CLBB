@@ -272,6 +272,32 @@ pub struct Direction {
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+pub struct SelectionInput {
+    /// Typed native UI ownership is independent of a post-MOVE hover receipt.
+    pub ready: Flag,
+    pub coherent: Flag,
+    pub input_ready: Flag,
+    pub panel_visible: Flag,
+    pub has_drag: Flag,
+    pub selected_option_valid: Flag,
+    pub source: Text,
+    pub reason: Text,
+    pub token: Text,
+    pub slot: Text,
+    pub hero_id: Number,
+    pub base_skill_id: Number,
+    pub active_skill_id: Number,
+    pub native_skill_id: Number,
+    pub owner_id: u64,
+    pub sample_start_ns: Number,
+    pub sample_end_ns: Number,
+    pub hover_index: Number,
+    pub selected_option: Number,
+    pub raw_touch_xyz: Vector3,
+    pub drag_direction_xy: Vector2,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct CancelState {
     pub ready: Flag,
     pub coherent: Flag,
@@ -303,6 +329,7 @@ pub struct Frame {
     pub skill_state: VariantState,
     pub active_joystick: Geometry,
     pub direction_input: Direction,
+    pub selection_input: SelectionInput,
     pub cancel_state: CancelState,
     pub logical: Logical,
     pub motion: Motion,

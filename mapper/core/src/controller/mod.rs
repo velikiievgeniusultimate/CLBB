@@ -14,11 +14,14 @@ mod lifecycle;
 mod charge_lifecycle;
 mod movement;
 mod native_aim;
+mod selection;
 pub mod snapshot;
 mod tick;
 pub mod view;
 #[cfg(test)]
 mod rejection_tests;
+#[cfg(test)]
+mod selection_tests;
 use crate::{AimSolver, AngularRadialSolver, Point};
 use host::{Host, Timer};
 use std::collections::{BTreeMap, BTreeSet};
@@ -64,6 +67,7 @@ pub enum SkillBehavior {
     AwaitVariant,
     Tap,
     Direction,
+    Selection,
 }
 #[derive(Clone, Default, Debug)]
 pub struct SkillIntent {
@@ -73,6 +77,8 @@ pub struct SkillIntent {
     pub worldValid: bool,
     pub directionValid: bool,
     pub worldResolver: u64,
+    pub screenDirection: Point,
+    pub screenDirectionValid: bool,
 }
 #[derive(Clone, Default, Debug)]
 pub struct QueuedSkill {
@@ -335,6 +341,10 @@ pub struct Controller {
     pub(crate) solver_: AimSolver,
     pub(crate) direct_: AngularRadialSolver,
     pub(crate) skillBehavior_: SkillBehavior,
+    pub(crate) selection_: selection::SelectionState,
+    pub(crate) selectionInput_: snapshot::SelectionInput,
+    pub(crate) selectionHeroScreen_: Point,
+    pub(crate) selectionHeroSampleNs_: i64,
 }
 impl Controller {
     pub(crate) fn sync_clock(&mut self, host: &mut impl Host) {

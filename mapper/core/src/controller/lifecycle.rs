@@ -130,6 +130,9 @@ impl Controller {
                 }
             }
         }
+        if self.skillTouch_>=0&&!self.skillCancelPending_&&self.skillBehavior_==SkillBehavior::Selection {
+            if !self.send_selection(host){self.finish_skill(host,true);return;}
+        }
         if self.skillTouch_ >= 0
             && !self.skillCancelPending_
             && !self.qDragArming_
@@ -184,6 +187,7 @@ impl Controller {
         if self.skillTouch_ >= 0
             && !self.skillCancelPending_
             && self.skillEchoPending_
+            &&(self.skillBehavior_!=SkillBehavior::Selection||self.selection_echo_allowed())
             && before == self.touchSequence_
         {
             self.skillEchoPending_ = false;
@@ -317,6 +321,10 @@ impl Controller {
                 }
             }
         }
+        if self.selectionHeroSampleNs_>0&&self.now_-self.selectionHeroSampleNs_<=100_000_000 {
+            let d=self.pixels(self.pointer_-self.selectionHeroScreen_);let n=d.length();
+            if finite(d)&&n>1e-8 {r.screenDirection=d/n;r.screenDirectionValid=true;}
+        }
         r
     }
     pub(crate) fn drop_intent(host: &mut impl Host, intent: &SkillIntent) {
@@ -327,6 +335,13 @@ impl Controller {
     pub(crate) fn apply_skill_intent(&mut self, host: &mut impl Host, intent: SkillIntent) {
         if self.skillBehavior_ == SkillBehavior::Tap {
             Self::drop_intent(host, &intent);
+            return;
+        }
+        if self.skillBehavior_==SkillBehavior::Selection {
+            let pointer=self.pointer_;self.pointer_=intent.pointer;
+            self.freeze_selection_intent(host);self.pointer_=pointer;
+            self.selection_.frozen_direction=intent.screenDirectionValid.then_some(intent.screenDirection);
+            Self::drop_intent(host,&intent);
             return;
         }
         self.pendingRelease_ = true;
@@ -500,6 +515,10 @@ impl Controller {
         if self.skillCancelPending_ || self.skillTouch_ >= 0 {
             return false;
         }
+        if self.classify_skill(b)==SkillBehavior::Selection&&!self.selection_phase_known(b) {
+            self.trace(host,"selection_start_rejected","selector_phase_unconfirmed");
+            return false;
+        }
         let state_forbidden = self.state_forbidden(b, self.cooldown_variant(b), 0) == Some(true);
         self.flush_pointer(host);
         if b.stopMovement && self.classify_skill(b) != SkillBehavior::AwaitVariant {
@@ -565,6 +584,7 @@ impl Controller {
         self.warmAttempted_ = false;
         self.startupArmed_ = self.skillBehavior_ == SkillBehavior::Range;
         self.startupMayActivate_ = self.coreSkill_ == 0;
+        self.arm_selection(b);
         if self.skillBehavior_ == SkillBehavior::Tap && self.skillCastMode_ == 1 {
             host.timer(Timer::Tap, Some(16))
         }
@@ -573,6 +593,9 @@ impl Controller {
                 || self.skillBehavior_ == SkillBehavior::AwaitVariant)
         {
             self.freeze_direction_intent(host)
+        }
+        if self.skillCastMode_==1&&self.skillBehavior_==SkillBehavior::Selection {
+            self.freeze_selection_intent(host);
         }
         self.arm_charge_gesture(b);
         self.changed_ = true;
@@ -629,6 +652,9 @@ impl Controller {
     pub(crate) fn finish_auto_completed_charge(&mut self, host: &mut impl Host) {
         self.finish_skill_inner(host, false, true);
     }
+    pub(crate) fn finish_auto_completed_selection(&mut self, host: &mut impl Host) {
+        self.finish_skill_inner(host, false, true);
+    }
     fn finish_skill_inner(&mut self, host: &mut impl Host, cancel: bool, auto_completed: bool) {
         host.timer(Timer::Tap, None);
         if cancel && !(self.skillCancelPending_ && self.skillCancelAcknowledged_) {
@@ -645,7 +671,8 @@ impl Controller {
                     return;
                 }
             }
-            self.trace(host, "release", if auto_completed { "auto_completed" } else if cancel { "cancel" } else { "cast" });
+            self.trace(host, "release", if auto_completed { "auto_completed" } else if cancel { "cancel" }
+                else if self.skillBehavior_==SkillBehavior::Selection {"selection_up_after_ui_ack"} else { "cast" });
             if !cancel || self.skillCancelAcknowledged_ || !self.abort_retribution_touch(host) {
                 if cancel && self.cancelReady_ && !self.skillCancelPending_ {
                     self.move_skill(host, self.cancelPoint_, false);
@@ -669,6 +696,7 @@ impl Controller {
             }
         }
         self.skillCooldownVariant_ = 0;
+        self.selection_=Default::default();
         self.chargeGesture_ = None;
         self.skillActivationObserved_ = false;
         self.skillStateForbiddenAtDown_ = false;
@@ -722,6 +750,7 @@ impl Controller {
         self.skillCancelSentNs_ = 0;
         host.timer(Timer::Tap, None);
         self.skillEchoPending_ = false;
+        self.selection_.goal_sequence=0;
         self.startupArmed_ = false;
         self.pendingRelease_ = false;
         self.pendingWorldValid_ = false;
@@ -753,6 +782,7 @@ impl Controller {
             return;
         };
         let s = &f.cancel_state;
+        if self.skillBehavior_==SkillBehavior::Selection&&!self.selection_cancel_owner(b,f){return;}
         let start = s.sample_start_ns.get(-1.);
         let end = s.sample_end_ns.get(-1.);
         let now = self.now_ as f64;

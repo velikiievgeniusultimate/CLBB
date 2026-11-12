@@ -46,7 +46,7 @@ pub trait Host {
 pub struct Binding {
     pub key: i32,
     pub cast_mode: i32,
-    /// Verified native template: 0 unknown, 1 tap, 2 direction, 3 range.
+    /// Verified native template: 0 unknown, 1 tap, 2 direction, 3 range, 4 UI choice.
     pub aim_type: u8,
     pub stop_movement: bool,
 }
