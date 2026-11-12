@@ -201,7 +201,7 @@ mod tests {
         for absent in [false, true] {
             let (mut c, mut h, aux, primary, movement) = three_contacts();
             let mut f = frame(100, Some(true));
-            f.auxiliary_controls.controls[0].owner_id -= 1;
+            if !absent {f.auxiliary_controls.controls[0].owner_id -= 1;}
             f.auxiliary_controls.controls[0].owner_present = flag(!absent);
             send(&mut c, &mut h, f);
             assert_eq!(h.ended, vec![aux]); others(&h, primary, movement);
@@ -291,6 +291,42 @@ mod tests {
         assert!(!c.skillKeyHeld_);
         assert!(!c.skillCancelPending_);
         assert!(h.active.contains_key(&movement));
+    }
+    #[test]
+    fn current_attack_owner_with_retired_history_accepts_new_presses_in_any_row_order() {
+        for hold in [false,true] {for reverse in [false,true] {
+            // A previous charge owner is intentionally cached, matching the
+            // real hero-switch failure before a new plain CommonAttack.
+            let (mut c,mut h)=setup(Some(true));let movement=c.movementTouch_;
+            let mut f=frame(60,Some(hold));f.auxiliary_controls.count=2;
+            f.auxiliary_controls.controls[1]=f.auxiliary_controls.controls[0];
+            f.auxiliary_controls.controls[1].owner_id=OWNER-1;
+            f.auxiliary_controls.controls[1].owner_present=flag(false);
+            if reverse {f.auxiliary_controls.controls.swap(0,1);}
+            send(&mut c,&mut h,f);
+            key(&mut c,&mut h,61,32,true);
+            assert_eq!(h.active.len(),2,"current attack and movement must both be down");
+            assert!(h.active.contains_key(&movement));
+            let attack=*h.active.keys().find(|id|**id!=movement).unwrap();
+            let mut f=frame(70,Some(hold));f.auxiliary_controls.count=2;
+            f.auxiliary_controls.controls[1]=f.auxiliary_controls.controls[0];
+            f.auxiliary_controls.controls[1].owner_id=OWNER-1;
+            f.auxiliary_controls.controls[1].owner_present=flag(false);
+            f.auxiliary_controls.controls.swap(0,1);
+            send(&mut c,&mut h,f);
+            assert!(h.active.contains_key(&attack),"unrelated retired owner cannot retire the current contact");
+            key(&mut c,&mut h,71,32,false);
+            assert!(!h.active.contains_key(&attack));assert!(h.active.contains_key(&movement));
+        }}
+    }
+    #[test]
+    fn contradictory_current_attack_owners_remain_unknown_and_cannot_open_a_charge() {
+        let (mut c,mut h)=setup(Some(true));let next=h.next;
+        let mut f=frame(60,Some(true));f.auxiliary_controls.count=2;
+        f.auxiliary_controls.controls[1]=f.auxiliary_controls.controls[0];
+        f.auxiliary_controls.controls[1].owner_id=OWNER-1;
+        send(&mut c,&mut h,f);key(&mut c,&mut h,61,32,true);
+        assert_eq!(h.next,next);
     }
     #[test]
     fn keyboard_movement_is_immediate_diagonal_normalized_and_independent_of_pointer_and_skills() {
@@ -639,10 +675,15 @@ impl Controller {
             && end <= self.now_ as f64
             && self.now_ as f64 - end <= FRESH_NS as f64
             && {
-                let mut slots = BTreeSet::new();
+                let mut identities = BTreeSet::new();
+                let mut present_slots = BTreeSet::new();
                 s.controls[..s.count as usize].iter().all(|row| {
                     let slot = row.slot.as_str();
-                    !slot.is_empty() && slot.len() <= 64 && slots.insert(slot)
+                    // One current owner may coexist with retired owners of
+                    // the SAME action after a hero/button replacement.
+                    !slot.is_empty() && slot.len() <= 64
+                        && identities.insert((slot,row.owner_id))
+                        && (!row.owner_present.get() || present_slots.insert(slot))
                         && (row.owner_present.missing() || row.owner_present.is_bool())
                         && (!row.owner_present.get() || row.owner_id != 0)
                 })
@@ -674,8 +715,11 @@ impl Controller {
             if hold.hero != self.heroId_ || hold.epoch != self.frameEpoch_
                 || s.sample_start_ns.value < hold.down_ns as f64
             { continue; }
-            let Some(row) = s.controls[..s.count as usize].iter()
-                .find(|row| row.slot.as_str() == hold.slot) else { continue };
+            let rows=&s.controls[..s.count as usize];
+            let Some(row) = rows.iter()
+                .find(|row| row.slot.as_str()==hold.slot && row.owner_id==hold.owner_id)
+                .or_else(||rows.iter().find(|row| row.slot.as_str()==hold.slot && row.owner_present.get()))
+                else { continue };
             let revoked = row.owner_present.is_bool()
                 && (!row.owner_present.get() || row.owner_id != hold.owner_id);
             if revoked {
@@ -690,7 +734,8 @@ impl Controller {
     pub(crate) fn begin_auxiliary(&mut self, host: &mut impl Host, b: &Button) {
         let row = self.auxiliary_scope(&self.auxiliaryControlState_)
             .then(|| self.auxiliaryControlState_.controls[..self.auxiliaryControlState_.count as usize]
-                .iter().find(|row| row.slot.as_str() == b.slot).copied())
+                .iter().filter(|row| row.slot.as_str() == b.slot)
+                .max_by_key(|row| if row.owner_present.get() {2} else if row.owner_present.is_bool() {1} else {0}).copied())
             .flatten();
         let hold = row.filter(|row| row.owner_present.get() && row.hold_to_release.get());
         if let Some(row) = hold {
