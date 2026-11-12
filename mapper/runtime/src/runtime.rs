@@ -518,8 +518,8 @@ impl Host for Adapter {
         if let Some(sample)=self.fresh().filter(|s|s.frame.hero_id.int()==hero) {
             binding.aim_type=*sample.control_types.get(&button.slot).unwrap_or(&0);
         }
-        if config == "extra:2" && button.skillId == 20080 {
-            binding.cast_mode = self.settings.integer("hero.bindings.extra:2:20080.cast_mode", hero);
+        if config == "extra:2" && crate::settings::plain_spell_id(button.skillId) {
+            binding.cast_mode = self.settings.integer(&format!("hero.bindings.extra:2:{}.cast_mode",button.skillId), hero);
         }
         if self.conflicts.contains_key(&binding.key) { binding.key=0; }
         binding
@@ -1067,7 +1067,7 @@ impl Runtime {
                 .find(|v|v.slot.as_str()==slot&&v.base_skill_id.int()==b.skill_id.int()).map(|v|v.active_skill_id.int()).filter(|v|*v>0).unwrap_or(b.skill_id.int());
             let config=slot;
             let kind=sample.control_types.get(slot).copied().unwrap_or(0);
-            let mode_config=if slot=="extra:2"&&b.skill_id.int()==20080 {"extra:2:20080"}else{config};
+            let mode_config=if slot=="extra:2"&&crate::settings::plain_spell_id(b.skill_id.int()) {format!("extra:2:{}",b.skill_id.int())}else{config.into()};
             text.push_str(&format!("{slot}\t{config}\t{mode_config}\t{}\t{variant}\t{kind}\n",b.skill_id.int()));
             if b.kind.as_str()=="skill" && !crate::settings::hold_duration_skill(hero,slot) {
                 let mut forms=self.host.settings.observed_forms.get(&hero).and_then(|m|m.get(&(slot.to_owned(),b.skill_id.int()))).cloned().unwrap_or_default();

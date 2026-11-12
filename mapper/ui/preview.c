@@ -631,6 +631,18 @@ int main(int argc, char **argv) {
     g_hash_table_remove(p.values,"preview.controls");put(&p,"hero.id","25");clbb_settings_refresh(s);
     g_assert_nonnull(find_control(window,"hero.bindings.skill:0.cast_mode"));
     g_print("CLBB_SUYOU_SINGLE_HOLD_SKILL_UI_OK three fixed release modes, shared stop/key settings\n");
+    put(&p,"hero.id","77");put(&p,"common.battle_spell_id","20030");
+    put(&p,"common.bindings.extra:2.cast_mode","3");
+    put(&p,"preview.controls","1\t77\nextra:2\textra:2\textra:2:20030\t20030\t20030\t1\n");
+    clbb_settings_refresh(s);
+    GtkWidget *inspire_mode=find_type(find_control(window,"common.bindings.extra:2:20030.cast_mode"),GTK_TYPE_DROP_DOWN);
+    g_assert_nonnull(inspire_mode);
+    g_assert_cmpuint(g_list_model_get_n_items(gtk_drop_down_get_model(GTK_DROP_DOWN(inspire_mode))),==,2);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(inspire_mode),1);
+    g_assert_cmpstr(read_value(&p,"common.bindings.extra:2:20030.cast_mode"),==,"1");
+    g_assert_cmpstr(read_value(&p,"common.bindings.extra:2.cast_mode"),==,"3");
+    g_hash_table_remove(p.values,"preview.controls");put(&p,"hero.id","25");clbb_settings_refresh(s);
+    g_print("CLBB_INSPIRE_PLAIN_BUTTON_UI_OK two modes independent of aimed battle spells\n");
     g_print("CLBB_SETTINGS_SELFTEST_OK key normalization, reserved LMB, hotkey "
             "conflicts, refresh, hero switch, overrides, stop movement, "
             "atomic display apply, preserved draft, atomic FPS VSync, "

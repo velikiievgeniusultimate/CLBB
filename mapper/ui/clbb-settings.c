@@ -767,9 +767,9 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
     char **v=g_strsplit(lines[n],"\t",7);
     if (g_strv_length(v)==6&&valid_action(v[0])&&valid_action(v[1])&&
         (!strcmp(v[0],v[1])||(g_str_has_prefix(v[0],"skill:")&&g_str_has_prefix(v[1],v[0])&&v[1][strlen(v[0])]==':'))&&
-        (!strcmp(v[1],v[2])||(!strcmp(v[0],"extra:2")&&atoi(v[3])==20080&&!strcmp(v[2],"extra:2:20080")))&&!g_hash_table_contains(seen,v[0])) {
+        (!strcmp(v[1],v[2])||(!strcmp(v[0],"extra:2")&&((atoi(v[3])==20080&&!strcmp(v[2],"extra:2:20080"))||(atoi(v[3])==20030&&!strcmp(v[2],"extra:2:20030")))))&&!g_hash_table_contains(seen,v[0])) {
       g_hash_table_add(seen,g_strdup(v[0]));
-      int type=CLAMP(atoi(v[5]),0,4);any=TRUE;can_cancel|=type>=2||g_str_has_prefix(v[0],"combo:");
+      int type=CLAMP(atoi(v[5]),0,4);any=TRUE;can_cancel|=g_str_has_prefix(v[0],"skill:")||g_str_has_prefix(v[0],"combo:")||g_str_has_prefix(v[0],"extra:");
       if (g_str_has_prefix(v[0],"attack")) {
         if (!attack_group) {
           attack_group=section(s->hero_box,"Атака");
@@ -1459,7 +1459,8 @@ void clbb_settings_refresh(ClbbSettings *s) {
       break;
     case CONTROL_MODE:
       if (c->battle_spell_mode) {
-        gboolean plain = read_int(s, "common.battle_spell_id", 0) == 20080;
+        int spell_id=read_int(s,"common.battle_spell_id",0);
+        gboolean plain = spell_id==20080 || spell_id==20030;
         if (plain != c->plain_spell_mode) {
           const char *const plain_modes[] = {"При отпускании", "Моментальное нажатие", NULL};
           const char *const aimed_modes[] = {"Моментальное прожатие", "Обычный навык", "Моментальный с наведением", "Прожатие с удержанием", NULL};
@@ -1468,7 +1469,8 @@ void clbb_settings_refresh(ClbbSettings *s) {
           g_object_unref(model);
           gboolean personal = g_str_has_prefix(c->key, "hero.");
           g_free(c->key);
-          c->key = g_strdup_printf("%s.bindings.%s.cast_mode", personal ? "hero" : "common", plain ? "extra:2:20080" : "extra:2");
+          c->key = plain ? g_strdup_printf("%s.bindings.extra:2:%d.cast_mode",personal?"hero":"common",spell_id)
+                         :g_strdup_printf("%s.bindings.extra:2.cast_mode",personal?"hero":"common");
           c->plain_spell_mode = plain;
         }
         n = read_int(s, c->key, c->fallback);

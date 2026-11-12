@@ -273,6 +273,13 @@ pub(crate) fn skill_button_class<M: Memory>(r: &mut Reflection<M>, class: &crate
     Ok(control_kind(false, &ancestry) == "skill")
 }
 
+fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
+    // Badang's successful wall dash exposes its ordinary wall-removal button
+    // through the SAME owned slot/data. There is intentionally no aim registry
+    // entry for this recast. Never apply the exception to its original dash.
+    (hero==77 && slot=="skill:1" && base==7720 && active==7725)
+        || (hero==25 && slot=="skill:2" && base==2530 && matches!(active,2530|2531))
+}
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
     if ancestry.iter().any(|name| name.starts_with("SkillButton") && name.ends_with("Ex")) {
@@ -1346,9 +1353,9 @@ impl<M: Memory> Source<M> {
                 control_types.insert(entry.slot.owned(), 2);
                 continue;
             }
-            if !choice_family && hero == 25 && entry.slot.as_str() == "skill:2" && matches!(id, 2530 | 2531) {
-                // The umbrella's second form has a directional indicator
-                // package, but the ultimate itself uses a button press.
+            if !choice_family && verified_button_only_form(hero,entry.slot.as_str(),entry.skill_id.int(),id) {
+                // Explicitly verified recasts/ultimates are button presses,
+                // even when their original ability has directional geometry.
                 control_types.insert(entry.slot.owned(), 1);
                 continue;
             }
@@ -2196,6 +2203,13 @@ mod tests {
         assert_eq!(published.get("skill:2"),Some(&4),"a known future ID still needs independently verified native geometry");
         published.insert("skill:2".into(),choice_control_type(Some(false),Some(1)));
         assert_eq!(published.get("skill:2"),Some(&1));
+    }
+    #[test]
+    fn badang_wall_removal_is_only_the_owned_cancel_form_not_the_dash() {
+        assert!(verified_button_only_form(77,"skill:1",7720,7725));
+        for (hero,slot,base,id) in [(77,"skill:1",7720,7720),(77,"skill:0",7720,7725),(25,"skill:1",7720,7725),(77,"skill:1",7710,7725),(77,"skill:1",7720,7726)] {
+            assert!(!verified_button_only_form(hero,slot,base,id));
+        }
     }
     #[test]
     fn cold_selection_registry_retries_do_not_inherit_idle_delay_or_spin_without_bound() {

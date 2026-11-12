@@ -631,17 +631,18 @@ impl MotionPlan {
     }
     pub fn discover_behavior<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -> Result<(Checks,u8)> {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
-        // Purify is a shared spell with no aim indicator. Require its actual
-        // registry/config identity and reciprocal owners, independent of hero.
-        if skill == 20080 && mc.name == "IndicatorMotionBase" && pc.name == "IndicatorPackageBase" {
+        // Verified shared self-use buttons have no aiming indicator. Their
+        // base pair is not a missing Range plan: validate config identity and
+        // reciprocal native owners before publishing Tap, on every hero.
+        if matches!(skill,20010|20030|20080) && mc.name == "IndicatorMotionBase" && pc.name == "IndicatorPackageBase" {
             let config = owner(r, comp, "m_Config", &mut checks)?;
             let config_class = r.pointer(config)?;
             checks.push((config, config_class.to_le_bytes().to_vec()));
-            if r.class(config_class)?.name != "CData_Skill_Element" { return Err("Unknown Purify config".into()); }
+            if r.class(config_class)?.name != "CData_Skill_Element" { return Err("Unknown shared tap config".into()); }
             let at = typed_field(r, config, "m_SkillID", 8)?;
-            if i32_at(&capture(r, &mut checks, at, 4)?, 0) != skill { return Err("Purify config identity changed".into()); }
+            if i32_at(&capture(r, &mut checks, at, 4)?, 0) != skill { return Err("Shared tap config identity changed".into()); }
             if owner(r, motion, "m_OwnComp", &mut checks)? != comp || owner(r, package, "m_OwnComp", &mut checks)? != comp {
-                return Err("Purify owner changed".into());
+                return Err("Shared tap owner changed".into());
             }
             check(r, &checks)?;
             return Ok((checks, 1));
@@ -1747,6 +1748,17 @@ mod tests {
             b[2576..2580].copy_from_slice(&20080i32.to_le_bytes());
         }
         r
+    }
+    #[test]
+    fn inspire_and_regen_are_owner_checked_taps_without_an_aim_plan() {
+        for skill in [20010i32,20030] {
+            let mut r=purify_fixture();
+            {let mut b=r.memory.0.borrow_mut();for at in [552,2576] {b[at..at+4].copy_from_slice(&skill.to_le_bytes());}}
+            assert_eq!(MotionPlan::discover_behavior(&mut r,128,skill).unwrap().1,1);
+            assert!(MotionPlan::discover(&mut r,128,skill).is_err());
+            r.memory.0.borrow_mut()[2576..2580].copy_from_slice(&20020i32.to_le_bytes());
+            assert!(MotionPlan::discover_behavior(&mut r,128,skill).is_err());
+        }
     }
     #[test]
     fn purify_is_owner_checked_shared_tap_without_aim_plan() {

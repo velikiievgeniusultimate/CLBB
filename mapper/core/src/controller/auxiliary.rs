@@ -71,7 +71,7 @@ mod tests {
         fn release_resolver(&mut self, _: u64) {}
         fn navigation(&mut self, _: Point, p: Point, _: bool) -> Result<Vec<Point>, String> { Ok(vec![p]) }
         fn binding(&mut self, _: i32, b: &Button, _: &str) -> Binding {
-            Binding { key: if b.kind == "attack" { self.attack_key } else { 81 },
+            Binding { key: if b.slot=="extra:1" {68} else if b.kind == "attack" { self.attack_key } else { 81 },
                 aim_type: if b.kind=="attack" { self.attack_aim } else {2}, cast_mode: if b.kind == "attack" { self.attack_mode } else { 0 }, stop_movement: false }
         }
         fn cancel_key(&mut self, _: i32) -> i32 { 84 }
@@ -291,6 +291,30 @@ mod tests {
         assert!(!c.skillKeyHeld_);
         assert!(!c.skillCancelPending_);
         assert!(h.active.contains_key(&movement));
+    }
+    #[test]
+    fn held_regen_cancel_waits_for_native_ack_and_keeps_primary_and_movement_down() {
+        let (mut c,mut h)=setup(Some(false));let movement=c.movementTouch_;
+        key(&mut c,&mut h,60,81,true);let primary=c.skillTouch_;
+        let mut f=frame(65,Some(false));f.ui.button_count=3;
+        f.ui.buttons[2]=snapshot::Button {slot:text("extra:1"),kind:text("extra"),skill_id:n(20010.),
+            active:flag(true),press_uv:v2(0.6,0.9),center_uv:v2(0.6,0.9),radius_uv:v2(0.1,0.1),..Default::default()};
+        f.ui.active_slot=text("extra:1");send(&mut c,&mut h,f);
+        key(&mut c,&mut h,66,68,true);let regen=c.auxiliaryTaps_[0].id;
+        key(&mut c,&mut h,67,84,true);
+        assert!(c.auxiliaryTaps_[0].cancelRequested);assert!(!c.skillCancelPending_);
+        assert_eq!(h.active[&regen],c.cancelPoint_);
+        key(&mut c,&mut h,68,68,false);assert!(h.active.contains_key(&regen));
+        for (ms,slot,epoch,done) in [(70,"skill:0","auxiliary-match",false),(71,"extra:1","foreign",false),(72,"extra:1","auxiliary-match",true)] {
+            let mut update=f;update.time_ns=n((T+ms*MS)as f64);update.ui.time_ns=update.time_ns;
+            update.cancel_state=snapshot::CancelState {ready:flag(true),coherent:flag(true),source:text("UIKeySkill.bCancelSkill"),
+                slot:text(slot),token:text(epoch),hero_id:f.hero_id,base_skill_id:n(20010.),cancelled:flag(true),
+                sample_start_ns:n((T+ms*MS-1)as f64),sample_end_ns:update.time_ns};
+            send(&mut c,&mut h,update);
+            assert_eq!(!h.active.contains_key(&regen),done);
+            assert!(h.active.contains_key(&primary));assert!(h.active.contains_key(&movement));
+        }
+        assert!(c.auxiliaryTaps_.is_empty());
     }
     #[test]
     fn current_attack_owner_with_retired_history_accepts_new_presses_in_any_row_order() {
@@ -770,6 +794,10 @@ impl Controller {
     pub(crate) fn release_auxiliary_key(&mut self, host: &mut impl Host, key: i32) {
         for i in (0..self.auxiliaryTaps_.len()).rev() {
             if self.auxiliaryTaps_[i].key == key && self.auxiliaryTaps_[i].until == i64::MAX {
+                if self.auxiliaryTaps_[i].cancelRequested {
+                    self.trace(host,"auxiliary_cancel",&format!("physical_up_waits_for_ack finger={}",self.auxiliaryTaps_[i].id));
+                    continue;
+                }
                 let tap = self.auxiliaryTaps_.remove(i);
                 host.end(tap.id, tap.point);
                 self.sync_clock(host);

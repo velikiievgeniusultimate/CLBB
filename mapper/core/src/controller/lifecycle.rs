@@ -835,7 +835,8 @@ impl Controller {
         self.manualTouch_ = -1
     }
     pub(crate) fn begin_auxiliary_tap(&mut self, host: &mut impl Host, b: &Button) {
-        if !b.available || self.auxiliaryTaps_.len() + self.auxiliaryHolds_.len() >= 8 {
+        if !b.available || self.auxiliaryTaps_.len() + self.auxiliaryHolds_.len() >= 8
+            || self.auxiliaryTaps_.iter().any(|t|t.key==b.key && t.cancelRequested) {
             return;
         }
         let id = host.begin(b.press);
@@ -859,6 +860,7 @@ impl Controller {
                 String::new()
             },
             cooldownVariant: variant,
+            hero:self.heroId_,epoch:self.frameEpoch_.clone(),cancelRequested:false,cancelSentNs:0,
         });
         if b.castMode == 1 { host.timer(Timer::Auxiliary, Some(16)); }
     }

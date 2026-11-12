@@ -11,6 +11,7 @@ pub mod api;
 pub mod host;
 mod input;
 mod auxiliary;
+mod auxiliary_cancel;
 mod lifecycle;
 mod charge_lifecycle;
 mod movement;
@@ -99,6 +100,10 @@ pub struct AuxiliaryTap {
     pub until: i64,
     pub cooldownSlot: String,
     pub cooldownVariant: i32,
+    pub hero: i32,
+    pub epoch: String,
+    pub cancelRequested: bool,
+    pub cancelSentNs: i64,
 }
 #[derive(Clone, Default, Debug)]
 pub struct SkillVariant {

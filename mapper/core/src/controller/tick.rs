@@ -8,6 +8,7 @@ impl Controller {
             self.invalidate(host, "F7: данные игры устарели — касания отпущены");
             return;
         }
+        self.tick_auxiliary_cancel(host);
         self.activate_movement_hold(host);
         if self.movementHeld_ || self.movementAuto_ {
             self.request_pointer_flush(host)

@@ -59,7 +59,7 @@ impl Settings {
             if let Some((base, tail)) = key.split_once(".bindings.") {
                 if let Some((slot, field)) = tail.rsplit_once('.') {
                     if !matches!(field, "key" | "cast_mode" | "stop_movement") { continue; }
-                    let parent = if slot == "extra:2:20080" { "extra:2" } else { slot };
+                    let parent = if plain_spell_slot(slot) { "extra:2" } else { slot };
                     let explicit = native_skill_slot(slot) || slot.starts_with("combo:") || saved.get(&format!("{base}.bindings.{parent}.override")).is_some_and(|v|matches!(v.as_str(),"true"|"1"));
                     self.values.insert(format!("{key}.override"), explicit.to_string());
                 }
@@ -191,7 +191,7 @@ impl Settings {
             if let Some((slot, field)) = tail.rsplit_once('.') {
                 if matches!(field, "key" | "cast_mode" | "stop_movement") {
                     let canonical = Self::canonical(key, hero);
-                    let parent = if slot == "extra:2:20080" { "extra:2" } else { slot };
+                    let parent = if plain_spell_slot(slot) { "extra:2" } else { slot };
                     let legacy = (native_skill_slot(slot) || slot.starts_with("combo:") || self.values.get(&Self::canonical(&format!("hero.bindings.{parent}.override"),hero)).is_some_and(|v|matches!(v.as_str(),"true"|"1"))) && self.values.contains_key(&canonical);
                     let explicit = self.values.get(&format!("{canonical}.override")).map(|v|matches!(v.as_str(),"true"|"1")).unwrap_or(legacy);
                     if !explicit { return self.get(&format!("common.bindings.{tail}"),hero); }
@@ -547,6 +547,8 @@ pub fn parse_resolution(value: &str) -> Option<(u32, u32)> {
         && u64::from(w) * u64::from(h) <= 32 * 1024 * 1024)
         .then_some((w, h))
 }
+pub fn plain_spell_id(id:i32)->bool {matches!(id,20030|20080)}
+fn plain_spell_slot(slot:&str)->bool {slot.strip_prefix("extra:2:").and_then(|s|s.parse::<i32>().ok()).is_some_and(plain_spell_id)}
 pub fn hold_duration_skill(hero: i32, slot: &str) -> bool {
     hero==126 && matches!(variant_base(slot).unwrap_or(slot),"skill:0"|"skill:1"|"skill:2")
 }
@@ -998,6 +1000,15 @@ mod field_inheritance_tests {
         let before=s.values.clone();
         assert!(s.set("hero.bindings.extra:2.key","70",73).is_err());
         assert_eq!(s.values,before);std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn inspire_has_plain_modes_independent_of_aimed_spell_modes() {
+        let mut s=Settings::default();s.set("common.bindings.extra:2.cast_mode","3",0).unwrap();
+        assert_eq!(s.integer("hero.bindings.extra:2:20030.cast_mode",77),0);
+        s.set("common.bindings.extra:2:20030.cast_mode","1",0).unwrap();
+        assert_eq!(s.integer("hero.bindings.extra:2:20030.cast_mode",77),1);
+        assert_eq!(s.binding(77,"extra:2").cast_mode,3);
+        assert_eq!(s.integer("hero.bindings.extra:2:20080.cast_mode",77),0);
     }
     #[test]
     fn suyou_three_skills_always_release_and_internal_forms_share_one_setting() {

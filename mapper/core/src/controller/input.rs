@@ -46,7 +46,7 @@ impl Controller {
         if key != 0 && key == self.cancelKey_ {
             if pressed && !auto_repeat {
                 self.clear_queued_skills(host, "explicit_user_cancel");
-                self.request_skill_cancel(host)
+                if !self.request_auxiliary_cancel(host) {self.request_skill_cancel(host)}
             }
             return true;
         }
