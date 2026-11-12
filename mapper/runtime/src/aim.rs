@@ -240,6 +240,35 @@ fn fixed_part_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     }
     Ok(true)
 }
+// Hayabusa's shadow return selects native recipients from a direction. Its
+// HookLine motion has no m_OwnPackage; prove the shared config and both actual
+// comp owners instead. Other HookLine skills (e.g. Chou) remain unqualified.
+fn shadow_return_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
+    motion_name:&str,package_name:&str,checks:&mut Checks)->Result<bool> {
+    if skill!=2126 || motion_name!="IndicatorMotionHookLine" || package_name!="IndicatorPackageEasy" {return Ok(false);}
+    let mut config=0;
+    for object in [comp,motion,package] {
+        let at=typed_field(r,object,"m_Config",17)?;
+        let linked=u64_at(&capture(r,checks,at,8)?,0);
+        if linked==0 || (config!=0 && linked!=config){return Err("Shadow return config owners differ".into());}
+        config=linked;
+    }
+    let(rect,params)=native_rect_config(r,comp,skill,checks)?;
+    typed_field(r,config,"m_ShowRectPara",29)?;
+    if rect!=11 || params!=[1.,999.] {return Err("Unverified shadow return shape".into());}
+    for object in [motion,package] {
+        typed_field(r,object,"m_OwnComp",18)?;
+        if owner(r,object,"m_OwnComp",checks)?!=comp {return Err("Shadow return comp owner changed".into());}
+    }
+    // Absence is part of this measured class contract, never a blanket excuse
+    // for missing ownership links in arbitrary indicators.
+    match r.field(motion,"m_OwnPackage") {
+        Err(error) if error=="Missing reflected field m_OwnPackage"=>{},
+        Err(error)=>return Err(error),
+        Ok(_)=>return Err("Shadow return motion layout changed".into()),
+    }
+    Ok(true)
+}
 fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,motion:&str,package:&str,checks:&mut Checks)->Result<bool> {
     if motion!="IndicatorMotionRot" || !matches!(package,"IndicatorPackage_TwoPartAndPos_Direction"
         |"IndicatorPackage_Multi_JianTou"|"IndicatorPackage_TwoPart_Direction") {
@@ -486,8 +515,9 @@ impl MotionPlan {
     pub fn audit_registry_identity<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -> Result<serde_json::Value> {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
+        let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
-            if base_tap&&object==motion&&field=="m_OwnPackage" {
+            if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
                     Err(error)if error=="Missing reflected field m_OwnPackage"=>continue,
                     Err(error)=>return Err(error),
@@ -526,9 +556,10 @@ impl MotionPlan {
         let elapsed=std::time::Instant::now();
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
-        if !base_tap&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
+        if !base_tap&&!shadow_direction&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
-            if base_tap&&object==motion&&field=="m_OwnPackage" {
+            if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
                     Err(error)if error=="Missing reflected field m_OwnPackage"=>continue,
                     Err(error)=>return Err(error),
@@ -671,11 +702,13 @@ impl MotionPlan {
             return Ok((checks, 1));
         }
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
+        let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let kind=if let Some(kind)=native_template(&mc.name,&pc.name) {
             if kind==3 {native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Unverified native range family")?;}
             kind
         }
         else if base_tap {1}
+        else if shadow_direction {2}
         else if fixed_part_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)? {2}
         else if mc.name=="IndicatorMotionPos" && pc.name=="IndicatorPackage_TwoPartAndPos_Direction" {
@@ -690,7 +723,7 @@ impl MotionPlan {
             1
         } else {return Err("Unverified native template".into());};
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
-            if base_tap&&object==motion&&field=="m_OwnPackage"{continue;}
+            if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage"{continue;}
             if owner(r,object,field,&mut checks)?!=expected {return Err("Native template owner mismatch".into());}
         }
         check(r,&checks)?;Ok((checks,kind))
@@ -743,7 +776,8 @@ impl MotionPlan {
         let(mut checks,comp,motion,package,motion_class,package_class)=owned;
         let name=motion_class.name.clone();
         let range_contract=native_range_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
-        let configured_direction=fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
+        let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
+        let configured_direction=shadow_direction || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
         let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,configured_direction);
         let expected = match skill {
@@ -772,7 +806,7 @@ impl MotionPlan {
             (comp, r.pointer(comp)?.to_le_bytes().to_vec()),
         ]);
         if owner(r, motion, "m_OwnComp", &mut checks)? != comp
-            || owner(r, motion, "m_OwnPackage", &mut checks)? != package
+            || (!shadow_direction && owner(r, motion, "m_OwnPackage", &mut checks)? != package)
             || owner(r, package, "m_OwnComp", &mut checks)? != comp
         {
             return Err("Native motion owner mismatch".into());
@@ -1068,7 +1102,7 @@ impl MotionPlan {
             frame.direction_input = s::Direction {
                 ready: flag(true),
                 coherent: flag(true),
-                source: text("IndicatorMotionRot.m_vDragResult"),
+                source: text(if self.name=="IndicatorMotionHookLine" {"IndicatorMotionHookLine.m_vDragResult"}else{"IndicatorMotionRot.m_vDragResult"}),
                 token: frame.token,
                 hero_id: frame.hero_id,
                 slot: frame.ui.active_slot,
@@ -1645,6 +1679,31 @@ mod tests {
             r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&shape.to_le_bytes());
             assert!(additional_direction_contract(&mut r,128,12710,m,package,&mut Vec::new()).unwrap());
         }
+    }
+    #[test]
+    fn shadow_return_requires_exact_identity_and_all_config_owners() {
+        fn fixture()->Reflection<MutableMemory>{
+            let r=base_tap_fixture();
+            r.memory.0.borrow_mut()[1056..1060].copy_from_slice(&2126i32.to_le_bytes());
+            for(at,value)in [(1568,1f32),(1572,999.)]{r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+            r
+        }
+        let m="IndicatorMotionHookLine";let p="IndicatorPackageEasy";
+        let mut r=fixture();let mut reads=Vec::new();
+        assert!(shadow_return_contract(&mut r,128,256,384,2126,m,p,&mut reads).unwrap());
+        assert_eq!(native_range_shape(m,p),None);
+        for skill in [2120,2121,2632]{assert!(!shadow_return_contract(&mut r,128,256,384,skill,m,p,&mut Vec::new()).unwrap());}
+        for(at,bytes)in [(416,1280u64.to_le_bytes().to_vec()),(424,256u64.to_le_bytes().to_vec()),(296,384u64.to_le_bytes().to_vec()),(1056,2120i32.to_le_bytes().to_vec()),(1060,0i32.to_le_bytes().to_vec()),(1568,3f32.to_le_bytes().to_vec()),(1572,0f32.to_le_bytes().to_vec())]{
+            let mut r=fixture();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(shadow_return_contract(&mut r,128,256,384,2126,m,p,&mut Vec::new()).is_err());
+        }
+        r.memory.0.borrow_mut()[424..432].copy_from_slice(&256u64.to_le_bytes());
+        assert!(check(&r,&reads).is_err());
+        let(r,mut plan)=q_fixture();plan.skill=2126;plan.name=m.into();plan.direction_geometry=true;plan.range=None;plan.protect=None;
+        for(at,value)in [(528,0.6f32),(536,0.8)]{r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        let mut frame=s::Frame::default();plan.sample(&r,&mut frame).unwrap();
+        assert_eq!(frame.direction_input.source.as_str(),"IndicatorMotionHookLine.m_vDragResult");
+        assert!(frame.direction_input.ready.get());assert!(frame.logical.world_range.missing());
     }
     #[test]
     fn flameshot_shared_direction_uses_owned_shape_without_range() {
