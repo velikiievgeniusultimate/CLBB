@@ -1700,11 +1700,19 @@ impl<M: Memory> Source<M> {
         let portrait = if hero==104 {
             if plan.ui.portrait.as_ref().is_some_and(|p|p.validate(r).is_err()){plan.ui.portrait=None;plan.ui.portrait_retry=0;}
             if plan.ui.portrait.is_none() && now>=plan.ui.portrait_retry {
-                plan.ui.portrait=match crate::portrait_picker::Plan::discover(r,plan.ui.object,&plan.ui.buttons,plan.match_owners[2]){Ok(p)=>Some(p),Err(e)=>{self.portrait_error=e;None}};
+                plan.ui.portrait=match crate::portrait_picker::Plan::discover(r,plan.ui.object,&plan.ui.buttons,plan.match_owners[2],plan.ui.camera_object){Ok(p)=>Some(p),Err(e)=>{self.portrait_error=e;None}};
                 plan.ui.portrait_retry=now.saturating_add(100_000_000);
             }
             let checkpoint=consumed.len();
-            let observed=plan.ui.portrait.as_ref().and_then(|p|match p.sample(r,plan.ui.matrix,frame.ui.active_slot.as_str(),&mut consumed){Ok(o)=>{self.portrait_error.clear();Some(o)},Err(e)=>{self.portrait_error=e;None}});
+            let observed=plan.ui.portrait.as_mut().and_then(|p|match p.sample(r,plan.ui.matrix,frame.ui.active_slot.as_str(),frame.ui.resolution_px.values.map(|v|v.value),&mut consumed){Ok(mut o)=>{
+                if frame.ui.active_slot.as_str()==o.slot {
+                    if frame.ui.cancel_uv.valid(){o.cancel_point=Some(frame.ui.cancel_uv.values.map(|v|v.value));}
+                    let c=&frame.cancel_state;
+                    if c.ready.get()&&c.coherent.get()&&c.slot.as_str()==o.slot&&c.cancelled.is_bool()
+                        &&c.base_skill_id.int()==o.base {o.native_cancel=Some(c.cancelled.get());}
+                }
+                self.portrait_error.clear();Some(o)
+            },Err(e)=>{self.portrait_error=e;None}});
             if observed.is_none(){consumed.truncate(checkpoint);}
             observed
         } else {None};

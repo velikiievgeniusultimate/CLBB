@@ -1010,7 +1010,7 @@ impl Runtime {
         if down&&!repeat&&key!=0&&key==self.host.settings.integer("hero.cancel_key",hero){self.portrait.cancel(now_ns());}
         if down&&!repeat&&active_match {
             if let Some(sample)=self.host.sample.clone(){if let Some(o)=&sample.portrait {
-                if key!=0&&key==self.host.settings.binding(hero,&o.slot).key {
+                if o.active==10431&&key!=0&&key==self.host.settings.binding(hero,&o.slot).key {
                     let button=sample.frame.ui.buttons.iter().take(sample.frame.ui.button_count.min(32)as usize).find(|b|b.slot.as_str()==o.slot&&b.active.get()&&b.press_uv.valid());
                     if let Some(button)=button.filter(|_|sample.frame.hero_screen_uv.valid()) {
                         let v=sample.frame.hero_screen_uv.values;let b=button.press_uv.values;

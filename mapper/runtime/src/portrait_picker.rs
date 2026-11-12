@@ -27,6 +27,11 @@ pub struct Observation {
     pub selected: i32,
     pub camera_guid: u32,
     pub portraits: Vec<Portrait>,
+    pub resolution: [f64; 2],
+    pub cancel_point: Option<[f64; 2]>,
+    pub native_cancel: Option<bool>,
+    pub contact_owner: u64,
+    pub contact_point: Option<[f64; 2]>,
 }
 #[derive(Clone)]
 struct Icon {
@@ -52,6 +57,9 @@ pub struct Plan {
     entities: u64,
     selected: u64,
     camera_guid: (u64, u8),
+    follow: u64,
+    camera: u64,
+    contacts: Option<crate::target_contacts::ContactRegistryPlan>,
 }
 fn array<M: Memory>(
     r: &mut Reflection<M>,
@@ -81,6 +89,7 @@ impl Plan {
         ui: u64,
         buttons: &[ButtonPlan],
         show: u64,
+        camera: u64,
     ) -> Result<Self> {
         let mut checks = Vec::new();
         let (_, uf) = fields(r, &mut checks, ui)?;
@@ -100,6 +109,24 @@ impl Plan {
         }
         if ptr(r, &mut checks, address(backend, &f, "m_pOwner", &[18])?.0)? != show {
             return Err("portrait_foreign_owner".into());
+        }
+        let follow = ptr(r, &mut checks, address(backend, &f, "m_followGo", &[18])?.0)?;
+        let (name, gf) = fields(r, &mut checks, follow)?;
+        if name != "GameObject" {
+            return Err("portrait_follow_type".into());
+        }
+        let native = ptr(
+            r,
+            &mut checks,
+            address(follow, &gf, "m_CachedPtr", &[24])?.0,
+        )?;
+        if ptr(
+            r,
+            &mut checks,
+            native.checked_add(40).ok_or("portrait_native_overflow")?,
+        )? != follow
+        {
+            return Err("portrait_follow_owner".into());
         }
         let base = address(backend, &f, "m_iBindInitSkillId", &[8])?.0;
         let active = address(backend, &f, "m_iBindSkillId", &[8])?.0;
@@ -142,6 +169,11 @@ impl Plan {
         }
         check(r, &checks)?;
         Ok(Self {
+            contacts: crate::target_contacts::discover_ui_camera_class(r, camera)
+                .and_then(|k| crate::target_contacts::ContactRegistryPlan::discover(r, k))
+                .ok(),
+            follow,
+            camera,
             checks,
             backend,
             slot: b.slot.clone(),
@@ -159,19 +191,19 @@ impl Plan {
         check(r, &self.checks)
     }
     pub fn sample<M: Memory>(
-        &self,
+        &mut self,
         r: &mut Reflection<M>,
         matrix: u64,
         held_slot: &str,
+        resolution: [f64; 2],
         consumed: &mut Checks,
     ) -> Result<Observation> {
         self.validate(r)?;
         consumed.extend(self.checks.iter().cloned());
         let base = int(r, consumed, self.base)?;
         let active = int(r, consumed, self.active)?;
-        if int(r, consumed, self.data_base)? != base
-            || int(r, consumed, self.data_active)? != active
-        {
+        let current = int(r, consumed, self.data_active)?;
+        if int(r, consumed, self.data_base)? != base || ![base, active].contains(&current) {
             return Err("portrait_inactive_form".into());
         }
         let selected = int(r, consumed, self.selected)?;
@@ -182,7 +214,7 @@ impl Plan {
         let entities = array(r, self.entities, "ShowEntity", consumed)?;
         let (view, projection) = unity::matrices(&capture(r, consumed, matrix, 128)?)?;
         let mut portraits = Vec::new();
-        for (index, i) in self.icons.iter().enumerate() {
+        for (index, i) in self.icons.iter().enumerate().filter(|_| current == active) {
             check(r, &i.checks)?;
             consumed.extend(i.checks.iter().cloned());
             if !boolean(r, consumed, i.active)?
@@ -224,15 +256,51 @@ impl Plan {
                 radius,
             });
         }
+        let mut contact_owner = 0;
+        let mut contact_point = None;
+        {
+            if self
+                .contacts
+                .as_ref()
+                .is_some_and(|p| p.validate(r).is_err())
+            {
+                self.contacts = None;
+            }
+            if self.contacts.is_none() {
+                self.contacts = crate::target_contacts::discover_ui_camera_class(r, self.camera)
+                    .and_then(|k| crate::target_contacts::ContactRegistryPlan::discover(r, k))
+                    .ok();
+            }
+            let checkpoint = consumed.len();
+            if let Some(c) = self
+                .contacts
+                .as_ref()
+                .and_then(|p| p.sample(r, self.follow, 0, consumed).ok())
+                .filter(|c| c.present && c.press_started)
+            {
+                let [w, h] = resolution;
+                if w > 1. && h > 1. {
+                    contact_owner = c.contact_owner_id;
+                    contact_point = Some([c.raw_pos[0] / (w - 1.), (h - c.raw_pos[1]) / (h - 1.)]);
+                }
+            } else {
+                consumed.truncate(checkpoint);
+            }
+        }
         Ok(Observation {
             backend: self.backend,
             slot: self.slot.clone(),
             base,
-            active,
-            held: held_slot == self.slot,
+            active: current,
+            held: held_slot == self.slot || contact_owner != 0,
             selected,
             camera_guid,
             portraits,
+            contact_owner,
+            contact_point,
+            resolution,
+            cancel_point: None,
+            native_cancel: None,
         })
     }
 }

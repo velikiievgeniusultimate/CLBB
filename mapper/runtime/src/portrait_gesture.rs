@@ -26,6 +26,7 @@ pub struct Held {
     pub copies: Vec<Copy>,
     pub goal: Option<(usize, u32, u64)>,
     pub move_ns: i64,
+    contact_owner: u64,
     #[serde(serialize_with = "serialize_point")]
     pub point: Point,
     #[serde(serialize_with = "serialize_point")]
@@ -91,6 +92,7 @@ impl Picker {
             copies: Vec::new(),
             goal: None,
             move_ns: 0,
+            contact_owner: 0,
             point: neutral,
             anchor,
             neutral,
@@ -145,7 +147,7 @@ impl Picker {
             epoch == h.epoch
                 && o.backend == h.backend
                 && o.base == 10430
-                && o.active == 10431
+                && matches!(o.active, 10430 | 10431)
                 && sample_ns >= h.started
                 && now - sample_ns <= 100_000_000
         }) else {
@@ -155,6 +157,32 @@ impl Picker {
             }
             return;
         };
+        if let Some(point) = o
+            .cancel_point
+            .filter(|p| p.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)))
+        {
+            h.neutral = Point::new(point[0], point[1]);
+        }
+        if o.active == o.base {
+            // The owned native base form positively revokes all attachment
+            // targets. Retire this finger at neutral without touching motion.
+            if h.move_ns == 0 || h.point != h.neutral || h.goal.is_some() {
+                if t.motion(h.contact, h.neutral) {
+                    h.point = h.neutral;
+                    h.goal = None;
+                    h.move_ns = now;
+                }
+                return;
+            }
+            if sample_ns > h.move_ns {
+                let h = self.held.take().unwrap();
+                t.up(h.contact, h.neutral);
+                if h.physical_held {
+                    self.ignored.push(h.key);
+                }
+            }
+            return;
+        }
         if !o.held {
             return;
         }
@@ -241,15 +269,30 @@ impl Picker {
         // Recheck the same index/GUID/owner in the current native array before
         // releasing. Reordering, disappearing stacks and duplicate portraits
         // cannot silently turn a pending release into a different opponent.
-        let matched = sample_ns > h.move_ns
+        let point_ack = o.resolution.iter().all(|v| v.is_finite() && *v > 1.)
+            && sample_ns > h.move_ns
+            && o.contact_owner != 0
+            && o.contact_point.is_some_and(|p| {
+                (p[0] - h.point.x).abs() < 2.0 / o.resolution[0]
+                    && (p[1] - h.point.y).abs() < 2.0 / o.resolution[1]
+            });
+        if point_ack && h.contact_owner == 0 {
+            h.contact_owner = o.contact_owner;
+        }
+        let matched = point_ack
+            && h.contact_owner == o.contact_owner
             && match h.goal {
                 Some((index, guid, owner)) => {
-                    o.selected == index as i32
+                    o.native_cancel == Some(false)
+                        && o.selected == index as i32
                         && o.portraits
                             .iter()
                             .any(|p| p.index == index && p.guid == guid && p.owner == owner)
                 }
-                None => o.selected == -1,
+                // The native button center retains the last target and casts!
+                // Outside a copy, route to the owned native cancel widget and
+                // require BOTH its delivered pointer and native cancellation.
+                None => o.cancel_point.is_some() && o.native_cancel == Some(true),
             };
         if !h.pressed && matched {
             let h = self.held.take().unwrap();
@@ -314,6 +357,11 @@ mod tests {
             held: true,
             selected: -1,
             camera_guid: 0,
+            resolution: [4000., 3111.],
+            cancel_point: Some([0.84, 0.42]),
+            native_cancel: Some(false),
+            contact_owner: 99,
+            contact_point: Some([0.94, 0.7]),
             portraits: (0..5)
                 .map(|i| Portrait {
                     index: i,
@@ -325,10 +373,15 @@ mod tests {
                 .collect(),
         }
     }
+    fn step(p: &mut Picker, w: &mut Wire, o: &mut Observation, start: i64, now: i64) {
+        o.contact_point = w.events.last().map(|e| [e.2.x, e.2.y]);
+        o.native_cancel = Some(o.contact_point == o.cancel_point);
+        p.poll(w, "match", Some(o), start, now);
+    }
     fn begin() -> (Picker, Wire, Observation) {
         let mut p = Picker::default();
         let mut w = Wire::default();
-        let o = native();
+        let mut o = native();
         p.begin(
             &mut w,
             69,
@@ -339,7 +392,7 @@ mod tests {
             Point::new(0.2, 0.3),
             1,
         );
-        p.poll(&mut w, "match", Some(&o), 2, 3);
+        step(&mut p, &mut w, &mut o, 2, 3);
         (p, w, o)
     }
     fn center(c: &Copy) -> Point {
@@ -353,13 +406,13 @@ mod tests {
         for i in 0..5 {
             let (mut p, mut w, mut o) = begin();
             p.pointer = center(&p.held.as_ref().unwrap().copies[i]);
-            p.poll(&mut w, "match", Some(&o), 4, 5);
+            step(&mut p, &mut w, &mut o, 4, 5);
             p.release(69, 6);
-            p.poll(&mut w, "match", Some(&o), 7, 8);
+            step(&mut p, &mut w, &mut o, 7, 8);
             assert!(!w.events.iter().any(|e| e.0 == 2));
             o.selected = i as i32;
             o.camera_guid = o.portraits[i].guid;
-            p.poll(&mut w, "match", Some(&o), 9, 10);
+            step(&mut p, &mut w, &mut o, 9, 10);
             assert!(p.held.is_none());
             let up = w.events.last().unwrap();
             assert_eq!(up.0, 2);
@@ -371,19 +424,18 @@ mod tests {
         }
     }
     #[test]
-    fn outside_release_cancels_after_native_no_selection() {
+    fn outside_release_uses_native_position_despite_sticky_selected_index() {
         let (mut p, mut w, mut o) = begin();
         p.pointer = center(&p.held.as_ref().unwrap().copies[1]);
-        p.poll(&mut w, "match", Some(&o), 4, 5);
+        step(&mut p, &mut w, &mut o, 4, 5);
         o.selected = 1;
         p.pointer = Point::new(0.2, 0.2);
         p.release(69, 6);
-        p.poll(&mut w, "match", Some(&o), 7, 8);
-        p.poll(&mut w, "match", Some(&o), 9, 10);
-        assert!(p.held.is_some());
-        o.selected = -1;
-        p.poll(&mut w, "match", Some(&o), 11, 12);
-        assert_eq!(w.events.last().unwrap().2, Point::new(0.94, 0.7));
+        step(&mut p, &mut w, &mut o, 7, 8);
+        step(&mut p, &mut w, &mut o, 9, 10);
+        assert!(p.held.is_none());
+        assert_eq!(o.selected, 1);
+        assert_eq!(w.events.last().unwrap().2, Point::new(0.84, 0.42));
         assert!(!p.contains(69));
     }
     #[test]
@@ -392,20 +444,20 @@ mod tests {
         let before = p.held.as_ref().unwrap().copies[0].destination;
         o.camera_guid = 100;
         o.portraits[0].radius = [0.03, 0.04];
-        p.poll(&mut w, "match", Some(&o), 4, 5);
+        step(&mut p, &mut w, &mut o, 4, 5);
         assert_eq!(before, p.held.as_ref().unwrap().copies[0].destination);
     }
     #[test]
     fn recipient_replacement_during_release_cannot_cast_new_opponent() {
         let (mut p, mut w, mut o) = begin();
         p.pointer = center(&p.held.as_ref().unwrap().copies[0]);
-        p.poll(&mut w, "match", Some(&o), 4, 5);
+        step(&mut p, &mut w, &mut o, 4, 5);
         p.release(69, 6);
         o.portraits[0].guid = 999;
         o.selected = 0;
-        p.poll(&mut w, "match", Some(&o), 7, 8);
+        step(&mut p, &mut w, &mut o, 7, 8);
         assert_eq!(p.held.as_ref().unwrap().goal, None);
-        assert_eq!(w.events.last().unwrap().2, Point::new(0.94, 0.7));
+        assert_eq!(w.events.last().unwrap().2, Point::new(0.84, 0.42));
     }
     #[test]
     fn stale_or_foreign_backend_does_not_emit_target_up() {
@@ -413,16 +465,16 @@ mod tests {
         p.release(69, 4);
         let n = w.events.len();
         o.backend = 99;
-        p.poll(&mut w, "match", Some(&o), 5, 6);
+        step(&mut p, &mut w, &mut o, 5, 6);
         assert_eq!(w.events.len(), n);
         p.poll(&mut w, "other", Some(&o), 7, 8);
         assert_eq!(w.events.len(), n);
     }
     #[test]
     fn cancel_key_retires_only_picker_contact_and_waits_for_physical_up() {
-        let (mut p, mut w, o) = begin();
+        let (mut p, mut w, mut o) = begin();
         p.cancel(4);
-        p.poll(&mut w, "match", Some(&o), 5, 6);
+        step(&mut p, &mut w, &mut o, 5, 6);
         assert!(p.held.is_none());
         assert!(p.contains(69));
         assert!(w.events.iter().all(|e| e.1 == 7));
@@ -435,24 +487,60 @@ mod tests {
         o.held = false;
         p.release(69, 4);
         let n = w.events.len();
-        p.poll(&mut w, "match", Some(&o), 5, 6);
+        step(&mut p, &mut w, &mut o, 5, 6);
         assert_eq!(n, w.events.len());
         o.held = true;
-        p.poll(&mut w, "match", Some(&o), 7, 8);
+        step(&mut p, &mut w, &mut o, 7, 8);
         assert!(p.held.is_none());
     }
     #[test]
     fn cosmetic_icon_motion_does_not_postpone_release_ack() {
         let (mut p, mut w, mut o) = begin();
         p.pointer = center(&p.held.as_ref().unwrap().copies[0]);
-        p.poll(&mut w, "match", Some(&o), 4, 5);
+        step(&mut p, &mut w, &mut o, 4, 5);
         p.release(69, 6);
         let count = w.events.len();
         o.selected = 0;
         o.portraits[0].center[0] += 0.001;
-        p.poll(&mut w, "match", Some(&o), 7, 8);
+        step(&mut p, &mut w, &mut o, 7, 8);
         assert!(p.held.is_none());
         assert_eq!(w.events.len(), count + 1);
         assert_eq!(w.events.last().unwrap().0, 2);
+    }
+    #[test]
+    fn expired_attachment_form_retires_only_its_own_finger() {
+        let (mut p, mut w, mut o) = begin();
+        p.pointer = center(&p.held.as_ref().unwrap().copies[0]);
+        step(&mut p, &mut w, &mut o, 4, 5);
+        o.active = 10430;
+        o.held = false;
+        step(&mut p, &mut w, &mut o, 6, 7);
+        step(&mut p, &mut w, &mut o, 8, 9);
+        assert!(p.held.is_none());
+        assert!(w.events.iter().all(|e| e.1 == 7));
+        assert!(p.contains(69));
+        p.release(69, 10);
+        assert!(!p.contains(69));
+    }
+    #[test]
+    fn matching_index_without_owned_native_point_never_releases() {
+        let (mut p, mut w, mut o) = begin();
+        p.pointer = center(&p.held.as_ref().unwrap().copies[0]);
+        step(&mut p, &mut w, &mut o, 4, 5);
+        p.release(69, 6);
+        o.selected = 0;
+        o.contact_point = None;
+        p.poll(&mut w, "match", Some(&o), 7, 8);
+        assert!(p.held.is_some());
+        o.contact_point = Some([
+            p.held.as_ref().unwrap().point.x,
+            p.held.as_ref().unwrap().point.y,
+        ]);
+        o.contact_owner = 199;
+        // Capture the first recipient only from its matching point; a later
+        // contact replacement cannot authorize the old finger's release.
+        p.held.as_mut().unwrap().contact_owner = 99;
+        p.poll(&mut w, "match", Some(&o), 9, 10);
+        assert!(p.held.is_some());
     }
 }

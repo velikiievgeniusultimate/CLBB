@@ -7147,10 +7147,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..ff415e4
+index 0000000..afa3afc
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1157 @@
+@@ -0,0 +1,1163 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7770,7 +7770,13 @@ index 0000000..ff415e4
 +    double width=gtk_widget_get_width(widget),height=gtk_widget_get_height(widget);
 +    for(int i=0;rows && *rows && i<5;i++) {
 +        double sx,sy,sw,sh,dx,dy,dw,dh;int selected;
-+        if(sscanf(rows,"%lf %lf %lf %lf %lf %lf %lf %lf %d",&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh,&selected)!=9)break;
++        double *fields[]={&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh};
++        const char *scan=rows;gboolean parsed=TRUE;
++        for(unsigned int n=0;n<8;n++){
++            char *end=NULL;*fields[n]=g_ascii_strtod(scan,&end);
++            if(end==scan){parsed=FALSE;break;}scan=end;
++        }
++        if(!parsed || sscanf(scan,"%d",&selected)!=1)break;
 +        gboolean valid=TRUE;double numbers[]={sx,sy,sw,sh,dx,dy,dw,dh};
 +        for(unsigned int n=0;n<8;n++)if(!isfinite(numbers[n]) || numbers[n]<0 || numbers[n]>1)valid=FALSE;
 +        if(valid && sw>0 && sh>0 && dw>0 && dh>0 && sx+sw<=1 && sy+sh<=1 && dx+dw<=1 && dy+dh<=1) {

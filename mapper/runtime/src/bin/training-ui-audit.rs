@@ -140,6 +140,7 @@ fn run()->Result<()> {
             queue.clear(); queue.push_back((object,"diagnostic_object".into(),0usize));
         }
     }
+    let expanded=filter.as_ref().is_some_and(|f|f.starts_with("0x"));
     let mut seen=BTreeSet::new();let mut objects=Vec::new();
     while let Some((object,path,depth))=queue.pop_front() {
         if seen.len()>=768||started.elapsed()>Duration::from_secs(8){break;}
@@ -150,12 +151,12 @@ fn run()->Result<()> {
         let geometry=widget(&mut r,object);
         let button_geometry=button_widget(&mut r,object);
         for (key,field) in fields {
-            if field.is_static||field.offset>65536{continue;}
+            if field.is_static||field.offset>65536||(!expanded&&!interesting(&key)&&depth>0){continue;}
             let address=object+field.offset;
             if matches!(field.kind,14|18|21|29){
                 let Ok(child)=r.pointer(address) else{continue};
                 if child==0 {continue;}
-                if field.kind == 29 {
+                if field.kind == 29 && expanded {
                     if let Ok(header) = r.read(child,32) {
                         let count=clbb_mapper::reflection::u64_at(&header,24);
                         let class=clbb_mapper::reflection::u64_at(&header,0);
@@ -186,9 +187,9 @@ fn run()->Result<()> {
                         queue.push_back((child,format!("{path}.{key}"),depth+1));
                     }
                 }
-            } else if matches!(field.kind,8|9) {
+            } else if matches!(field.kind,8|9)&&(expanded||interesting(&key)) {
                 if let Ok(v)=r.integer(address){values.insert(key,json!(v));}
-            } else if field.kind==2 {
+            } else if field.kind==2&&(expanded||["active","enable","show","visible","choose","select"].iter().any(|part|key.to_ascii_lowercase().contains(part))) {
                 if let Ok(raw)=r.read(address,1){if raw[0]<=1{values.insert(key,json!(raw[0]==1));}}
             }
         }
