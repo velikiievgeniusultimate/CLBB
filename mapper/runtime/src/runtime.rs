@@ -777,6 +777,30 @@ impl Runtime {
                 "cancel_point_ready":view.cancelReady_!=0,"cancel_point":[view.cancelPoint_.x,view.cancelPoint_.y]}
         })
     }
+    fn contact_diagnostics(&self)->serde_json::Value {
+        serde_json::json!({"rotation":self.host.rotate_contacts,"next":self.host.next_contact,
+            "active":self.host.touches.iter().enumerate().filter_map(|(id,held)|held.then_some(id)).collect::<Vec<_>>()})
+    }
+    /// One immutable controller View and the serial runtime's current contact
+    /// inventory. Native Source freshness remains explicit, never inferred from
+    /// the controller's cached acceptance flags or worker publication counters.
+    fn controller_diagnostics(&self,view:&clbb_moba_core::controller::view::View)->serde_json::Value {
+        let sample=self.host.sample.as_ref();
+        serde_json::json!({"schema":1,"atomic":true,"snapshot_ns":now_ns(),
+            "hero":view.heroId_,"epoch":view.frameEpoch_.as_str(),
+            "source":{"present":sample.is_some(),"fresh":self.host.fresh().is_some(),
+                "hero":sample.map(|s|s.frame.hero_id.int()),"epoch":sample.map(|s|s.frame.token.as_str()),
+                "owner_matches_view":sample.map(|s|s.frame.hero_id.int()==view.heroId_
+                    &&!view.frameEpoch_.as_str().is_empty()&&s.frame.token.as_str()==view.frameEpoch_.as_str())},
+            "input":self.input_diagnostics(view),"aim":self.aim_diagnostics(view),"cancel":self.cancel_diagnostics(view),
+            "contacts":self.contact_diagnostics(),
+            "cast":{"key":view.skillKey_,"held":view.skillKeyHeld_,"mode":view.skillCastMode_,"touch":view.skillTouch_,
+                "slot":view.activeSlot_.as_str(),"start_ns":view.castStartedNs_,"previous_end_ns":view.lastSkillEndNs_,
+                "sample_start_ns":view.frameCoreSampleStartNs_,"touch_sequence":view.touchSequence_,
+                "transport_sequence":view.verifiedTransportSequence_,"cancel_pending":view.skillCancelPending_,
+                "cancel_ack":view.skillCancelAcknowledged_,"binding_variant":view.skillBindingVariant_,
+                "cooldown_variant":view.skillCooldownVariant_}})
+    }
     fn input_diagnostics(&self, view: &clbb_moba_core::controller::view::View) -> serde_json::Value {
         let hero=view.heroId_;
         serde_json::json!({"hero":hero,"ready":view.ready_,"enabled":view.enabled_,"skill":view.coreSkill_,"touch":view.skillTouch_,"aim":view.aimReady_,"pending_release":view.pendingRelease_,"logical":view.logicalMode_,"source":view.logicalSource_.as_str(),"pointer":[view.pointer_.x,view.pointer_.y],"status":view.status_.as_str(),"navigation":view.navigationAvailable_,"reason":view.inputReason_.as_str(),"accepted":view.acceptedInput_,"raw":[view.traceRaw_.x,view.traceRaw_.y],"decoded":[view.traceDecoded_.x,view.traceDecoded_.y],"sent":[view.skillPoint_.x,view.skillPoint_.y],"direct":view.directGeometryFresh_,"pending_seq":view.pendingGoalSequence_,"matched_seq":view.traceMatchedSequence_,"source_aim":self.host.sample.as_ref().is_some_and(|s|s.aim.is_some()),"epoch":view.frameEpoch_.as_str(),"plan_revision":self.host.sample.as_ref().map(|s|s.plan_revision).unwrap_or(0),"direction_accepted":view.directionAccepted_,"direction_fresh":view.directionGeometryFresh_,"direction_matched_seq":view.directionMatchedSequence_,"movement_touch":view.movementTouch_,"movement_held":view.movementHeld_,"movement_pressed":view.movementPressed_,"movement_ready":view.movementReady_,"movement_status":view.movementStatus_.as_str()})
@@ -791,6 +815,9 @@ impl Runtime {
                     "pending_direction_valid":view.pendingDirectionValid_,
                     "pending_direction":[view.pendingDirection_.x,view.pendingDirection_.y],
                     "direction_observed":[view.directionObserved_.x,view.directionObserved_.y],
+                    "direction_accepted":view.directionAccepted_,"direction_fresh":view.directionGeometryFresh_,
+                    "direction_matched_seq":view.directionMatchedSequence_,
+
                     "direction_goal_time_ns":view.directionGoalTime_,
                     "direction_goal_seq":view.directionGoalSequence_,
                     "direction_sample_start_ns":view.directionSampleStart_,
@@ -952,6 +979,7 @@ impl Runtime {
             "audio.input_devices"|"audio.output_devices"|"audio.status"|"audio.capture_status"|"audio.playback_status"=>crate::audio::read(key),
             "hero.id"=>hero.to_string(),"hero.name"=>if hero==25{"Кагура".into()}else if hero>0{format!("Герой {hero}")}else{"Вне матча".into()},
             "status"|"diagnostics.status"=>if !self.error.is_empty(){self.error.clone()}else if !self.host.settings.boolean("enabled",0){"Управление CLBB выключено".into()}else if self.host.fresh().is_none(){"Ожидаю матч и кнопки героя".into()}else if self.suspended{"Профиль готов · управление приостановлено".into()}else{view.status_.owned()},
+            "diagnostics.controller"=>self.controller_diagnostics(&view).to_string(),
             "diagnostics.input"=>self.input_diagnostics(&view).to_string(),
             "diagnostics.aim"=>self.aim_diagnostics(&view).to_string(),
             "diagnostics.cancel"=>self.cancel_diagnostics(&view).to_string(),
@@ -1020,7 +1048,7 @@ impl Runtime {
                     .map(|s|s.kind.int()).unwrap_or(0).to_string()
             },
             "diagnostics.gestures"=>serde_json::json!({"active":self.gestures.active,"ignored":self.gestures.ignored_keys(),"linked":self.host.fresh().and_then(|s|s.linked.as_ref()),"cancel_uv":self.host.fresh().map(|s|serde_json::json!({"valid":s.frame.ui.cancel_uv.valid(),"point":s.frame.ui.cancel_uv.values.map(|v|v.value)})),"buttons":self.host.fresh().map(|s|s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill").map(|b|serde_json::json!({"slot":b.slot.as_str(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>())}).to_string(),
-            "diagnostics.contacts"=>serde_json::json!({"rotation":self.host.rotate_contacts,"next":self.host.next_contact,"active":self.host.touches.iter().enumerate().filter_map(|(i,v)|v.then_some(i)).collect::<Vec<_>>()}).to_string(),
+            "diagnostics.contacts"=>self.contact_diagnostics().to_string(),
             "debug.status"=>self.recorder.status(),
             "diagnostics.source_ms"=>format!("{:.3}",self.worker.shared.lock().unwrap().source_ms),
             "diagnostics.navigation"=>view.navigationStatus_.owned(),_=>self.host.settings.get(key,hero),
@@ -1443,6 +1471,58 @@ mod tests {
         assert_eq!(stale_source["available"],false);assert_eq!(stale_source["source"]["present"],true);
         assert_eq!(stale_source["source"]["fresh"],false);assert!(stale_source["native"].is_null());
         assert_eq!(stale_source["native_fresh"],false);assert_eq!(stale_source["controller"]["pending"],true);
+    }
+    #[test]
+    fn atomic_controller_diagnostics_keep_one_view_direction_receipt_cast_owner_and_contacts() {
+        use crate::source::text;
+        let mut events=Vec::new();let mut runtime=fixture(&mut events);let at=now_ns();
+        let mut sample=template_sample(30,2,at);sample.frame.token=text("atomic-match");
+        runtime.host.sample=Some(Arc::new(sample));runtime.host.touches[2]=true;runtime.host.touches[7]=true;
+        let mut view=clbb_moba_core::controller::view::View::default();
+        view.heroId_=30;view.frameEpoch_=text("atomic-match");view.coreSkill_=3020;view.skillTouch_=7;
+        view.activeSlot_=text("skill:1");view.skillKey_=87;view.skillKeyHeld_=1;view.skillCastMode_=0;
+        view.castStartedNs_=at-10_000_000;view.directionAccepted_=1;view.directionGeometryFresh_=1;
+        view.directionMatchedSequence_=9_007_199_254_740_993;view.touchSequence_=view.directionMatchedSequence_;
+        view.sentTimeNs_=at-3_000_000;view.directionSampleStart_=at-2_000_000;view.directionSampleEnd_=at-1_000_000;
+        view.directionObserved_=Point::new(0.6,0.8);view.skillCancelPending_=1;
+        let actual_core=runtime.core.inspect();assert_ne!(actual_core.heroId_,view.heroId_);
+        let row=runtime.controller_diagnostics(&view);
+        assert_eq!(row["schema"],1);assert_eq!(row["atomic"],true);assert!(row["snapshot_ns"].as_i64().unwrap()>=at);
+        assert_eq!(row["hero"],30);assert_eq!(row["epoch"],"atomic-match");
+        assert_eq!(row["input"]["hero"],row["hero"]);assert_eq!(row["input"]["epoch"],row["epoch"]);
+        assert_eq!(row["input"]["skill"],row["aim"]["skill"]);assert_eq!(row["input"]["touch"],row["aim"]["touch"]);
+        for field in ["direction_accepted","direction_fresh","direction_matched_seq"] {assert_eq!(row["input"][field],row["aim"][field]);}
+        assert_eq!(row["aim"]["direction_matched_seq"].as_u64(),Some(view.touchSequence_));
+        assert_eq!(row["aim"]["sent_seq"].as_u64(),Some(view.touchSequence_));assert_eq!(row["aim"]["sent_time_ns"],view.sentTimeNs_);
+        assert_eq!(row["aim"]["direction_sample_start_ns"],view.directionSampleStart_);assert_eq!(row["aim"]["direction_observed"],serde_json::json!([0.6,0.8]));
+        assert_eq!(row["cast"]["start_ns"],view.castStartedNs_);assert_eq!(row["cast"]["key"],87);assert_eq!(row["cast"]["held"],1);
+        assert_eq!(row["cast"]["touch"],7);assert_eq!(row["contacts"]["active"],serde_json::json!([2,7]));
+        assert_eq!(row["cancel"]["controller"]["pending"],true);assert_eq!(row["cancel"]["controller"]["touch"],7);
+        assert_eq!(row["source"]["fresh"],true);assert_eq!(row["source"]["owner_matches_view"],true);
+        assert_eq!(runtime.core.inspect().heroId_,actual_core.heroId_);assert!(events.is_empty());
+        assert!(runtime.host.touches[2]&&runtime.host.touches[7]);
+        // A serialized integer sequence is never rounded through a float.
+        let decoded:serde_json::Value=serde_json::from_str(&row.to_string()).unwrap();
+        assert_eq!(decoded["aim"]["sent_seq"].as_u64(),Some(view.touchSequence_));
+    }
+    #[test]
+    fn atomic_controller_diagnostics_report_source_mismatch_staleness_and_absence_independently() {
+        use crate::source::{text,number};
+        let mut events=Vec::new();let mut runtime=fixture(&mut events);let at=now_ns();
+        let mut view=clbb_moba_core::controller::view::View::default();view.heroId_=30;view.frameEpoch_=text("view-match");view.directionAccepted_=1;
+        let mut foreign=template_sample(40,2,at);foreign.frame.token=text("foreign-match");runtime.host.sample=Some(Arc::new(foreign.clone()));
+        let row=runtime.controller_diagnostics(&view);assert_eq!(row["atomic"],true);assert_eq!(row["input"]["direction_accepted"],1);
+        assert_eq!(row["source"]["hero"],40);assert_eq!(row["source"]["epoch"],"foreign-match");assert_eq!(row["source"]["fresh"],true);
+        assert_eq!(row["source"]["owner_matches_view"],false);
+        foreign.frame.time_ns=number((at-500_000_000)as f64);runtime.host.sample=Some(Arc::new(foreign));
+        let stale=runtime.controller_diagnostics(&view);assert_eq!(stale["source"]["present"],true);assert_eq!(stale["source"]["fresh"],false);
+        assert_eq!(stale["cancel"]["available"],false);assert!(stale["cancel"]["native"].is_null());
+        runtime.host.sample=None;
+        let missing=runtime.controller_diagnostics(&view);assert_eq!(missing["source"]["present"],false);assert_eq!(missing["source"]["fresh"],false);
+        assert!(missing["source"]["owner_matches_view"].is_null());assert!(missing["source"]["hero"].is_null());assert!(missing["source"]["epoch"].is_null());
+        let pointer=runtime.read("diagnostics.controller");let endpoint:serde_json::Value=serde_json::from_str(unsafe{CStr::from_ptr(pointer)}.to_str().unwrap()).unwrap();
+        assert_eq!(endpoint["atomic"],true);assert_eq!(endpoint["hero"],endpoint["input"]["hero"]);
+        assert_eq!(endpoint["input"]["touch"],endpoint["aim"]["touch"]);assert_eq!(endpoint["contacts"]["active"],serde_json::json!([]));assert!(events.is_empty());
     }
     #[test]
     fn primary_cancel_wait_mark_requires_a_sent_move_and_more_than_100ms() {

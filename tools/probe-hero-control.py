@@ -26,6 +26,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 from runtime_identity import runtime_executable_is_owned
 
 DIAGNOSTICS = ("input", "aim", "contacts", "cast_lock", "templates", "gestures", "cancel")
+CONTROLLER_DIAGNOSTICS = ("input", "aim", "contacts", "cancel", "cast")
+UNSUPPORTED_CONTROLLER = object()
 WAYPOINTS = ((.60, .50), (.57, .62), (.43, .58), (.37, .45), (.48, .35), (.62, .43))
 RELEASE_SECONDS = 1.8
 HEARTBEAT_SECONDS = .5  # The native independent-pointer lease is two seconds.
@@ -117,6 +119,7 @@ class Probe:
         self.pointer = WAYPOINTS[0]
         self.last_input_at = time.monotonic()
         self.in_control = False
+        self.controller_supported = None
         self.report["identity"] = {"pid": self.pid, "birth_ticks": self.birth,
             "executable": str(self.executable), "executable_sha256": digest,
             "owned_runtime_verified": True}
@@ -196,17 +199,65 @@ class Probe:
 
     def read(self, key: str, deadline=None):
         reply=self.command("read " + key, deadline=deadline)
+        if key == "diagnostics.controller" and not reply:
+            return UNSUPPORTED_CONTROLLER
         if key == "diagnostics.cancel" and not reply:
             return {"available":False,"reason":"unsupported_diagnostic"}
         return json.loads(reply)
 
+    def controller_snapshot(self, deadline=None):
+        """Only an explicitly unsupported endpoint permits separate legacy reads.
+
+        A malformed/foreign combined reply or timeout is a probe failure, never
+        silently relabelled as coherent telemetry from another set of RPCs.
+        """
+        if getattr(self, "controller_supported", None) is False:
+            return None
+        payload = self.read("diagnostics.controller", deadline=deadline)
+        if payload is UNSUPPORTED_CONTROLLER:
+            self.controller_supported = False
+            return None
+        if (not isinstance(payload, dict) or payload.get("atomic") is not True
+                or type(payload.get("schema")) is not int or payload["schema"] != 1
+                or type(payload.get("snapshot_ns")) is not int or payload["snapshot_ns"] <= 0
+                or any(not isinstance(payload.get(name), dict) for name in CONTROLLER_DIAGNOSTICS)
+                or not isinstance(payload.get("source"), dict)):
+            raise RuntimeError("Invalid atomic controller diagnostic schema")
+        inputs, aim, cast = payload["input"], payload["aim"], payload["cast"]
+        if type(payload.get("hero")) is not int or payload["hero"] != self.hero or type(inputs.get("hero")) is not int or inputs["hero"] != self.hero:
+            raise RuntimeError(f"Expected hero {self.hero}, atomic controller hero changed")
+        if not isinstance(payload.get("epoch"), str) or not payload["epoch"] or inputs.get("epoch") != payload["epoch"]:
+            raise RuntimeError("Atomic controller epoch is missing or inconsistent")
+        for field in ("skill", "touch"):
+            if type(inputs.get(field)) is not int or type(aim.get(field)) is not int or inputs[field] != aim[field]:
+                raise RuntimeError(f"Atomic input/aim {field} is missing or inconsistent")
+        if type(cast.get("touch")) is not int or cast["touch"] != inputs["touch"]:
+            raise RuntimeError("Atomic cast/input touch is inconsistent")
+        for field in ("direction_accepted", "direction_fresh", "direction_matched_seq"):
+            if type(inputs.get(field)) is not int or type(aim.get(field)) is not int or inputs[field] != aim[field]:
+                raise RuntimeError(f"Atomic Direction {field} is missing or inconsistent")
+        self.controller_supported = True
+        return payload
+
     def snapshot(self, stage: str, deadline=None, goal=None) -> dict:
-        sample = {"stage": stage, "start_ns": time.monotonic_ns(), "data": {}}
+        sample = {"stage": stage, "start_ns": time.monotonic_ns(), "atomic": False, "data": {}}
         if goal is not None:
             sample["pointer_goal"] = dict(goal)
         self.report["samples"].append(sample)
         try:
+            if self.in_control and time.monotonic() - self.last_input_at >= HEARTBEAT_SECONDS:
+                self.send_pointer(self.pointer, deadline=deadline)
+            controller = self.controller_snapshot(deadline=deadline)
+            if controller is not None:
+                sample["atomic"] = True
+                sample["controller"] = {name: controller[name] for name in
+                                        ("schema", "snapshot_ns", "hero", "epoch", "source")}
+                sample["data"].update({name: controller[name] for name in CONTROLLER_DIAGNOSTICS})
+            else:
+                sample["controller"] = {"available": False, "reason": "unsupported_diagnostic"}
             for name in DIAGNOSTICS:
+                if name in sample["data"]:
+                    continue
                 if self.in_control and time.monotonic() - self.last_input_at >= HEARTBEAT_SECONDS:
                     self.send_pointer(self.pointer, deadline=deadline)
                 sample["data"][name] = self.read("diagnostics." + name, deadline=deadline)
