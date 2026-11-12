@@ -1110,7 +1110,7 @@ impl Runtime {
         let Some(backend)=backend else{return String::new();};
         let mut out=format!("{}:{backend:x}\n",sample.frame.token.as_str());
         if let Some(o)=&sample.portrait {for p in &o.portraits {
-            let _=writeln!(out,"{} {} {} {} {}",p.guid,p.center[0]-p.radius[0],p.center[1]-p.radius[1],p.radius[0]*2.,p.radius[1]*2.);
+            let _=writeln!(out,"{} {} {} {} {} {}",p.guid,p.center[0]-p.radius[0],p.center[1]-p.radius[1],p.radius[0]*2.,p.radius[1]*2.,i32::from(p.rendered));
         }}
         out
     }
@@ -1450,7 +1450,7 @@ mod tests {
         let mut events=Vec::new();let mut r=fixture(&mut events);let at=now_ns();
         let mut sample=template_sample(104,1,at);
         let o=Observation {backend:77,slot:"skill:2".into(),base:10430,active:10431,held:false,selected:-1,camera_guid:0,
-            portraits:vec![Portrait{index:0,guid:900,owner:88,center:[0.9,0.6],radius:[0.02,0.025]}],
+            portraits:vec![Portrait{index:0,guid:900,owner:88,rendered:true,native_cancel_entry:false,native_collider:true,center:[0.9,0.6],radius:[0.02,0.025]}],
             resolution:[4000.,3111.],cancel_point:None,native_cancel:None,contact_owner:0,contact_point:None};
         sample.portrait=Some(o.clone());r.host.sample=Some(Arc::new(sample.clone()));
         r.portrait.begin(&mut r.host,69,sample.frame.token.as_str(),&o,Point::new(0.5,0.55),Point::new(0.9,0.8),Point::new(0.2,0.3),at);

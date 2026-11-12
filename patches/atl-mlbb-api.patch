@@ -7147,10 +7147,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..eaaedb9
+index 0000000..4560db1
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1242 @@
+@@ -0,0 +1,1249 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7795,11 +7795,12 @@ index 0000000..eaaedb9
 +    if(!line){portrait_cache_clear(h);h->portrait_scope[0]=0;g_free(preview);return;}
 +    *line++=0;
 +    if(strcmp(preview,h->portrait_scope)){portrait_cache_clear(h);g_strlcpy(h->portrait_scope,preview,sizeof(h->portrait_scope));}
-+    struct {guint64 guid;double uv[4];} rows[5];unsigned n=0;
++    struct {guint64 guid;double uv[4];gboolean rendered;} rows[5];unsigned n=0;
 +    while(*line && n<5){
 +        char *end;guint64 guid=g_ascii_strtoull(line,&end,10);const char *scan=end;gboolean valid=guid!=0&&end!=line;
 +        for(unsigned k=0;k<4 && valid;k++){rows[n].uv[k]=g_ascii_strtod(scan,&end);valid=end!=scan&&isfinite(rows[n].uv[k])&&rows[n].uv[k]>=0&&rows[n].uv[k]<=1;scan=end;}
-+        if(valid && rows[n].uv[2]>0 && rows[n].uv[3]>0){rows[n].guid=guid;n++;}
++        int rendered=0;
++        if(valid && sscanf(scan,"%d",&rendered)==1){rows[n].guid=guid;rows[n].rendered=rendered!=0;n++;}
 +        line=strchr(line,'\n');if(!line)break;line++;
 +    }
 +    const guint64 *info=g_object_get_data(G_OBJECT(surface->texture),"clbb-render-frame-info");
@@ -7811,7 +7812,7 @@ index 0000000..eaaedb9
 +            gboolean in_use=FALSE;for(unsigned j=0;j<n;j++)if(h->portraits[i].guid==rows[j].guid)in_use=TRUE;
 +            if(!in_use){slot=i;g_clear_object(&h->portraits[i].image);h->portraits[i].guid=rows[r].guid;h->portraits[i].captures=0;break;}
 +        }
-+        if(slot<0 || (h->portrait_visible && h->portraits[slot].image) || h->portraits[slot].captures>=3 || (h->portraits[slot].captures && h->portraits[slot].frame==frame))continue;
++        if(slot<0 || !rows[r].rendered || (h->portrait_visible && h->portraits[slot].image) || h->portraits[slot].captures>=3 || (h->portraits[slot].captures && h->portraits[slot].frame==frame))continue;
 +        double *uv=rows[r].uv;
 +        GdkTexture *image=portrait_crop(native,surface,uv[0],uv[1],uv[2],uv[3]);
 +        if(image){g_clear_object(&h->portraits[slot].image);h->portraits[slot].image=image;h->portraits[slot].frame=frame;h->portraits[slot].captures++;}
@@ -7841,14 +7842,20 @@ index 0000000..eaaedb9
 +            if(end==scan){parsed=FALSE;break;}scan=end;
 +        }
 +        if(!parsed || sscanf(scan,"%d",&selected)!=1)break;
-+        gboolean valid=TRUE;double numbers[]={sx,sy,sw,sh,dx,dy,dw,dh};
-+        for(unsigned int n=0;n<8;n++)if(!isfinite(numbers[n]) || numbers[n]<0 || numbers[n]>1)valid=FALSE;
-+        if(valid && sw>0 && sh>0 && dw>0 && dh>0 && sx+sw<=1 && sy+sh<=1 && dx+dw<=1 && dy+dh<=1) {
++        GdkTexture *cached=NULL;
++        for(unsigned k=0;k<5;k++)if(h->portraits[k].guid==guid){cached=h->portraits[k].image;break;}
++        gboolean dest_valid=TRUE,source_valid=TRUE;
++        double dest_numbers[]={dx,dy,dw,dh},source_numbers[]={sx,sy,sw,sh};
++        for(unsigned n=0;n<4;n++){
++            if(!isfinite(dest_numbers[n]) || dest_numbers[n]<0 || dest_numbers[n]>1)dest_valid=FALSE;
++            if(!isfinite(source_numbers[n]) || source_numbers[n]<0 || source_numbers[n]>1)source_valid=FALSE;
++        }
++        dest_valid=dest_valid && dw>0 && dh>0 && dx+dw<=1 && dy+dh<=1;
++        source_valid=source_valid && sw>0 && sh>0 && sx+sw<=1 && sy+sh<=1;
++        if(dest_valid && (cached || source_valid)) {
 +            graphene_rect_t dest=GRAPHENE_RECT_INIT(dx*width,dy*height,dw*width,dh*height);
 +            GskRoundedRect clip;gsk_rounded_rect_init_from_rect(&clip,&dest,MIN(dest.size.width,dest.size.height)/2.0);
 +            gtk_snapshot_push_rounded_clip(snapshot,&clip);
-+            GdkTexture *cached=NULL;
-+            for(unsigned k=0;k<5;k++)if(h->portraits[k].guid==guid){cached=h->portraits[k].image;break;}
 +            if(cached)gtk_snapshot_append_texture(snapshot,cached,&dest);
 +            else {
 +            gtk_snapshot_save(snapshot);

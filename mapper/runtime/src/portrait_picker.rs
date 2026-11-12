@@ -14,6 +14,9 @@ pub struct Portrait {
     pub index: usize,
     pub guid: u32,
     pub owner: u64,
+    pub rendered: bool,
+    pub native_cancel_entry: bool,
+    pub native_collider: bool,
     pub center: [f64; 2],
     pub radius: [f64; 2],
 }
@@ -222,12 +225,14 @@ impl Plan {
         {
             check(r, &i.checks)?;
             consumed.extend(i.checks.iter().cloned());
-            if !boolean(r, consumed, i.active)?
-                || boolean(r, consumed, i.cancel)?
-                || !boolean(r, consumed, i.collider)?
-            {
+            // Membership belongs to the native target roster. Hovering may
+            // hide/reconfigure a sprite or disable its click collider without
+            // removing the enemy from that roster. Those are not revocations.
+            if !boolean(r, consumed, i.active)? {
                 continue;
             }
+            let native_cancel_entry = boolean(r, consumed, i.cancel)?;
+            let native_collider = boolean(r, consumed, i.collider)?;
             let id = guid(r, consumed, i.id)?;
             let entity = entities[index];
             if id == 0 || entity == 0 || int(r, consumed, i.index)? != index as i32 {
@@ -247,9 +252,7 @@ impl Plan {
             // never revoke an otherwise valid target for the entire hold.
             i.widget.refresh_path(r)?;
             consumed.extend(i.widget.path.checks.iter().cloned());
-            if !i.widget.visible(r)? {
-                continue;
-            }
+            let rendered = i.widget.visible(r)?;
             let (center, radius) = i.widget.geometry(r, &view, &projection, true)?;
             if !unity::onscreen(center)
                 || radius
@@ -262,6 +265,9 @@ impl Plan {
                 index,
                 guid: id,
                 owner: i.object,
+                rendered,
+                native_cancel_entry,
+                native_collider,
                 center,
                 radius,
             });

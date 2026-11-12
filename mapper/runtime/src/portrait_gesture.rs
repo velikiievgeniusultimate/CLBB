@@ -376,6 +376,9 @@ mod tests {
                     index: i,
                     guid: 100 + i as u32,
                     owner: 200 + i as u64,
+                    rendered: true,
+                    native_cancel_entry: false,
+                    native_collider: true,
                     center: [0.9 - i as f64 * 0.04, 0.7],
                     radius: [0.02, 0.025],
                 })
@@ -573,5 +576,66 @@ mod tests {
         assert_eq!(w.events.len(), 1, "only DOWN, no unacknowledged aiming");
         step(&mut p, &mut w, &mut o, 2, 3);
         assert_eq!(w.events.len(), 1);
+    }
+    #[test]
+    fn hover_a_b_a_keeps_hidden_native_portraits_until_roster_removal() {
+        let (mut p, mut w, mut o) = begin();
+        let initial = p
+            .held
+            .as_ref()
+            .unwrap()
+            .copies
+            .iter()
+            .map(|c| (c.guid, c.destination))
+            .collect::<Vec<_>>();
+        for (step_id, index) in [0usize, 1, 0, 2, 1].into_iter().enumerate() {
+            let copy = p
+                .held
+                .as_ref()
+                .unwrap()
+                .copies
+                .iter()
+                .find(|c| c.index == index)
+                .unwrap();
+            p.pointer = center(copy);
+            for portrait in &mut o.portraits {
+                portrait.rendered = portrait.index == index;
+                portrait.native_collider = portrait.index == index;
+                portrait.native_cancel_entry = portrait.index != index;
+            }
+            o.selected = index as i32;
+            step(
+                &mut p,
+                &mut w,
+                &mut o,
+                10 + step_id as i64 * 2,
+                11 + step_id as i64 * 2,
+            );
+            let held = p.held.as_ref().unwrap();
+            assert_eq!(
+                held.copies
+                    .iter()
+                    .map(|c| (c.guid, c.destination))
+                    .collect::<Vec<_>>(),
+                initial
+            );
+            assert_eq!(
+                held.goal.unwrap().0,
+                index,
+                "native rendering flags never remove a roster target"
+            );
+        }
+        let gone = o.portraits.remove(0).guid;
+        step(&mut p, &mut w, &mut o, 30, 31);
+        assert_eq!(p.held.as_ref().unwrap().copies.len(), 4);
+        assert!(
+            p.held
+                .as_ref()
+                .unwrap()
+                .copies
+                .iter()
+                .all(|c| c.guid != gone),
+            "positive native roster removal still removes the copy"
+        );
     }
 }
