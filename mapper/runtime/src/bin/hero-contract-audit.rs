@@ -441,10 +441,16 @@ fn main() -> Result<()> {
         println!("hero_level_verified={valid} output={}", args[3]);
         return if valid { Ok(()) } else { Err("Native hero level is unknown; inspect the saved report".into()) };
     }
-    if args.len()!=3 && args.len()!=5 { return Err("Usage: hero-contract-audit PID OUTPUT.json [WIDTH HEIGHT]".into()); }
+    if !matches!(args.len(),3|5|7) { return Err("Usage: hero-contract-audit PID OUTPUT.json [WIDTH HEIGHT [--wait-variant ID]]".into()); }
     let pid:u32=args[1].parse().map_err(|_|"Invalid PID")?;
     if pid==0 {return Err("PID must be positive".into());}
-    let size=if args.len()==5 {[args[3].parse().map_err(|_|"Invalid width")?,args[4].parse().map_err(|_|"Invalid height")?]} else {[4000.,3111.]};
+    let size=if args.len()>=5 {[args[3].parse().map_err(|_|"Invalid width")?,args[4].parse().map_err(|_|"Invalid height")?]} else {[4000.,3111.]};
+    let wait_variant=if args.len()==7 {
+        if args[5]!="--wait-variant" {return Err("Unknown audit option".into());}
+        let id:i32=args[6].parse().map_err(|_|"Invalid awaited variant")?;
+        if !(1..=10_000_000).contains(&id){return Err("Awaited variant outside audit bounds".into());}
+        Some(id)
+    }else{None};
     if size.iter().any(|v:&f64|!v.is_finite()||!(32. ..=16384.).contains(v)) {return Err("Resolution outside audit bounds".into());}
     let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
     verify_selected_runtime(&root,pid)?;
@@ -459,7 +465,21 @@ fn main() -> Result<()> {
             Err(error)=>{*errors.entry(error).or_insert(0usize)+=1;std::thread::sleep(Duration::from_millis(5));},
         }
     }
-    let sample=snapshot.ok_or_else(||format!("No coherent hero sample in audit bounds: {errors:?}"))?;
+    let mut sample=snapshot.ok_or_else(||format!("No coherent hero sample in audit bounds: {errors:?}"))?;
+    if let Some(id)=wait_variant {
+        let hero=sample.frame.hero_id.int();let token=sample.frame.token.owned();
+        write_output(&format!("{}.ready",args[2]),&json!({"pid":pid,"hero":hero,"await_variant":id}))?;
+        let deadline=Instant::now()+Duration::from_secs(8);
+        loop {
+            if process_identity(pid)?!=identity {return Err("Runtime identity changed while waiting".into());}
+            if sample.frame.hero_id.int()!=hero || sample.frame.token.as_str()!=token {return Err("Hero/match changed while waiting".into());}
+            if sample.frame.skill_state.buttons.iter().take(sample.frame.skill_state.count.min(32)as usize)
+                .any(|v|v.active_skill_id.int()==id) {break;}
+            if Instant::now()>=deadline {return Err("Awaited variant did not appear within8seconds".into());}
+            std::thread::sleep(Duration::from_millis(5));
+            if let Ok(next)=source.sample(now_ns(),size){sample=next;}
+        }
+    }
     let frame=&sample.frame;let hero=frame.hero_id.int();
     let buttons:Vec<_>=frame.ui.buttons.iter().take(frame.ui.button_count.min(32)as usize).map(|b|json!({
         "slot":b.slot.as_str(),"kind":b.kind.as_str(),"base_skill":b.skill_id.int(),"active":b.active.get(),

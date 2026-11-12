@@ -284,6 +284,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
     // through the SAME owned slot/data. There is intentionally no aim registry
     // entry for this recast. Never apply the exception to its original dash.
     (hero==77 && slot=="skill:1" && base==7720 && active==7725)
+        // Chou's follow-up follows the target selected by the initial kick;
+        // its HookLine indicator does not take a second aiming direction.
+        || (hero==26 && slot=="skill:2" && base==2630 && active==2632)
         || (hero==25 && slot=="skill:2" && base==2530 && matches!(active,2530|2531))
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
@@ -2225,6 +2228,14 @@ mod tests {
     fn badang_wall_removal_is_only_the_owned_cancel_form_not_the_dash() {
         assert!(verified_button_only_form(77,"skill:1",7720,7725));
         for (hero,slot,base,id) in [(77,"skill:1",7720,7720),(77,"skill:0",7720,7725),(25,"skill:1",7720,7725),(77,"skill:1",7710,7725),(77,"skill:1",7720,7726)] {
+            assert!(!verified_button_only_form(hero,slot,base,id));
+        }
+    }
+    #[test]
+    fn chou_follow_up_is_plain_without_reclassifying_the_first_kick_or_other_slots() {
+        assert!(verified_button_only_form(26,"skill:2",2630,2632));
+        for (hero,slot,base,id) in [(26,"skill:2",2630,2630),(26,"skill:2",2630,2631),
+            (26,"skill:1",2630,2632),(25,"skill:2",2630,2632),(26,"skill:2",2620,2632)] {
             assert!(!verified_button_only_form(hero,slot,base,id));
         }
     }
