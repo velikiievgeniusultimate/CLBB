@@ -567,6 +567,24 @@ static gboolean valid_action(const char *slot) {
   }
   return action_key(slot)!=0;
 }
+/* Display-only spell IDs: never used for input routing or geometry. */
+static const char *battle_spell_name(int skill) {
+  switch (skill) {
+  case 20020: return "Возмездие";
+  case 20030: return "Вдохновение";
+  case 20040: return "Спринт";
+  case 20050: return "Исцеление";
+  case 20060: return "Эгида";
+  case 20070: return "Оцепенение";
+  case 20080: return "Очищение";
+  case 20100: return "Вспышка";
+  case 20140: return "Огненный выстрел";
+  case 20150: return "Кара";
+  case 20160: return "Прибытие";
+  case 20190: return "Отмщение";
+  default: return NULL;
+  }
+}
 static const char *action_title(const char *slot, int skill, const char *config) {
   (void)config;
   if (!strcmp(slot,"skill:0")) return "Навык 1";
@@ -577,7 +595,7 @@ static const char *action_title(const char *slot, int skill, const char *config)
   if (!strcmp(slot,"combo:1")) return "Комбо · навык 2 → навык 1";
   const char *slots[]={"extra:0","extra:1","extra:2","extra:3","attack","attack:minion","attack:tower","shop:quick","upgrade:0","upgrade:1","upgrade:2","upgrade:3"};
   const char *titles[]={"Возвращение","Регенерация","Боевой навык","Дополнительная кнопка","Основная атака","Атака по миньонам","Атака по башням","Быстрая покупка","Прокачка навыка 1","Прокачка навыка 2","Прокачка навыка 3","Прокачка навыка 4"};
-  if (!strcmp(slot,"extra:2")&&skill==20080) return "Очищение";
+  (void)skill;
   for (guint n=0;n<G_N_ELEMENTS(slots);++n) if (!strcmp(slot,slots[n])) return titles[n];
   return "Кнопка";
 }
@@ -624,7 +642,12 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
   if (personal) for (guint n=first;n<s->controls->len;++n) add_inheritance(g_ptr_array_index(s->controls,n));
 }
 static void action_card(ClbbSettings *s,const char *slot,const char *config,const char *mode_config,int skill,int type,GHashTable *expanded,gboolean cancel) {
-  GtkWidget *content=section(s->hero_box,cancel?"Отмена навыка":action_title(slot,skill,config));
+  char *title;
+  if (!strcmp(slot,"extra:2")) {
+    const char *name=battle_spell_name(skill);
+    title=name?g_strdup_printf("Боевой навык - %s",name):g_strdup_printf("Боевой навык - №%d",skill);
+  } else title=g_strdup(cancel?"Отмена навыка":action_title(slot,skill,config));
+  GtkWidget *content=section(s->hero_box,title);g_free(title);
   GtkWidget *card=gtk_widget_get_parent(gtk_widget_get_parent(content));
   g_object_set_data_full(G_OBJECT(card),"clbb-control-slot",g_strdup(config),g_free);
   GtkWidget *flow=gtk_flow_box_new();
@@ -645,9 +668,9 @@ static void movement_scope(ClbbSettings *s,GtkWidget *flow,gboolean personal) {
   gtk_box_append(GTK_BOX(box),label(personal?"Для этого героя":"Для всех героев","clbb-section-title"));
   guint first=s->controls->len;
   const char *prefix=personal?"hero.movement":"movement";
-  char *key=g_strdup_printf("%s.button",prefix);Control *mouse=bind_control(s,box,"Клавиша",key,KEY_MOUSE|2);g_free(key);
+  char *key=g_strdup_printf("%s.click_mode",prefix);mode_control(s,box,"Режим",key,0,TRUE);g_free(key);
+  key=g_strdup_printf("%s.button",prefix);Control *mouse=bind_control(s,box,"Клавиша",key,KEY_MOUSE|2);g_free(key);
   mouse->visible_if=g_strdup_printf("%s.click_mode",prefix);mouse->visible_mode=2;mouse->visible_not=TRUE;
-  key=g_strdup_printf("%s.click_mode",prefix);mode_control(s,box,"Режим",key,0,TRUE);g_free(key);
   key=g_strdup_printf("%s.click_distance_percent",prefix);
   Control *c=new_control(s,box,"Дальность клика, %",key,CONTROL_NUMBER,100);g_free(key);
   c->visible_if=g_strdup_printf("%s.click_mode",prefix);
