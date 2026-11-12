@@ -322,6 +322,7 @@ impl Encode for s::Frame {
         out.insert("active_joystick".into(), self.active_joystick.encode());
         out.insert("direction_input".into(), self.direction_input.encode());
         out.insert("selection_input".into(), self.selection_input.encode());
+        out.insert("auxiliary_controls".into(), self.auxiliary_controls.encode());
         out.insert("cancel_state".into(), self.cancel_state.encode());
         out.insert("logical".into(), self.logical.encode());
         out.insert("motion".into(), self.motion.encode());
@@ -337,7 +338,7 @@ impl Encode for u8 {
 
 impl Encode for s::SelectionInput {
     fn encode(&self)->Value {
-        json!({"ready":self.ready.encode(),"coherent":self.coherent.encode(),"input_ready":self.input_ready.encode(),
+        json!({"kind":self.kind.encode(),"ready":self.ready.encode(),"coherent":self.coherent.encode(),"input_ready":self.input_ready.encode(),
             "panel_visible":self.panel_visible.encode(),"has_drag":self.has_drag.encode(),
             "selected_option_valid":self.selected_option_valid.encode(),"source":self.source.encode(),"reason":self.reason.encode(),
             "token":self.token.encode(),"slot":self.slot.encode(),"hero_id":self.hero_id.encode(),
@@ -345,7 +346,43 @@ impl Encode for s::SelectionInput {
             "native_skill_id":self.native_skill_id.encode(),"owner_id":self.owner_id.encode(),"owner_hex":format!("0x{:x}",self.owner_id),
             "sample_start_ns":self.sample_start_ns.encode(),"sample_end_ns":self.sample_end_ns.encode(),
             "hover_index":self.hover_index.encode(),"selected_option":self.selected_option.encode(),
-            "raw_touch_xyz":self.raw_touch_xyz.encode(),"drag_direction_xy":self.drag_direction_xy.encode()})
+            "raw_touch_xyz":self.raw_touch_xyz.encode(),"drag_direction_xy":self.drag_direction_xy.encode(),
+            "target_guid":self.target_guid.encode(),"target_valid":self.target_valid.encode(),
+            "target_owner_id":self.target_owner_id.encode(),"target_owner_hex":format!("0x{:x}",self.target_owner_id),
+            "target_self_id":self.target_self_id.encode(),"target_self_hex":format!("0x{:x}",self.target_self_id),
+            "backend_owner_id":self.backend_owner_id.encode(),"backend_owner_hex":format!("0x{:x}",self.backend_owner_id),
+            "contact_owner_id":self.contact_owner_id.encode(),"contact_owner_hex":format!("0x{:x}",self.contact_owner_id),
+            "contact_present":self.contact_present.encode(),"native_contact_id":self.native_contact_id.encode(),
+            "native_cancel":self.native_cancel.encode(),"native_unselectable":self.native_unselectable.encode(),
+            "backend_state":self.backend_state.encode(),"target_cancel_hit":self.target_cancel_hit.encode(),
+            "target_cancel_ready":self.target_cancel_ready.encode(),"target_cancel_uv":self.target_cancel_uv.encode()})
+    }
+}
+impl Encode for s::AuxiliaryControlRow {
+    fn encode(&self)->Value {
+        let mut out=serde_json::Map::new();
+        out.insert("slot".into(),self.slot.encode());out.insert("owner_present".into(),self.owner_present.encode());
+        out.insert("owner_id".into(),self.owner_id.encode());out.insert("owner_hex".into(),json!(format!("0x{:x}",self.owner_id)));
+        out.insert("hold_to_release".into(),self.hold_to_release.encode());out.insert("cancel_supported".into(),self.cancel_supported.encode());
+        Value::Object(out)
+    }
+}
+impl Encode for s::AuxiliaryControlState {
+    fn encode(&self)->Value {
+        let mut out=serde_json::Map::new();
+        out.insert("ready".into(),self.ready.encode());out.insert("coherent".into(),self.coherent.encode());
+        out.insert("source".into(),self.source.encode());out.insert("token".into(),self.token.encode());out.insert("hero_id".into(),self.hero_id.encode());
+        out.insert("sample_start_ns".into(),self.sample_start_ns.encode());out.insert("sample_end_ns".into(),self.sample_end_ns.encode());
+        out.insert("controls".into(),Value::Array(self.controls.iter().take(self.count.min(8)as usize).map(Encode::encode).collect()));
+        out.insert("count".into(),self.count.encode());Value::Object(out)
+    }
+}
+impl Encode for clbb_moba_core::controller::view::AuxiliaryHoldView {
+    fn encode(&self)->Value {
+        let mut out=serde_json::Map::new();out.insert("slot".into(),self.slot.encode());out.insert("id".into(),self.id.encode());
+        out.insert("key".into(),self.key.encode());out.insert("point".into(),self.point.encode());out.insert("owner_id".into(),self.owner_id.encode());
+        out.insert("owner_hex".into(),json!(format!("0x{:x}",self.owner_id)));out.insert("down_ns".into(),self.down_ns.encode());
+        out.insert("cancel_supported".into(),self.cancel_supported.encode());Value::Object(out)
     }
 }
 impl Encode for u64 {
@@ -404,6 +441,8 @@ impl Encode for clbb_moba_core::controller::view::VariantView {
 impl Encode for clbb_moba_core::controller::view::View {
     fn encode(&self) -> Value {
         let mut out = serde_json::Map::new();
+        out.insert("auxiliaryHolds_".into(),self.auxiliaryHolds_.encode());
+        out.insert("auxiliaryHoldCount_".into(),self.auxiliaryHoldCount_.encode());
         out.insert("traceEnabled_".into(), self.traceEnabled_.encode());
         out.insert("enabled_".into(), self.enabled_.encode());
         out.insert("ready_".into(), self.ready_.encode());
@@ -607,6 +646,23 @@ impl Encode for clbb_moba_core::controller::view::View {
         );
         out.insert("touchSequence_".into(), self.touchSequence_.encode());
         out.insert("sentTimeNs_".into(), self.sentTimeNs_.encode());
+        out.insert("selectionKind_".into(),self.selectionKind_.encode());
+        out.insert("selectionBackendOwner_".into(),self.selectionBackendOwner_.encode());
+        out.insert("selectionBackendOwnerHex_".into(),json!(format!("0x{:x}",self.selectionBackendOwner_)));
+        out.insert("selectionContactOwner_".into(),self.selectionContactOwner_.encode());
+        out.insert("selectionContactOwnerHex_".into(),json!(format!("0x{:x}",self.selectionContactOwner_)));
+        out.insert("selectionTargetGuid_".into(),self.selectionTargetGuid_.encode());
+        out.insert("selectionTargetOwner_".into(),self.selectionTargetOwner_.encode());
+        out.insert("selectionTargetOwnerHex_".into(),json!(format!("0x{:x}",self.selectionTargetOwner_)));
+        out.insert("selectionTargetSelf_".into(),self.selectionTargetSelf_.encode());
+        out.insert("selectionTargetSelfHex_".into(),json!(format!("0x{:x}",self.selectionTargetSelf_)));
+        out.insert("selectionTargetInvalid_".into(),self.selectionTargetInvalid_.encode());
+        out.insert("selectionGoalTargetGuid_".into(),self.selectionGoalTargetGuid_.encode());
+        out.insert("selectionGoalTargetOwner_".into(),self.selectionGoalTargetOwner_.encode());
+        out.insert("selectionGoalTargetOwnerHex_".into(),json!(format!("0x{:x}",self.selectionGoalTargetOwner_)));
+        out.insert("selectionGoalTargetSelf_".into(),self.selectionGoalTargetSelf_.encode());
+        out.insert("selectionGoalTargetSelfHex_".into(),json!(format!("0x{:x}",self.selectionGoalTargetSelf_)));
+
         out.insert("selectionOwner_".into(), self.selectionOwner_.encode());
         out.insert("selectionOwnerHex_".into(),json!(format!("0x{:x}",self.selectionOwner_)));
         out.insert("selectionRevoked_".into(), self.selectionRevoked_.encode());
@@ -864,6 +920,47 @@ mod tests {
         assert_eq!(row["chargeEndClock_"]["kind"],1);
         assert_eq!(row["chargeEndSampleNs_"].as_i64(),Some(9_007_199_254_740_993));
         assert_eq!(row["chargeLastSampleNs_"].as_i64(),Some(9_007_199_254_740_999));
+    }
+    #[test]
+    fn target_and_auxiliary_recordings_preserve_unknowns_exact_owner_ids_and_native_contact_identity() {
+        let large=9_007_199_254_740_993u64;
+        let mut frame=s::Frame::default();
+        frame.selection_input=s::SelectionInput {kind:crate::source::number(2.),source:crate::source::text(crate::target_selection::SOURCE),
+            owner_id:large,backend_owner_id:large+1,contact_owner_id:large+2,target_owner_id:large+3,target_self_id:large+4,
+            native_skill_id:crate::source::number(0.),native_contact_id:crate::source::number(0.),
+            target_guid:crate::source::number(u32::MAX as f64),contact_present:crate::source::flag(true),
+            target_cancel_hit:crate::source::flag(false),target_cancel_ready:crate::source::flag(true),target_cancel_uv:crate::source::v2([0.7,0.2]),..Default::default()};
+        frame.auxiliary_controls.count=3;
+        for(i,present)in[-1,0,1].into_iter().enumerate() {
+            frame.auxiliary_controls.controls[i]=s::AuxiliaryControlRow {slot:crate::source::text("attack"),owner_id:large+i as u64,
+                owner_present:s::Flag{value:present},hold_to_release:s::Flag{value:present},..Default::default()};
+        }
+        let encoded=frame.encode();let raw=serde_json::to_vec(&encoded).unwrap();let row:Value=serde_json::from_slice(&raw).unwrap();assert_eq!(row,encoded);
+        let target=&row["selection_input"];
+        assert_eq!(target["owner_id"].as_u64(),Some(large));assert_eq!(target["backend_owner_id"].as_u64(),Some(large+1));
+        assert_eq!(target["contact_owner_id"].as_u64(),Some(large+2));assert_eq!(target["target_owner_id"].as_u64(),Some(large+3));
+        assert_eq!(target["target_self_id"].as_u64(),Some(large+4));assert_eq!(target["owner_hex"],format!("0x{large:x}"));
+        assert_eq!(target["native_contact_id"]["value"],0.);assert_eq!(target["native_skill_id"]["value"],0.);
+        assert_eq!(target["target_guid"]["value"],u32::MAX as f64);assert_eq!(target["target_valid"]["value"],-1);
+        assert_eq!(target["target_cancel_hit"]["value"],0);assert_eq!(target["target_cancel_ready"]["value"],1);assert_eq!(target["target_cancel_uv"]["values"][0]["value"],0.7);assert_eq!(target["selected_option"]["kind"],0);
+        for(i,present)in[-1,0,1].into_iter().enumerate() {
+            let aux=&row["auxiliary_controls"]["controls"][i];assert_eq!(aux["owner_present"]["value"],present);
+            assert_eq!(aux["hold_to_release"]["value"],present);assert_eq!(aux["cancel_supported"]["value"],-1);
+            assert_eq!(aux["owner_id"].as_u64(),Some(large+i as u64));
+        }
+        let mut view=clbb_moba_core::controller::view::View::default();view.auxiliaryHoldCount_=1;
+        view.auxiliaryHolds_[0].owner_id=large;view.auxiliaryHolds_[0].cancel_supported=crate::source::flag(false);
+        view.selectionKind_=2;view.selectionBackendOwner_=large+1;view.selectionContactOwner_=large+2;
+        view.selectionTargetGuid_=u32::MAX;view.selectionTargetOwner_=large+3;view.selectionTargetSelf_=large+4;view.selectionTargetInvalid_=1;
+        view.selectionGoalTargetGuid_=u32::MAX;view.selectionGoalTargetOwner_=large+5;view.selectionGoalTargetSelf_=large+6;
+        let encoded=view.encode();let raw=serde_json::to_vec(&encoded).unwrap();let row:Value=serde_json::from_slice(&raw).unwrap();
+        assert_eq!(row["selectionKind_"],2);assert_eq!(row["selectionBackendOwner_"].as_u64(),Some(large+1));
+        assert_eq!(row["selectionContactOwner_"].as_u64(),Some(large+2));assert_eq!(row["selectionTargetOwner_"].as_u64(),Some(large+3));
+        assert_eq!(row["selectionTargetSelf_"].as_u64(),Some(large+4));assert_eq!(row["selectionTargetGuid_"].as_u64(),Some(u32::MAX as u64));
+        assert_eq!(row["selectionTargetInvalid_"],1);assert_eq!(row["selectionGoalTargetGuid_"].as_u64(),Some(u32::MAX as u64));
+        assert_eq!(row["selectionGoalTargetOwner_"].as_u64(),Some(large+5));assert_eq!(row["selectionGoalTargetSelf_"].as_u64(),Some(large+6));
+        assert_eq!(row["auxiliaryHolds_"][0]["owner_id"].as_u64(),Some(large));assert_eq!(row["auxiliaryHolds_"][0]["cancel_supported"]["value"],0);
+        assert_eq!(row["auxiliaryHoldCount_"],1);
     }
     #[test]
     fn state_forbidden_recording_preserves_unknown_false_and_true() {

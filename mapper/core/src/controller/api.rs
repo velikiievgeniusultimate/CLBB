@@ -10,6 +10,7 @@ pub enum Input<'a> {
 impl Controller {
     pub fn apply_input(&mut self,host:&mut impl Host,event:Input<'_>,now:i64)->bool {
         self.now_=now;self.changed_=false;
+        self.observe_host_touch_reset(host);
         match event {
             Input::Enabled(v)=>self.set_enabled(host,v),
             Input::Pointer(p)=>self.update_pointer(host,p),
@@ -39,6 +40,7 @@ impl Controller {
     }
     pub fn apply_snapshot(&mut self,host:&mut impl Host,frame:&Frame,now:i64) {
         self.now_=now;
+        self.observe_host_touch_reset(host);
         if frame.hero_screen_uv.valid(){self.heroScreen_=Point::new(frame.hero_screen_uv.values[0].value,frame.hero_screen_uv.values[1].value);}
         self.ingest_frame(host,frame);
     }

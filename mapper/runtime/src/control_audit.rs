@@ -94,6 +94,175 @@ pub(crate) fn state_forbid_address<M: Memory>(r: &mut Reflection<M>, object: u64
         .then(|| object + field.offset)
 }
 
+/// Stable native button ownership is independent of its changing skill data.
+/// A future charged skill proves hold capability before that charge begins;
+/// neither a cancel ID nor this capability proves a supported cancel gesture.
+#[derive(Clone)]
+pub(crate) struct AuxiliaryHoldPlan {
+    checks: Checks,
+    attack_link: u64,
+    local_show: u64,
+    local_component: u64,
+    component_class: u64,
+    component_owner_offset: u64,
+    data: AuxiliaryDataLayout,
+    button: AuxiliaryButtonLayout,
+    replacement: Option<AuxiliaryButtonLayout>,
+}
+#[derive(Clone)]
+struct AuxiliaryDataLayout {
+    class: u64,
+    component: u64,
+    base: u64,
+    active: u64,
+    charge: u64,
+    cancel: u64,
+}
+#[derive(Clone)]
+struct AuxiliaryButtonLayout {
+    owner: u64,
+    checks: Checks,
+    kind: AuxiliaryKind,
+    data: u64,
+    down: Option<u64>,
+    future: Option<u64>,
+    use_type: Option<u64>,
+    bits: Option<u64>,
+}
+#[derive(Clone,Copy)]
+enum AuxiliaryKind { Charge, Ordinary, Unknown }
+pub(crate) struct AuxiliaryHoldObservation {
+    pub owner_id: u64,
+    pub owner_present: bool,
+    pub hold_to_release: Option<bool>,
+    pub replacement_owner: Option<u64>,
+    pub replacement_hold: Option<bool>,
+    /// Native enum/bit observations only; never cancellation eligibility.
+    pub skill_use_type: Option<i32>,
+    pub button_bits: Option<i32>,
+}
+fn auxiliary_address(object:u64,metadata:&HashMap<String,Field>,name:&str,kind:u8)->Result<u64> {
+    let field=metadata.get(name).ok_or_else(||format!("Auxiliary field absent:{name}"))?;
+    if field.is_static||field.kind!=kind||field.offset>1_048_576{return Err(format!("Auxiliary field type changed:{name}"));}
+    object.checked_add(field.offset).ok_or("Auxiliary field overflow".into())
+}
+fn auxiliary_pointer<M:Memory>(r:&Reflection<M>,checks:&mut Checks,address:u64)->Result<u64> {
+    let pointer=u64_at(&capture(r,checks,address,8)?,0);
+    if pointer==0{return Err("Auxiliary pointer unavailable".into());}Ok(pointer)
+}
+impl AuxiliaryDataLayout {
+    fn discover<M:Memory>(r:&mut Reflection<M>,data:u64,checks:&mut Checks)->Result<Self> {
+        let(name,metadata)=fields(r,data,checks)?;
+        if name!="ShowSkillData"{return Err("Auxiliary skill data type changed".into());}
+        let offset=|name,kind|auxiliary_address(data,&metadata,name,kind).map(|address|address-data);
+        Ok(Self{class:r.pointer(data)?,component:offset("m_SkillComp",18)?,base:offset("m_InitSkillID",8)?,
+            active:offset("m_TranID",8)?,charge:offset("m_bChargeSkill",2)?,cancel:offset("m_iCancelChargeSkill",8)?})
+    }
+    fn read<M:Memory>(&self,r:&Reflection<M>,data:u64,local:u64,checks:&mut Checks)->Result<bool> {
+        if data==0||u64_at(&capture(r,checks,data,8)?,0)!=self.class{return Err("Auxiliary data class unavailable".into());}
+        if auxiliary_pointer(r,checks,data+self.component)?!=local{return Err("Auxiliary skill data is not local".into());}
+        let base=i32_at(&capture(r,checks,data+self.base,4)?,0);
+        let active=i32_at(&capture(r,checks,data+self.active,4)?,0);
+        if !(1..=clbb_moba_core::controller::MAX_SKILL_ID).contains(&base)||!(1..=clbb_moba_core::controller::MAX_SKILL_ID).contains(&active){
+            return Err("Auxiliary skill identity unavailable".into());
+        }
+        let charged=capture(r,checks,data+self.charge,1)?[0];
+        let cancel=i32_at(&capture(r,checks,data+self.cancel,4)?,0);
+        match(charged,cancel) {
+            (0,0)=>Ok(false),
+            (1,1..=clbb_moba_core::controller::MAX_SKILL_ID)=>Ok(true),
+            _=>Err("Auxiliary charge data contradictory".into()),
+        }
+    }
+}
+impl AuxiliaryButtonLayout {
+    fn discover<M:Memory>(r:&mut Reflection<M>,button:u64,show:u64)->Result<Self> {
+        if button==0||show==0{return Err("Auxiliary button unavailable".into());}
+        let mut checks=Vec::new();let(name,metadata)=fields(r,button,&mut checks)?;
+        let owner=auxiliary_address(button,&metadata,"m_pOwner",18)?;
+        if auxiliary_pointer(r,&mut checks,owner)?!=show{return Err("Auxiliary button is not local".into());}
+        let kind=match name.as_str(){"CommonAttackPressCharge"=>AuxiliaryKind::Charge,"CommonAttack"=>AuxiliaryKind::Ordinary,_=>AuxiliaryKind::Unknown};
+        let data=auxiliary_address(button,&metadata,"m_SkillData",18)?;
+        let(down,future)=if matches!(kind,AuxiliaryKind::Charge) {
+            (Some(auxiliary_address(button,&metadata,"keyDownSkillData",18)?),Some(auxiliary_address(button,&metadata,"keyTimeChangeSkillData",18)?))
+        }else{(None,None)};
+        let optional=|name,kinds:&[u8]|metadata.get(name).filter(|field|!field.is_static&&kinds.contains(&field.kind)&&field.offset<=1_048_576)
+            .and_then(|field|button.checked_add(field.offset));
+        check(r,&checks)?;
+        Ok(Self{owner:button,checks,kind,data,down,future,use_type:optional("m_SkillUseType",&[17]),bits:optional("m_iBit",&[8])})
+    }
+    fn hold<M:Memory>(&self,r:&Reflection<M>,layout:&AuxiliaryDataLayout,local:u64,checks:&mut Checks)->Result<Option<bool>> {
+        check(r,&self.checks)?;checks.extend(self.checks.iter().cloned());
+        let current=auxiliary_pointer(r,checks,self.data)?;let current_charge=layout.read(r,current,local,checks)?;
+        match self.kind {
+            AuxiliaryKind::Ordinary=>Ok((!current_charge).then_some(false)),
+            AuxiliaryKind::Unknown=>Ok(None),
+            AuxiliaryKind::Charge=>{
+                let down=auxiliary_pointer(r,checks,self.down.ok_or("Auxiliary down field unavailable")?)?;
+                let future=auxiliary_pointer(r,checks,self.future.ok_or("Auxiliary future field unavailable")?)?;
+                let down_charge=layout.read(r,down,local,checks)?;
+                let future_charge=layout.read(r,future,local,checks)?;
+                if down_charge||!future_charge{return Err("Auxiliary future hold is unproven".into());}
+                // Current skill/Tran changes are read afresh; they never become
+                // the stable ownership key and cannot prematurely end a hold.
+                Ok(Some(true))
+            }
+        }
+    }
+    fn diagnostic<M:Memory>(r:&Reflection<M>,address:Option<u64>,checks:&mut Checks)->Option<i32> {
+        let checkpoint=checks.len();let value=address.and_then(|at|capture(r,checks,at,4).ok()).map(|raw|i32_at(&raw,0));
+        if value.is_none(){checks.truncate(checkpoint);}value
+    }
+}
+impl AuxiliaryHoldPlan {
+    pub(crate) fn discover<M:Memory>(r:&mut Reflection<M>,ui:u64,stable_button:u64,local_show:u64)->Result<Self> {
+        let mut checks=Vec::new();let(name,metadata)=fields(r,ui,&mut checks)?;
+        if name!="UIKeySkill"{return Err("Auxiliary UI type changed".into());}
+        let attack_link=auxiliary_address(ui,&metadata,"m_KeySKillATK",18)?;
+        let mut discovery=Vec::new();
+        if auxiliary_pointer(r,&mut discovery,attack_link)?!=stable_button{return Err("Auxiliary attack is not current".into());}
+        let(_,show_fields)=fields(r,local_show,&mut checks)?;
+        let local_component=auxiliary_address(local_show,&show_fields,"m_SkillComp",18)?;
+        let local=auxiliary_pointer(r,&mut discovery,local_component)?;
+        let(name,metadata)=fields(r,local,&mut discovery)?;
+        if name!="ShowSkillComp"{return Err("Auxiliary component type changed".into());}
+        let component_class=r.pointer(local)?;
+        let component_owner_offset=auxiliary_address(local,&metadata,"m_pOwner",18)?-local;
+        if auxiliary_pointer(r,&mut discovery,local+component_owner_offset)?!=local_show{return Err("Auxiliary component is not local".into());}
+        let button=AuxiliaryButtonLayout::discover(r,stable_button,local_show)?;
+        let current=auxiliary_pointer(r,&mut discovery,button.data)?;
+        let data=AuxiliaryDataLayout::discover(r,current,&mut discovery)?;
+        button.hold(r,&data,local,&mut discovery)?;
+        check(r,&checks)?;check(r,&discovery)?;
+        Ok(Self{checks,attack_link,local_show,local_component,component_class,component_owner_offset,data,button,replacement:None})
+    }
+    /// UI and local-show identity only. A freed old button cannot prevent an
+    /// independently validated current replacement from proving its absence.
+    pub(crate) fn validate<M:Memory>(&self,r:&Reflection<M>)->Result<()> {check(r,&self.checks)}
+    pub(crate) fn sample<M:Memory>(&mut self,r:&mut Reflection<M>,consumed:&mut Checks)->Result<AuxiliaryHoldObservation> {
+        let checkpoint=consumed.len();
+        let result=(||->Result<AuxiliaryHoldObservation>{
+            self.validate(r)?;consumed.extend(self.checks.iter().cloned());
+            let local=auxiliary_pointer(r,consumed,self.local_component)?;
+            if u64_at(&capture(r,consumed,local,8)?,0)!=self.component_class||auxiliary_pointer(r,consumed,local+self.component_owner_offset)?!=self.local_show {
+                return Err("Auxiliary local component changed".into());
+            }
+            let current=auxiliary_pointer(r,consumed,self.attack_link)?;
+            let same=current==self.button.owner;
+            if !same&&self.replacement.as_ref().is_none_or(|plan|plan.owner!=current) {
+                self.replacement=Some(AuxiliaryButtonLayout::discover(r,current,self.local_show)?);
+            }
+            let button=if same{&self.button}else{self.replacement.as_ref().ok_or("Auxiliary replacement unavailable")?};
+            let hold=button.hold(r,&self.data,local,consumed)?;
+            let use_type=AuxiliaryButtonLayout::diagnostic(r,button.use_type,consumed);
+            let bits=AuxiliaryButtonLayout::diagnostic(r,button.bits,consumed);
+            Ok(AuxiliaryHoldObservation{owner_id:self.button.owner,owner_present:same,hold_to_release:if same{hold}else{None},
+                replacement_owner:(!same).then_some(current),replacement_hold:if same{None}else{hold},skill_use_type:use_type,button_bits:bits})
+        })();
+        if result.is_err(){consumed.truncate(checkpoint);}result
+    }
+}
+
 /// UI option selection is a separate family. Its XY vector and option enum
 /// must never be interpreted as a world-space directional skill result.
 #[derive(Clone)]
@@ -310,6 +479,14 @@ pub fn observe<M: Memory>(r: &mut Reflection<M>, ui: u64, buttons: &[ButtonPlan]
                 values.insert(name.into(), match value(r, button.object, f, &mut consumed){Ok(v)=>v,Err(error)=>json!({"unavailable":error})});
             }
         }
+        if let Some(f)=metadata.get("m_SkillUseType") {
+            let observed=if f.kind==17&&!f.is_static&&f.offset<=1_048_576 {
+                button.object.checked_add(f.offset).ok_or("Native use-type field overflow".into())
+                    .and_then(|at|capture(r,&mut consumed,at,4))
+                    .map(|raw|json!({"kind":17,"value":i32_at(&raw,0),"diagnostic_only":true}))
+            }else{Err("Native use-type enum contract unavailable".into())};
+            values.insert("m_SkillUseType".into(),match observed{Ok(value)=>value,Err(error)=>json!({"unavailable":error})});
+        }
         rows.push(json!({"slot":button.slot,"class":class_name,"values":values,"numeric":numeric}));
     }
     let (_, metadata) = fields(r, ui, &mut consumed)?;
@@ -524,6 +701,104 @@ mod charge_tests {
         let mut wrong=choice_fixture();let table=wrong.pointer(0x1100+0x78).unwrap();let ty=wrong.pointer(table+8).unwrap();
         wrong.memory.0.borrow_mut()[ty as usize+8..ty as usize+12].copy_from_slice(&(18u32<<16).to_le_bytes());
         assert!(ChoicePlan::discover(&mut wrong,CHOICE_UI,CHOICE,CHOICE_DATA,CHOICE_SHOW).is_err(),"native cached pointer kind24 must not become managed reference18");
+    }
+    const AUX_UI:u64=0x4000;
+    const AUX_A:u64=0x4100;
+    const AUX_B:u64=0x4200;
+    const AUX_SHOW:u64=0x4300;
+    const AUX_COMP:u64=0x4400;
+    const AUX_DOWN:u64=0x4500;
+    const AUX_FUTURE:u64=0x4600;
+    const AUX_ORDINARY:u64=0x4700;
+    fn auxiliary_fixture()->Reflection<TestMemory> {
+        let mut b=vec![0;0x10000];let mut next=0x6000;
+        class(&mut b,&mut next,0x100,"UIKeySkill",&[("m_KeySKillATK",18,16)]);
+        class(&mut b,&mut next,0x300,"CommonAttackPressCharge",&[("m_pOwner",18,16),("m_SkillData",18,24),
+            ("keyDownSkillData",18,32),("keyTimeChangeSkillData",18,40),("m_SkillUseType",17,48),("m_iBit",8,52)]);
+        class(&mut b,&mut next,0x500,"CommonAttack",&[("m_pOwner",18,16),("m_SkillData",18,24),("m_SkillUseType",17,48),("m_iBit",8,52)]);
+        class(&mut b,&mut next,0x700,"UnqualifiedAttack",&[("m_pOwner",18,16),("m_SkillData",18,24)]);
+        class(&mut b,&mut next,0x900,"ShowSelfPlayer",&[("m_SkillComp",18,16)]);
+        class(&mut b,&mut next,0xb00,"ShowSkillComp",&[("m_pOwner",18,16)]);
+        class(&mut b,&mut next,0xd00,"ShowSkillData",&[("m_SkillComp",18,16),("m_InitSkillID",8,24),
+            ("m_TranID",8,28),("m_bChargeSkill",2,32),("m_iCancelChargeSkill",8,36)]);
+        class(&mut b,&mut next,0xf00,"ForeignData",&[("m_SkillComp",18,16)]);
+        for(object,kind)in[(AUX_UI,0x100),(AUX_A,0x300),(AUX_B,0x500),(AUX_SHOW,0x900),(AUX_COMP,0xb00),
+            (AUX_DOWN,0xd00),(AUX_FUTURE,0xd00),(AUX_ORDINARY,0xd00)]{put(&mut b,object,kind);}
+        for(at,value)in[(AUX_UI+16,AUX_A),(AUX_A+16,AUX_SHOW),(AUX_A+24,AUX_DOWN),(AUX_A+32,AUX_DOWN),(AUX_A+40,AUX_FUTURE),
+            (AUX_B+16,AUX_SHOW),(AUX_B+24,AUX_ORDINARY),(AUX_SHOW+16,AUX_COMP),(AUX_COMP+16,AUX_SHOW),
+            (AUX_DOWN+16,AUX_COMP),(AUX_FUTURE+16,AUX_COMP),(AUX_ORDINARY+16,AUX_COMP)]{put(&mut b,at,value);}
+        for(at,value)in[(AUX_DOWN+24,9700i32),(AUX_DOWN+28,9700),(AUX_FUTURE+24,9750),(AUX_FUTURE+28,9750),
+            (AUX_FUTURE+36,9762),(AUX_ORDINARY+24,4000),(AUX_ORDINARY+28,4000)]{b[at as usize..at as usize+4].copy_from_slice(&value.to_le_bytes());}
+        b[AUX_FUTURE as usize+32]=1;
+        Reflection::new(TestMemory(RefCell::new(b))).unwrap()
+    }
+    #[test]
+    fn auxiliary_hold_is_proven_before_charge_and_stable_across_data_and_form_changes() {
+        let mut r=auxiliary_fixture();let mut plan=AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_A,AUX_SHOW).unwrap();
+        let mut reads=Vec::new();let first=plan.sample(&mut r,&mut reads).unwrap();
+        assert!(first.owner_present);assert_eq!(first.owner_id,AUX_A);assert_eq!(first.hold_to_release,Some(true));
+        assert_eq!(first.skill_use_type,Some(0));assert_eq!(first.button_bits,Some(0));assert!(first.replacement_owner.is_none());
+        assert!(check(&r,&reads).is_ok());
+        put(&mut r.memory.0.borrow_mut(),AUX_A+24,AUX_FUTURE);
+        r.memory.0.borrow_mut()[AUX_FUTURE as usize+28..AUX_FUTURE as usize+32].copy_from_slice(&9753i32.to_le_bytes());
+        assert!(check(&r,&reads).is_err());assert!(plan.validate(&r).is_ok());
+        let next=plan.sample(&mut r,&mut Vec::new()).unwrap();assert_eq!(next.owner_id,AUX_A);assert!(next.owner_present);
+        assert_eq!(next.hold_to_release,Some(true));
+        // The producer validates typed ownership, never numeric hero prefixes.
+        for id in [1_013_132i32,2_013_132,10_000_000] {
+            r.memory.0.borrow_mut()[AUX_FUTURE as usize+28..AUX_FUTURE as usize+32].copy_from_slice(&id.to_le_bytes());
+            assert_eq!(plan.sample(&mut r,&mut Vec::new()).unwrap().hold_to_release,Some(true));
+        }
+    }
+    #[test]
+    fn auxiliary_absence_requires_independently_owned_replacement_and_ordinary_stays_tap() {
+        let mut r=auxiliary_fixture();let mut plan=AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_A,AUX_SHOW).unwrap();
+        put(&mut r.memory.0.borrow_mut(),AUX_UI+16,AUX_B);
+        // Old A can already be destroyed: only actual local B proves replacement.
+        put(&mut r.memory.0.borrow_mut(),AUX_A,0);
+        let mut reads=Vec::new();let replaced=plan.sample(&mut r,&mut reads).unwrap();
+        assert_eq!(replaced.owner_id,AUX_A);assert!(!replaced.owner_present);assert!(replaced.hold_to_release.is_none());
+        assert_eq!(replaced.replacement_owner,Some(AUX_B));assert_eq!(replaced.replacement_hold,Some(false));assert!(check(&r,&reads).is_ok());
+        let mut ordinary=AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_B,AUX_SHOW).unwrap();
+        let current=ordinary.sample(&mut r,&mut Vec::new()).unwrap();assert!(current.owner_present);assert_eq!(current.hold_to_release,Some(false));
+        put(&mut r.memory.0.borrow_mut(),AUX_B,0x700);
+        let mut unknown=AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_B,AUX_SHOW).unwrap();
+        let observed=unknown.sample(&mut r,&mut Vec::new()).unwrap();assert!(observed.owner_present);assert!(observed.hold_to_release.is_none());
+    }
+    #[test]
+    fn auxiliary_null_foreign_contradictory_and_failed_optional_reads_are_unknown_not_absent() {
+        for(at,value)in[(AUX_UI+16,0u64),(AUX_UI+16,0xFFF8),(AUX_A+24,0),(AUX_A+40,0),
+            (AUX_A+16,AUX_B),(AUX_FUTURE+16,AUX_B),(AUX_COMP+16,AUX_B)] {
+            let mut r=auxiliary_fixture();let mut plan=AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_A,AUX_SHOW).unwrap();
+            put(&mut r.memory.0.borrow_mut(),at,value);let retained=vec![(AUX_UI,0x100u64.to_le_bytes().to_vec())];let mut reads=retained.clone();
+            assert!(plan.sample(&mut r,&mut reads).is_err(),"{at}");assert_eq!(reads,retained);
+        }
+        for(at,raw)in[(AUX_FUTURE+32,vec![2]),(AUX_FUTURE+32,vec![0]),(AUX_FUTURE+36,0i32.to_le_bytes().to_vec()),
+            (AUX_FUTURE+28,10_000_001i32.to_le_bytes().to_vec())] {
+            let mut r=auxiliary_fixture();let mut plan=AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_A,AUX_SHOW).unwrap();
+            r.memory.0.borrow_mut()[at as usize..at as usize+raw.len()].copy_from_slice(&raw);
+            assert!(plan.sample(&mut r,&mut Vec::new()).is_err());
+        }
+        // A known UI replacement with foreign/missing data does not authorize
+        // an Absent tombstone for A; Source must retain an Unknown receipt.
+        let mut r=auxiliary_fixture();let mut plan=AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_A,AUX_SHOW).unwrap();
+        put(&mut r.memory.0.borrow_mut(),AUX_UI+16,AUX_B);put(&mut r.memory.0.borrow_mut(),AUX_B+16,AUX_A);
+        assert!(plan.sample(&mut r,&mut Vec::new()).is_err());
+        let mut r=auxiliary_fixture();let mut plan=AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_A,AUX_SHOW).unwrap();
+        plan.button.bits=Some(0x1_0000);let value=plan.sample(&mut r,&mut Vec::new()).unwrap();
+        assert_eq!(value.hold_to_release,Some(true));assert!(value.button_bits.is_none());assert!(value.owner_present);
+    }
+    #[test]
+    fn auxiliary_data_metadata_types_and_current_receipts_share_outer_owner_fences() {
+        for(class,index,kind)in[(0x300u64,3,8u32),(0xd00,3,8),(0xd00,4,12)] {
+            let mut r=auxiliary_fixture();let table=r.pointer(class+0x78).unwrap();let ty=r.pointer(table+index*32+8).unwrap();
+            r.memory.0.borrow_mut()[ty as usize+8..ty as usize+12].copy_from_slice(&(kind<<16).to_le_bytes());
+            assert!(AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_A,AUX_SHOW).is_err());
+        }
+        let mut r=auxiliary_fixture();let mut plan=AuxiliaryHoldPlan::discover(&mut r,AUX_UI,AUX_A,AUX_SHOW).unwrap();
+        let mut reads=Vec::new();plan.sample(&mut r,&mut reads).unwrap();
+        r.memory.0.borrow_mut()[AUX_FUTURE as usize+32]=0;assert!(check(&r,&reads).is_err());
+        assert!(plan.validate(&r).is_ok(),"dynamic data flags are not controller ownership");
     }
     #[test]
     fn discovery_requires_typed_button_data_and_its_local_skill_component() {

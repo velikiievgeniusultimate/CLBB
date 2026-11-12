@@ -305,6 +305,22 @@ impl Controller {
         pressed: bool,
         pointer: Point,
     ) -> bool {
+        if !pressed { self.physicalMouseButtons_.remove(&button); }
+        if self.contextIgnoredMouseButtons_.contains(&button) {
+            if !pressed { self.contextIgnoredMouseButtons_.remove(&button); }
+            return true;
+        }
+        let handled = self.handle_mouse_inner(host, button, pressed, pointer);
+        if handled && pressed { self.physicalMouseButtons_.insert(button); }
+        handled
+    }
+    fn handle_mouse_inner(
+        &mut self,
+        host: &mut impl Host,
+        button: i32,
+        pressed: bool,
+        pointer: Point,
+    ) -> bool {
         self.update_pointer(host, pointer);
         self.flush_pointer(host);
         if button == 1 {

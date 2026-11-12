@@ -204,6 +204,9 @@ pub struct ButtonPlan {
     choice_touch_retry: i64,
     choice_touch_attempts: u8,
     choice_touch_held: bool,
+    target_family: bool,
+    target: Option<crate::target_selection::TargetPlan>,
+    target_retry: i64,
     pub timer: Option<u64>,
     pub widget: Option<Widget>,
 }
@@ -217,6 +220,7 @@ pub struct UiPlan {
     pub movement: Option<Widget>,
     pub movement_owner: u64,
     pub matrix: u64,
+    pub camera_object: u64,
     pub current: u64,
     pub held: [u64; 2],
     pub visible: [u64; 3],
@@ -409,6 +413,7 @@ impl UiPlan {
             };
             let choice_family=kind=="skill"&&crate::control_audit::ChoicePlan::is_family(r,&class)?;
             let choice=if choice_family {crate::control_audit::ChoicePlan::discover(r,object,button,data,local_show).ok()}else{None};
+            let target_family=kind=="skill"&&crate::target_selection::TargetPlan::is_family(r,&class)?;
             checks.push((button, class.address.to_le_bytes().to_vec()));
             checks.push((at, index.to_le_bytes().to_vec()));
             buttons.push(ButtonPlan {
@@ -425,6 +430,7 @@ impl UiPlan {
                 charge,
                 charge_retry: 0,
                 choice_family,choice,choice_retry:0,choice_touch:None,choice_touch_retry:0,choice_touch_attempts:0,choice_touch_held:false,
+                target_family,target:None,target_retry:0,
                 timer,
                 widget: None,
             });
@@ -494,6 +500,7 @@ impl UiPlan {
             movement,
             movement_owner,
             matrix,
+            camera_object:camera,
             current,
             held,
             visible,
@@ -813,6 +820,48 @@ struct MatchIdentity {
     owners: [u64; 4],
     hero: i32,
 }
+#[derive(Default)]
+struct AuxiliaryProducer {
+    scope:Option<(MatchIdentity,u64)>,ui:u64,plan:Option<crate::control_audit::AuxiliaryHoldPlan>,retry:i64,
+    current:u64,retired:[u64;7],retired_count:usize,
+}
+impl AuxiliaryProducer {
+    fn retire(&mut self,owner:u64) {
+        if owner==0||self.retired[..self.retired_count].contains(&owner){return;}
+        if self.retired_count==self.retired.len(){self.retired.rotate_left(1);self.retired_count-=1;}
+        self.retired[self.retired_count]=owner;self.retired_count+=1;
+    }
+    fn project(&mut self,observation:crate::control_audit::AuxiliaryHoldObservation,token:&str,hero:i32,now:i64)->s::AuxiliaryControlState {
+        let current=if observation.owner_present{observation.owner_id}else{observation.replacement_owner.unwrap_or(0)};
+        let hold=if observation.owner_present{observation.hold_to_release}else{observation.replacement_hold};
+        if current==0{return Default::default();}
+        if self.current!=current{self.retire(self.current);self.current=current;}
+        if !observation.owner_present{self.retire(observation.owner_id);}
+        let mut packet=s::AuxiliaryControlState {ready:flag(true),coherent:flag(true),source:text("UIKeySkill.auxiliary_controls"),
+            token:text(token),hero_id:number(hero as f64),sample_start_ns:number(now as f64),sample_end_ns:number(now as f64),..Default::default()};
+        packet.controls[0]=s::AuxiliaryControlRow {slot:text("attack"),owner_present:flag(true),owner_id:current,
+            hold_to_release:hold.map(flag).unwrap_or_default(),..Default::default()};packet.count=1;
+        for owner in self.retired[..self.retired_count].iter().copied().filter(|owner|*owner!=current) {
+            packet.controls[packet.count as usize]=s::AuxiliaryControlRow {slot:text("attack"),owner_present:flag(false),owner_id:owner,..Default::default()};packet.count+=1;
+        }
+        packet
+    }
+    fn sample<M:Memory>(&mut self,r:&mut Reflection<M>,identity:MatchIdentity,epoch:u64,ui:u64,button:u64,
+        token:&str,now:i64,consumed:&mut Checks)->s::AuxiliaryControlState {
+        if self.scope!=Some((identity,epoch)){*self=Self{scope:Some((identity,epoch)),..Default::default()};}
+        if self.ui!=ui{self.ui=ui;self.plan=None;self.retry=0;}
+        if self.plan.as_ref().is_some_and(|plan|plan.validate(r).is_err()){self.plan=None;self.retry=0;}
+        if self.plan.is_none()&&button!=0&&now>=self.retry {
+            self.plan=crate::control_audit::AuxiliaryHoldPlan::discover(r,ui,button,identity.owners[2]).ok();
+            self.retry=now.saturating_add(20_000_000);
+        }
+        let Some(plan)=&mut self.plan else{return Default::default();};
+        match plan.sample(r,consumed) {
+            Ok(value)=>self.project(value,token,identity.hero,now),
+            Err(_)=>Default::default(), // missing/foreign rows stay Unknown.
+        }
+    }
+}
 /// Input identity follows the battle/local actor, not a cached UI read plan.
 /// A normal form/geometry replan must never look like a new match to the core.
 #[derive(Clone, Copy, Default)]
@@ -845,6 +894,7 @@ pub struct Source<M: Memory> {
     generation: u64,
     match_checks: Checks,
     match_epoch: MatchEpoch,
+    auxiliary:AuxiliaryProducer,
 }
 impl<M: Memory> Source<M> {
     pub fn new(memory: M, token: String) -> Result<Self> {
@@ -855,6 +905,7 @@ impl<M: Memory> Source<M> {
             generation: 0,
             match_checks: Vec::new(),
             match_epoch: MatchEpoch::default(),
+            auxiliary:AuxiliaryProducer::default(),
         })
     }
     /// Read-only inventory of the already owned match-control roots.
@@ -1223,6 +1274,9 @@ impl<M: Memory> Source<M> {
                     }
                 }
             }
+            if button.target_family {
+                retain_choice_family(&ui,&skill_state,&button.slot,&mut control_types);
+            }
         }
         // Charge flags share the same owner-fenced bracket as the local
         // skill variants. Missing/contradictory native flags remain unknown.
@@ -1231,7 +1285,7 @@ impl<M: Memory> Source<M> {
                 .copied().map(flag).unwrap_or_default();
         }
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill" || b.kind.as_str()=="extra") {
-            let choice_family=plan.ui.buttons.iter().any(|b|b.slot==entry.slot.as_str()&&b.choice_family);
+            let choice_family=plan.ui.buttons.iter().any(|b|b.slot==entry.slot.as_str()&&(b.choice_family||b.target_family));
             if choice_family
                 &&choice_selector_phase(&ui,&skill_state,entry.slot.as_str())!=Some(false){continue;}
             let id=skill_state.buttons.iter().take(skill_state.count.min(32) as usize)
@@ -1282,6 +1336,8 @@ impl<M: Memory> Source<M> {
             cancel_state,
             ..Default::default()
         };
+        frame.auxiliary_controls=self.auxiliary.sample(r,MatchIdentity{owners:plan.match_owners,hero},epoch,plan.ui.object,
+            plan.ui.buttons.iter().find(|b|b.kind=="attack").map(|b|b.object).unwrap_or(0),&token,now,&mut consumed);
         // Read idle Arc geometry too, so even an immediate key release has
         // current visual intent before the native DOWN preview appears.
         if hero==84 && !plan.motions.contains_key(&8410) {
@@ -1401,6 +1457,9 @@ impl<M: Memory> Source<M> {
         }
         // Choice feedback is native UI XY, never a world-space Direction ACK.
         frame.selection_input.reason=text(if selection_variant_unknown{"choice_variant_unknown"}else{"owner_receipt_unavailable"});
+        if let Some(button)=plan.ui.buttons.iter().filter(|b|b.choice_family).min_by_key(|b|{
+            if b.slot==frame.ui.active_slot.as_str(){0}else if b.slot==plan.ui.last_choice_slot{1}else{2}
+        }) {frame.selection_input.kind=number(1.);frame.selection_input.slot=text(&button.slot);}
         if selection_observations.iter().any(|(slot,_)|slot==frame.ui.active_slot.as_str()) {
             if plan.ui.last_choice_slot!=frame.ui.active_slot.as_str(){plan.ui.last_choice_slot=frame.ui.active_slot.owned();}
         }
@@ -1411,7 +1470,7 @@ impl<M: Memory> Source<M> {
             let unit=observation.direction[0].hypot(observation.direction[1]);
             let direction_valid=(unit-1.).abs()<=0.01&&observation.direction[2].abs()<=0.01;
             let mut selection=s::SelectionInput {
-                ready:flag(true),coherent:flag(true),input_ready:flag(false),
+                kind:number(1.),ready:flag(true),coherent:flag(true),input_ready:flag(false),
                 reason:text(if observation.active==observation.base{"inactive_choice"}else{"selector_phase_complete"}),
                 panel_visible:flag(observation.panel),has_drag:flag(observation.drag),
                 selected_option_valid:flag(selected.is_some()),source:text("KeySkillMultiChoice.m_lastDragDir"),
@@ -1436,6 +1495,51 @@ impl<M: Memory> Source<M> {
                 }
             }
             frame.selection_input=selection;
+        }
+        // Absolute native UI targets share neither Choice's radial XY goal nor
+        // any world-space indicator. Their raw receipt comes from the owned
+        // persistent native contact registry, including native skill ID zero.
+        for button in plan.ui.buttons.iter_mut().filter(|b|b.target_family) {
+            let phase=choice_selector_phase(&frame.ui,&frame.skill_state,&button.slot);
+            let mut target=s::SelectionInput {kind:number(2.),slot:text(&button.slot),
+                reason:text(if phase.is_none(){"target_variant_unknown"}else{"target_owner_unavailable"}),..Default::default()};
+            if phase.is_some() {
+                if button.target.as_ref().is_some_and(|p|p.validate(r).is_err()){button.target=None;button.target_retry=0;}
+                if button.target.is_none()&&now>=button.target_retry {
+                    button.target=crate::target_selection::TargetPlan::discover(r,plan.ui.object,button.object,button.data,plan.match_owners[2],plan.ui.camera_object).ok();
+                    button.target_retry=now.saturating_add(20_000_000);
+                }
+                let checkpoint=consumed.len();
+                if let Some(plan)=button.target.as_mut() {
+                    match plan.sample(r,&frame,&button.slot,now,&mut consumed) {
+                        Ok(value)=>{
+                            let matching=frame.skill_state.buttons.iter().take(frame.skill_state.count.min(32)as usize)
+                                .find(|v|v.slot.as_str()==button.slot)
+                                .is_some_and(|v|v.base_skill_id.int()==value.base_skill_id.int()&&v.active_skill_id.int()==value.active_skill_id.int());
+                            if matching{target=value;}else{consumed.truncate(checkpoint);}
+                        }
+                        Err(_)=>{consumed.truncate(checkpoint);target.reason=text("target_optional_read_unknown");}
+                    }
+                }
+            }
+            if target.slot.as_str()==frame.ui.active_slot.as_str(){plan.ui.last_choice_slot=target.slot.owned();}
+            let priority=|slot:&str|if slot==frame.ui.active_slot.as_str(){0}else if slot==plan.ui.last_choice_slot{1}else{2};
+            if frame.selection_input.kind.missing()||priority(target.slot.as_str())<priority(frame.selection_input.slot.as_str()) {
+                frame.selection_input=target;
+            }
+        }
+        let mut target_cancel_error=None;
+        let target_cancel=if frame.selection_input.kind.int()==2&&frame.selection_input.ready.get()&&frame.selection_input.coherent.get()&&frame.selection_input.panel_visible.get() {
+            plan.ui.buttons.iter_mut().find(|b|b.target_family&&b.slot==frame.selection_input.slot.as_str()).and_then(|b|b.target.as_mut()).and_then(|target| {
+                let checkpoint=consumed.len();match target.cancel_uv(r,now,&mut consumed) {
+                    Ok(point)=>Some(point),Err(error)=>{consumed.truncate(checkpoint);target_cancel_error=Some(error);None}
+                }
+            })
+        }else{None};
+        attach_target_cancel(&mut frame,target_cancel);
+        if let Some(error)=target_cancel_error {
+            let reason=format!("{};cancel_geometry_unknown:{error}",frame.selection_input.reason.as_str());
+            frame.selection_input.reason=if reason.len()<=256{text(&reason)}else{text("target_cancel_geometry_unknown")};
         }
         // A verified direction joystick may need its first MOVE before the
         // motion publishes a unit vector. UI ownership/geometry are sampled
@@ -1709,8 +1813,24 @@ fn stamp_frame(frame: &mut s::Frame, begin: i64, end: i64) {
         frame.selection_input.sample_start_ns=start;
         frame.selection_input.sample_end_ns=finish;
     }
+    if frame.auxiliary_controls.ready.get() {
+        frame.auxiliary_controls.sample_start_ns=start;
+        frame.auxiliary_controls.sample_end_ns=finish;
+    }
 }
 
+/// Keep Target cancellation local to its packet: an idle or concurrent Target
+/// must never replace another skill's generic cancellation geometry or receipt.
+fn attach_target_cancel(frame:&mut s::Frame,point:Option<[f64;2]>) {
+    let selection=&mut frame.selection_input;
+    if selection.kind.int()!=2{return;}
+    selection.target_cancel_ready=Default::default();selection.target_cancel_uv=Default::default();
+    if !selection.ready.get()||!selection.coherent.get()||!selection.panel_visible.get()
+        ||selection.owner_id==0||selection.backend_owner_id==0{return;}
+    if let Some(point)=point.filter(|point|unity::onscreen(*point)) {
+        selection.target_cancel_ready=flag(true);selection.target_cancel_uv=v2(point);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2131,4 +2251,71 @@ mod tests {
         let first = epoch.observe(identity, 0xfffffff0);
         assert_eq!(epoch.observe(identity, 0x10), first);
     }
+    fn auxiliary_observation(owner:u64,present:bool,hold:Option<bool>,replacement:Option<(u64,Option<bool>)>)->crate::control_audit::AuxiliaryHoldObservation {
+        crate::control_audit::AuxiliaryHoldObservation {owner_id:owner,owner_present:present,hold_to_release:hold,
+            replacement_owner:replacement.map(|v|v.0),replacement_hold:replacement.and_then(|v|v.1),skill_use_type:None,button_bits:None}
+    }
+    #[test]
+    fn auxiliary_current_owner_and_retired_tombstones_follow_positive_replacement_proof() {
+        let mut source=AuxiliaryProducer::default();
+        let a=source.project(auxiliary_observation(100,true,Some(true),None),"scope",97,1000);
+        assert!(a.ready.get()&&a.coherent.get());assert_eq!(a.count,1);assert_eq!(a.controls[0].owner_id,100);assert!(a.controls[0].hold_to_release.get());
+        let b=source.project(auxiliary_observation(100,false,None,Some((200,Some(false)))),"scope",97,1100);
+        assert_eq!(b.count,2);assert_eq!(b.controls[0].owner_id,200);assert!(b.controls[0].owner_present.get());
+        assert!(b.controls[0].hold_to_release.is_bool()&&!b.controls[0].hold_to_release.get());
+        assert_eq!(b.controls[1].owner_id,100);assert!(b.controls[1].owner_present.is_bool()&&!b.controls[1].owner_present.get());
+        let c=source.project(auxiliary_observation(100,false,None,Some((300,Some(true)))),"scope",97,1200);
+        assert_eq!(c.count,3);assert_eq!(c.controls[0].owner_id,300);
+        for owner in [100,200]{assert!(c.controls.iter().take(c.count as usize).any(|v|v.owner_id==owner&&v.owner_present.is_bool()&&!v.owner_present.get()));}
+        assert!(c.controls.iter().all(|v|v.cancel_supported.missing()),"native hold is not cancellation capability");
+    }
+    #[test]
+    fn auxiliary_unknown_hold_remains_present_unknown_and_reused_owner_has_no_false_tombstone() {
+        let mut source=AuxiliaryProducer::default();
+        source.project(auxiliary_observation(100,true,Some(true),None),"scope",97,1000);
+        source.project(auxiliary_observation(100,false,None,Some((200,None))),"scope",97,1100);
+        let a=source.project(auxiliary_observation(100,true,None,None),"scope",97,1200);
+        assert!(a.controls[0].owner_present.get());assert!(a.controls[0].hold_to_release.missing());
+        assert_eq!(a.controls.iter().take(a.count as usize).filter(|v|v.owner_id==100).count(),1);
+        let unknown=source.project(auxiliary_observation(100,false,None,None),"scope",97,1300);
+        assert!(unknown.ready.missing());assert_eq!(unknown.count,0,"missing replacement does not imply original owner absent");
+    }
+    #[test]
+    fn auxiliary_history_is_bounded_and_match_scope_reset_cannot_republish_old_tombstones() {
+        let mut source=AuxiliaryProducer::default();
+        for current in 1..=20 {let packet=source.project(auxiliary_observation(current,true,Some(false),None),"scope",97,1000);
+            assert!(packet.count<=8);assert_eq!(packet.controls[0].owner_id,current);}
+        let mut r=Reflection::new(MutableMemory(RefCell::new(vec![0;128]))).unwrap();
+        let identity=MatchIdentity {owners:[1,2,3,4],hero:97};
+        let missing=source.sample(&mut r,identity,2,0,0,"new-scope",2000,&mut Vec::new());
+        assert!(missing.ready.missing());assert_eq!(source.current,0);assert_eq!(source.retired_count,0);
+        let mut frame=s::Frame::default();frame.auxiliary_controls=missing;stamp_frame(&mut frame,2000,2100);
+        assert!(frame.auxiliary_controls.sample_start_ns.missing());assert!(frame.auxiliary_controls.sample_end_ns.missing());
+        frame.auxiliary_controls=source.project(auxiliary_observation(400,true,Some(true),None),"new-scope",97,2000);
+        stamp_frame(&mut frame,2000,2100);assert_eq!(frame.auxiliary_controls.sample_start_ns.value,2000.);assert_eq!(frame.auxiliary_controls.sample_end_ns.value,2100.);
+    }
+
+    #[test]
+    fn target_cancel_geometry_is_packet_local_and_never_changes_another_skills_generic_channel() {
+        let mut frame=s::Frame::default();frame.token=text("scope");frame.hero_id=number(55.);
+        frame.ui.cancel_uv=v2([0.9,0.1]);frame.cancel_state.cancelled=flag(true);frame.cancel_state.source=text("UIKeySkill.bCancelSkill");
+        frame.cancel_state.slot=text("skill:0");
+        frame.selection_input=s::SelectionInput {kind:number(2.),ready:flag(true),coherent:flag(true),owner_id:100,backend_owner_id:200,
+            panel_visible:flag(true),slot:text("skill:2"),base_skill_id:number(5530.),native_cancel:flag(true),..Default::default()};
+        attach_target_cancel(&mut frame,None);
+        assert_eq!(frame.ui.cancel_uv.values[0].value,0.9);assert!(frame.cancel_state.cancelled.get());
+        assert_eq!(frame.cancel_state.source.as_str(),"UIKeySkill.bCancelSkill");assert_eq!(frame.cancel_state.slot.as_str(),"skill:0");
+        assert!(frame.selection_input.target_cancel_ready.missing());assert!(!frame.selection_input.target_cancel_uv.valid());
+        attach_target_cancel(&mut frame,Some([0.7,0.2]));assert!(frame.selection_input.target_cancel_ready.get());
+        assert_eq!(frame.selection_input.target_cancel_uv.values[0].value,0.7);assert!(frame.selection_input.target_cancel_hit.missing());
+        for case in 0..4 {
+            let mut current=frame;
+            match case {0=>current.selection_input.ready=Default::default(),1=>current.selection_input.coherent=flag(false),
+                2=>current.selection_input.panel_visible=flag(false),_=>current.selection_input.backend_owner_id=0};
+            attach_target_cancel(&mut current,Some([0.7,0.2]));assert!(current.selection_input.target_cancel_ready.missing());
+            assert!(!current.selection_input.target_cancel_uv.valid());assert_eq!(current.ui.cancel_uv.values[0].value,0.9);
+            assert_eq!(current.cancel_state.slot.as_str(),"skill:0");assert!(current.cancel_state.cancelled.get());
+        }
+    }
+
 }

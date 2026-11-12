@@ -65,6 +65,7 @@ struct ClbbSettings {
   Control *capture;
   int hero;
   int native_skill_types[4];
+  int native_selection_kinds[4];
   gboolean linked_controls;
   gboolean refreshing;
 };
@@ -495,8 +496,13 @@ static void add_binding(ClbbSettings *s, GtkWidget *box, const char *title,
       slot[6] >= '0' && slot[6] <= '3' && slot[7] == '\0') {
     char type_key[] = "hero.skill0_type";
     type_key[10] = slot[6];
-    if (read_int(s, type_key, 0) == 4)
-      selection_title = g_strdup_printf("%s · Выбор варианта", title);
+    if (read_int(s, type_key, 0) == 4) {
+      char kind_key[] = "hero.skill0_selection_kind";
+      kind_key[10] = slot[6];
+      int kind = read_int(s, kind_key, 0);
+      selection_title = g_strdup_printf("%s · %s", title,
+          kind == 1 ? "Выбор варианта" : kind == 2 ? "Выбор цели" : "Выбор");
+    }
   }
   Control *c = bind_control(s, box, selection_title ? selection_title : title, k, key);
   g_free(selection_title);
@@ -555,6 +561,9 @@ static void build_hero(ClbbSettings *s, int hero) {
     char type_key[] = "hero.skill0_type";
     type_key[10] = '0' + i;
     s->native_skill_types[i] = read_int(s, type_key, 0);
+    char kind_key[] = "hero.skill0_selection_kind";
+    kind_key[10] = '0' + i;
+    s->native_selection_kinds[i] = read_int(s, kind_key, 0);
   }
   s->linked_controls = read_int(s, "hero.linked_controls", 0) != 0;
   GtkWidget *b = section(s->hero_box, hero == 25 ? "Персональные навыки Кагуры"
@@ -1269,6 +1278,9 @@ void clbb_settings_refresh(ClbbSettings *s) {
     char type_key[] = "hero.skill0_type";
     type_key[10] = '0' + i;
     native_types_changed |= read_int(s, type_key, 0) != s->native_skill_types[i];
+    char kind_key[] = "hero.skill0_selection_kind";
+    kind_key[10] = '0' + i;
+    native_types_changed |= read_int(s, kind_key, 0) != s->native_selection_kinds[i];
   }
   if (hero != s->hero || native_types_changed || (read_int(s, "hero.linked_controls", 0) != 0) != s->linked_controls)
     build_hero(s, hero);

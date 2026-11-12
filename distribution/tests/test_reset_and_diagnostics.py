@@ -21,9 +21,10 @@ class ResetAndDiagnostics(unittest.TestCase):
    self.assertNotEqual(result.returncode,0);self.assertTrue((root/'state/game/base.apk').exists())
  def test_fallback_records_loader_error_without_form_secrets(self):
   with tempfile.TemporaryDirectory()as temp:
-   home,root,env=self.fixture(Path(temp));(root/'state/logs/launcher-stderr.log').write_text('error while loading shared libraries: libfoo.so\nCookie: private-cookie\npassword=private-password\n')
+   home,root,env=self.fixture(Path(temp));env['CLBB_DIAGNOSTIC_INVOCATION']='fixture-loader-1';(root/'state/logs/launcher-stderr-fixture-loader-1.log').write_text('error while loading shared libraries: libfoo.so\nCookie: private-cookie\npassword=private-password\n')
    env.pop('DISPLAY',None);env.pop('WAYLAND_DISPLAY',None)
    result=subprocess.run([sys.executable,str(ROOT/'distribution/launch-fallback.py'),str(root/'current'),str(root/'state'),'fixture launch error'],env=env,capture_output=True,text=True,timeout=10)
    self.assertEqual(result.returncode,0,result.stderr);report=(root/'state/logs/last-diagnostic.json').read_text();value=json.loads(report)
    self.assertEqual(value['schema'],'clbb-diagnostic-v1');self.assertIn('libfoo',report);self.assertNotIn('private-cookie',report);self.assertNotIn('private-password',report)
+   self.assertEqual(value['launch_provenance']['status'],'unknown');self.assertIsNone(value['last_launch']);self.assertEqual(value['launcher_stderr_provenance']['status'],'explicit_invocation')
 if __name__=='__main__':unittest.main()

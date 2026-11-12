@@ -40,6 +40,9 @@ impl Controller {
         }
         if hero != self.heroId_ {
             self.release_all(host);
+            self.auxiliaryKnownHolds_.clear();
+            self.auxiliaryControlState_ = Default::default();
+            self.auxiliaryControlSampleNs_ = 0;
             self.cooldownSeen_ = false;
             self.cooldownState_ = snapshot::CooldownState::default();
             self.cooldownCasts_.clear();
@@ -68,6 +71,9 @@ impl Controller {
             self.directStartups_.clear();
             self.directRanges_.clear();
             self.frameEpoch_ = epoch;
+            self.auxiliaryKnownHolds_.clear();
+            self.auxiliaryControlState_ = Default::default();
+            self.auxiliaryControlSampleNs_ = 0;
             self.cooldownSeen_ = false;
             self.cooldownState_ = snapshot::CooldownState::default();
             self.cooldownCasts_.clear();
@@ -97,6 +103,7 @@ impl Controller {
             )
         }
         self.ingest_skill_variants(f);
+        self.ingest_auxiliary_controls(host, f);
         self.observe_kagura_throw(host);
         let mut fresh = Vec::new();
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize) {
@@ -766,6 +773,8 @@ mod movement_continuity_tests {
         assert_eq!(c.movementTouch_, -1);
         assert!(h.ended.contains(&movement));
         assert!(!c.movementHeld_);
-        assert!(!c.handle_mouse(&mut h, 2, true, Point::new(0.5, 0.5)));
+        assert!(c.handle_mouse(&mut h, 2, true, Point::new(0.5, 0.5)),
+            "a globally retired held RMB is consumed until its physical UP");
+        assert_eq!(c.movementTouch_, -1);
     }
 }

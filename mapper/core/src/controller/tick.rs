@@ -25,12 +25,18 @@ impl Controller {
                 self.finish_skill(host, true);
                 return;
             }
-            if self.skillCancelSentNs_ == 0 && self.cancelReady_ {
-                if !self.move_skill(host, self.cancelPoint_, false) {
-                    self.finish_skill(host, true);
-                    return;
+            if self.skillCancelSentNs_ == 0 {
+                if let Some(point) = self.selection_cancel_point() {
+                    if !self.send_skill_cancel_point(host, point) {
+                        if self.skillBehavior_ == SkillBehavior::Selection {
+                            self.selection_transport_failed(host, "selection_cancel_retry_delivery_failed");
+                        } else {
+                            self.finish_skill(host, true);
+                        }
+                        return;
+                    }
+                    self.skillCancelSentNs_ = self.now_;
                 }
-                self.skillCancelSentNs_ = self.now_;
             }
             if self.skillCancelSentNs_ != 0 && self.now_ - self.skillCancelSentNs_ > 1_500_000_000 {
                 self.set_status(
