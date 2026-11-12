@@ -418,8 +418,8 @@ impl Settings {
                 })
             }
             "debug.mark_shortcut" => integer.is_some_and(|v| {
-                let base=v & 0x01ffffff;
-                v==0 || (v>0 && v & !0x0fffffff==0 && valid_key(base) && base!=0
+                let base=v & !0x0e000000;
+                v==0 || (v>0 && v & !0x3fffffff==0 && valid_key(base) && base!=0
                     && (v & 0x0e000000!=0 || !["hotkeys.settings","hotkeys.confine","hotkeys.fullscreen"].iter().any(|key|self.integer(key,hero)==v)))
             }),
             "hero.cancel_key" | "common.cancel_key" | "movement.button" | "hero.movement.button" => {
@@ -523,7 +523,9 @@ pub fn parse_resolution(value: &str) -> Option<(u32, u32)> {
 }
 pub fn valid_key(key: i32) -> bool {
     key == 0
-        || ((32..=126).contains(&key))
+        || ((32..=0x10ffff).contains(&key) && !(0xd800..=0xdfff).contains(&key))
+        || ((key & !0xffffff)==0x10000000 && key & 0xffffff != 0)
+        || ((key & !0xffff)==0x20000000 && key & 0xffff != 0)
         || ((0x01000000..=0x010000ff).contains(&key)
             && ![0x01000020, 0x01000021, 0x01000022, 0x01000023].contains(&key))
         || ((key & MOUSE) != 0 && {
@@ -967,6 +969,17 @@ mod field_inheritance_tests {
         let before=s.values.clone();
         assert!(s.set("hero.bindings.extra:2.key","70",73).is_err());
         assert_eq!(s.values,before);std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn extended_keyboard_identities_are_saved_without_aliasing_mouse_or_function_keys() {
+        let mut s=Settings::default();
+        for key in [0x0100003c,0x01000052,0x1008ff12,0x1000ffe1,0x200000fa,0x0416] {
+            assert!(valid_key(key));
+            s.set("hero.bindings.skill:0.key",&key.to_string(),25).unwrap();
+            assert_eq!(s.integer("hero.bindings.skill:0.key",25),key);
+            s.set("debug.mark_shortcut",&(key|0x04000000).to_string(),25).unwrap();
+        }
+        for key in [0x10000000,0x20000000,0x20010000,0x300000fa,-1,0xd800] {assert!(!valid_key(key),"{key:x}");}
     }
     #[test]
     fn all_os_mouse_buttons_roundtrip_and_non_buttons_are_rejected() {

@@ -375,7 +375,14 @@ int main(int argc, char **argv) {
     g_object_unref(debug_controllers);
     g_assert_cmpstr(read_value(&p,"debug.mark_shortcut"),==,"100663371");
     g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)),"Ctrl+Shift+K"));
-    g_assert_cmpint(clbb_settings_keycode(GDK_KEY_Shift_L), ==, 0);
+    g_assert_cmpint(clbb_settings_keycode(GDK_KEY_Shift_L), ==, 0x1000ffe1);
+    for(guint f=GDK_KEY_F1;f<=GDK_KEY_F35;f++) {
+      g_assert_cmpint(clbb_settings_keycode(f),==,0x01000030+(int)(f-GDK_KEY_F1));
+      // Hardware F1 must never turn the semantic F13 event back into F1.
+      g_assert_cmpint(clbb_settings_event_keycode(gdk_display_get_default(),f,67),==,clbb_settings_keycode(f));
+    }
+    g_assert_cmpint(clbb_settings_keycode(GDK_KEY_AudioMute),==,0x1008ff12);
+    g_assert_cmpint(clbb_settings_event_keycode(gdk_display_get_default(),GDK_KEY_VoidSymbol,250),==,0x200000fa);
     g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "Q"));
     g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "F7"));
     GtkWidget *q = find_type(find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key"),GTK_TYPE_BUTTON);
@@ -392,6 +399,20 @@ int main(int argc, char **argv) {
     }
     g_object_unref(controllers);
     g_assert_cmpstr(read_value(&p, "hero.bindings.skill:0.key"), ==, "74");
+    for (guint symbol=GDK_KEY_F13;symbol<=GDK_KEY_F35;symbol++) {
+      GtkWidget *binding=find_type(find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key"),GTK_TYPE_BUTTON);
+      g_signal_emit_by_name(binding,"clicked");
+      GListModel *capture=gtk_widget_observe_controllers(GTK_WIDGET(clbb_settings_panel(s)));
+      gboolean caught=FALSE;
+      for(guint i=0;i<g_list_model_get_n_items(capture);i++) {
+        GObject *controller=g_list_model_get_item(capture,i);
+        if(GTK_IS_EVENT_CONTROLLER_KEY(controller))g_signal_emit_by_name(controller,"key-pressed",symbol,67,0,&caught);
+        g_object_unref(controller);
+      }
+      g_object_unref(capture);
+      g_assert_true(caught);
+      g_assert_cmpint(atoi(read_value(&p,"hero.bindings.skill:0.key")),==,clbb_settings_keycode(symbol));
+    }
     g_assert(!write_value(&p, "hero.bindings.skill:0.key", "33554433"));
     g_assert(!write_value(&p, "hotkeys.settings", "16777275"));
     g_assert(write_value(&p, "hero.bindings.skill:0.key", "88"));

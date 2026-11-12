@@ -7139,10 +7139,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..7faaf46
+index 0000000..27f8285
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1111 @@
+@@ -0,0 +1,1104 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7543,15 +7543,8 @@ index 0000000..7faaf46
 +        repeat = down && previous;
 +        code = previous ? GPOINTER_TO_INT(previous) : 0;
 +        if (!code) {
-+            guint value = gdk_key_event_get_keyval(event), latin = 0;
-+            int group = 0, level = 0;
-+            GdkModifierType consumed = 0;
-+            if (gdk_display_translate_key(gdk_event_get_display(event),
-+                                          hardware, 0, 0, &latin, &group,
-+                                          &level, &consumed) &&
-+                latin)
-+                value = latin;
-+            code = clbb_settings_keycode(value);
++            code = clbb_settings_event_keycode(gdk_event_get_display(event),
++                gdk_key_event_get_keyval(event),hardware);
 +            GdkModifierType mods = gdk_event_get_modifier_state(event);
 +            int chord = clbb_settings_chord(code,mods);
 +            if (code && debug_recording(h) &&

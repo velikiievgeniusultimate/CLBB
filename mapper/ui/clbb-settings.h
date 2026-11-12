@@ -78,8 +78,11 @@ gboolean clbb_settings_is_capturing(const ClbbSettings *settings);
 gboolean clbb_settings_is_visible(const ClbbSettings *settings);
 GtkWidget *clbb_settings_panel(ClbbSettings *settings);
 void clbb_settings_destroy(ClbbSettings *settings);
-/* Also used by the native input adapter. Returns 0 for an unsupported key. */
+/* Shared capture/gameplay identity: existing Unicode/Qt codes stay stable;
+ * other semantic keysyms use 0x10000000|low24, unnamed hardware keys
+ * 0x20000000|keycode. Only printable text gets Latin-group normalization. */
 gint clbb_settings_keycode(guint keyval);
+gint clbb_settings_event_keycode(GdkDisplay *display, guint keyval, guint hardware);
 /* Stable binding code for a GDK button; preserves existing Qt mouse masks.
  * GDK2/3 -> middle/right; GDK8..29 -> legacy one-bit masks. Other buttons
  * 4..7,30..65535 use 0x03000000|GDKbutton. Primary LMB remains unbindable.

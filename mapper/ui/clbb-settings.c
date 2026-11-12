@@ -224,6 +224,16 @@ gint clbb_settings_chord(gint code, GdkModifierType state) {
       (state & GDK_ALT_MASK ? 0x08000000 : 0) : 0;
 }
 static char *key_name(int code) {
+  if ((code & 0xffff0000) == 0x20000000) return g_strdup_printf("Клавиша · код %u",code & 0xffff);
+  if ((code & 0xff000000) == 0x10000000) {
+    guint symbol=code & 0xffffff;
+    const char *name=gdk_keyval_name(symbol);
+    if (!name || g_str_has_prefix(name,"0x")) {
+      const char *vendor=gdk_keyval_name(symbol | 0x10000000);
+      if(vendor && !g_str_has_prefix(vendor,"0x")) name=vendor;
+    }
+    return name ? g_strdup(name) : g_strdup_printf("Клавиша · 0x%X",symbol);
+  }
   if (!code)
     return g_strdup("Не задана");
   if (code >= KEY_F1 && code <= KEY_F1 + 34)
@@ -348,12 +358,27 @@ gint clbb_settings_keycode(guint keyval) {
   case GDK_KEY_Meta_R:
   case GDK_KEY_Super_L:
   case GDK_KEY_Super_R:
-    return 0;
+    return 0x10000000 | keyval;
   default: {
     gunichar u = gdk_keyval_to_unicode(keyval);
-    return u >= 32 && u < 0x110000 ? (gint)g_unichar_toupper(u) : 0;
+    if(u >= 32 && u < 0x110000) return (gint)g_unichar_toupper(u);
+    if(keyval && keyval != GDK_KEY_VoidSymbol &&
+       (!(keyval & 0xff000000) || (keyval & 0xff000000)==0x10000000))
+      return 0x10000000 | (keyval & 0xffffff);
+    return 0;
   }
   }
+}
+/* Preserve semantic non-text keys (notably F13 from remapped mice).
+ * Only text is translated to the unmodified Latin group for stable Q/W/etc. */
+gint clbb_settings_event_keycode(GdkDisplay *display, guint keyval, guint hardware) {
+  if(gdk_keyval_to_unicode(keyval)>=32) {
+    guint latin=0;int group=0,level=0;GdkModifierType consumed=0;
+    if(hardware && gdk_display_translate_key(display,hardware,0,0,&latin,&group,&level,&consumed)
+       && gdk_keyval_to_unicode(latin)>=32) keyval=latin;
+  }
+  int code=clbb_settings_keycode(keyval);
+  return code ? code : hardware && hardware<=65535 ? (gint)(0x20000000u | hardware) : 0;
 }
 static GtkWidget *label(const char *text, const char *style) {
   GtkWidget *w = gtk_label_new(text);
@@ -762,16 +787,12 @@ static gboolean on_key(GtkEventControllerKey *controller, guint keyval,
       clbb_settings_refresh(s);
       return TRUE;
     }
-    /* Use unmodified Latin group when the display can translate it. */
-    GdkDisplay *d = gtk_widget_get_display(s->panel);
-    guint latin = 0;
-    int group = 0, level = 0;
-    GdkModifierType consumed = 0;
-    if (gdk_display_translate_key(d, keycode, 0, 0, &latin, &group, &level,
-                                  &consumed) &&
-        latin)
-      keyval = latin;
-    int code = keyval == GDK_KEY_BackSpace ? 0 : clbb_settings_keycode(keyval);
+    if (!strcmp(c->key,"debug.mark_shortcut") &&
+        (keyval==GDK_KEY_Shift_L || keyval==GDK_KEY_Shift_R ||
+         keyval==GDK_KEY_Control_L || keyval==GDK_KEY_Control_R ||
+         keyval==GDK_KEY_Alt_L || keyval==GDK_KEY_Alt_R)) return TRUE;
+    int code = keyval == GDK_KEY_BackSpace ? 0 :
+      clbb_settings_event_keycode(gtk_widget_get_display(s->panel),keyval,keycode);
     if (!code && keyval != GDK_KEY_BackSpace)
       return TRUE;
     stop_capture(s);
@@ -1400,7 +1421,7 @@ void clbb_settings_refresh(ClbbSettings *s) {
     switch (c->kind) {
     case CONTROL_BIND:
       if (!strcmp(c->key, "debug.mark_shortcut")) {
-        char *base = key_name(n & 0x01ffffff);
+        char *base = key_name(n & ~0x0e000000);
         t = g_strdup_printf("%s%s%s%s", n & 0x04000000 ? "Ctrl+" : "", n & 0x02000000 ? "Shift+" : "", n & 0x08000000 ? "Alt+" : "", base);
         g_free(base);
       } else t = key_name(n);
