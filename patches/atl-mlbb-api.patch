@@ -7147,10 +7147,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..afa3afc
+index 0000000..eaaedb9
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1163 @@
+@@ -0,0 +1,1242 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7261,6 +7261,11 @@ index 0000000..afa3afc
 +    gint64 fps_refresh_at;
 +    gboolean show_fps;
 +    gboolean portrait_visible;
++    struct {guint64 guid,frame;GdkTexture *image;unsigned captures;} portraits[5];
++    char portrait_scope[256];
++    gint64 portrait_request_us,portrait_snapshot_us;
++    unsigned portrait_snapshot_count;
++
 +    char fps_text[32];
 +    GtkWidget *cursor_layer;
 +    GtkWidget *viewport;
@@ -7341,6 +7346,12 @@ index 0000000..afa3afc
 +        (*env)->ExceptionDescribe(env);
 +        (*env)->ExceptionClear(env);
 +    }
++}
++static void portrait_redraw_after_input(ClbbHost *h,gint64 input_us) {
++    gboolean visible=!strcmp(h->read(h->runtime,"portrait.visible"),"true");
++    if(visible && !h->portrait_visible){h->portrait_request_us=input_us;h->portrait_snapshot_us=0;h->portrait_snapshot_count=0;}
++    if(visible || h->portrait_visible){GtkWidget *surface=game_surface(GTK_WIDGET(h->window));if(surface)gtk_widget_queue_draw(surface);}
++    h->portrait_visible=visible;
 +}
 +static gboolean write_setting(void *user, const char *key, const char *value) {
 +    ClbbHost *h = user;
@@ -7621,8 +7632,10 @@ index 0000000..afa3afc
 +            shortcut(h, kind == 2 ? (0x02000000 | code) : code, down, repeat);
 +    if (!handled) {
 +        h->dispatching = TRUE;
++        gint64 input_us=g_get_monotonic_time();
 +        handled = h->event(h->runtime, kind, code, down, repeat, h->x, h->y);
 +        h->dispatching = FALSE;
++        if(kind!=0)portrait_redraw_after_input(h,input_us);
 +    }
 +    if (kind == 1 && handled && down)
 +        g_hash_table_add(h->claimed, GUINT_TO_POINTER(hardware));
@@ -7757,6 +7770,55 @@ index 0000000..afa3afc
 +                            G_OBJECT(widget), G_CONNECT_AFTER);
 +}
 +
++/* Cache only five small GPU crops, never full game frames or CPU pixels.
++ * Preview portraits are already drawn before E. Keep their images independent
++ * of the game's subsequent held-panel animation and camera movement. */
++static void portrait_cache_clear(ClbbHost *h) {
++    for(unsigned i=0;i<5;i++){g_clear_object(&h->portraits[i].image);h->portraits[i].guid=0;h->portraits[i].captures=0;}
++}
++static GdkTexture *portrait_crop(GtkNative *native,SurfaceViewWidget *surface,double x,double y,double w,double h) {
++    if(!surface->texture || w<=0 || h<=0)return NULL;
++    GskRenderer *renderer=gtk_native_get_renderer(native);if(!renderer)return NULL;
++    double tw=gdk_texture_get_width(surface->texture),th=gdk_texture_get_height(surface->texture);
++    GtkSnapshot *crop=gtk_snapshot_new();
++    gtk_snapshot_scale(crop,128.0/(w*tw),128.0/(h*th));
++    gtk_snapshot_translate(crop,&GRAPHENE_POINT_INIT(-x*tw,-y*th));
++    if(surface->needs_flip){gtk_snapshot_translate(crop,&GRAPHENE_POINT_INIT(0,th));gtk_snapshot_scale(crop,1,-1);}
++    gtk_snapshot_append_texture(crop,surface->texture,&GRAPHENE_RECT_INIT(0,0,tw,th));
++    GskRenderNode *node=gtk_snapshot_free_to_node(crop);if(!node)return NULL;
++    GdkTexture *image=gsk_renderer_render_texture(renderer,node,&GRAPHENE_RECT_INIT(0,0,128,128));
++    gsk_render_node_unref(node);return image;
++}
++static void portrait_cache_update(ClbbHost *h,GtkNative *native,SurfaceViewWidget *surface) {
++    char *preview=g_strdup(h->read(h->runtime,"portrait.preview"));
++    char *line=strchr(preview,'\n');
++    if(!line){portrait_cache_clear(h);h->portrait_scope[0]=0;g_free(preview);return;}
++    *line++=0;
++    if(strcmp(preview,h->portrait_scope)){portrait_cache_clear(h);g_strlcpy(h->portrait_scope,preview,sizeof(h->portrait_scope));}
++    struct {guint64 guid;double uv[4];} rows[5];unsigned n=0;
++    while(*line && n<5){
++        char *end;guint64 guid=g_ascii_strtoull(line,&end,10);const char *scan=end;gboolean valid=guid!=0&&end!=line;
++        for(unsigned k=0;k<4 && valid;k++){rows[n].uv[k]=g_ascii_strtod(scan,&end);valid=end!=scan&&isfinite(rows[n].uv[k])&&rows[n].uv[k]>=0&&rows[n].uv[k]<=1;scan=end;}
++        if(valid && rows[n].uv[2]>0 && rows[n].uv[3]>0){rows[n].guid=guid;n++;}
++        line=strchr(line,'\n');if(!line)break;line++;
++    }
++    const guint64 *info=g_object_get_data(G_OBJECT(surface->texture),"clbb-render-frame-info");
++    guint64 frame=info?info[3]:(guint64)(uintptr_t)surface->texture;
++    for(unsigned r=0;r<n;r++){
++        int slot=-1;
++        for(unsigned i=0;i<5;i++)if(h->portraits[i].guid==rows[r].guid){slot=i;break;}
++        if(slot<0)for(unsigned i=0;i<5;i++){
++            gboolean in_use=FALSE;for(unsigned j=0;j<n;j++)if(h->portraits[i].guid==rows[j].guid)in_use=TRUE;
++            if(!in_use){slot=i;g_clear_object(&h->portraits[i].image);h->portraits[i].guid=rows[r].guid;h->portraits[i].captures=0;break;}
++        }
++        if(slot<0 || (h->portrait_visible && h->portraits[slot].image) || h->portraits[slot].captures>=3 || (h->portraits[slot].captures && h->portraits[slot].frame==frame))continue;
++        double *uv=rows[r].uv;
++        GdkTexture *image=portrait_crop(native,surface,uv[0],uv[1],uv[2],uv[3]);
++        if(image){g_clear_object(&h->portraits[slot].image);h->portraits[slot].image=image;h->portraits[slot].frame=frame;h->portraits[slot].captures++;}
++    }
++    g_free(preview);
++}
++
 +/* Crop the original game texture on the GPU. No screen capture, image
 + * matching, CPU texture download, second window, or retained game artwork. */
 +void clbb_portrait_overlay_host(GtkWidget *widget, GtkSnapshot *snapshot) {
@@ -7766,12 +7828,14 @@ index 0000000..afa3afc
 +    if(!h || h->closing || clbb_settings_is_visible(h->settings) || game_surface(GTK_WIDGET(root))!=widget)return;
 +    SurfaceViewWidget *surface=SURFACE_VIEW_WIDGET(widget);
 +    if(!surface->texture)return;
++    portrait_cache_update(h,GTK_NATIVE(root),surface);
 +    const char *rows=h->read(h->runtime,"portrait.overlay");
 +    double width=gtk_widget_get_width(widget),height=gtk_widget_get_height(widget);
 +    for(int i=0;rows && *rows && i<5;i++) {
 +        double sx,sy,sw,sh,dx,dy,dw,dh;int selected;
 +        double *fields[]={&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh};
-+        const char *scan=rows;gboolean parsed=TRUE;
++        char *guid_end=NULL;guint64 guid=g_ascii_strtoull(rows,&guid_end,10);
++        const char *scan=guid_end;gboolean parsed=guid!=0 && guid_end!=rows;
 +        for(unsigned int n=0;n<8;n++){
 +            char *end=NULL;*fields[n]=g_ascii_strtod(scan,&end);
 +            if(end==scan){parsed=FALSE;break;}scan=end;
@@ -7783,6 +7847,10 @@ index 0000000..afa3afc
 +            graphene_rect_t dest=GRAPHENE_RECT_INIT(dx*width,dy*height,dw*width,dh*height);
 +            GskRoundedRect clip;gsk_rounded_rect_init_from_rect(&clip,&dest,MIN(dest.size.width,dest.size.height)/2.0);
 +            gtk_snapshot_push_rounded_clip(snapshot,&clip);
++            GdkTexture *cached=NULL;
++            for(unsigned k=0;k<5;k++)if(h->portraits[k].guid==guid){cached=h->portraits[k].image;break;}
++            if(cached)gtk_snapshot_append_texture(snapshot,cached,&dest);
++            else {
 +            gtk_snapshot_save(snapshot);
 +            gtk_snapshot_translate(snapshot,&GRAPHENE_POINT_INIT((dx-sx*dw/sw)*width,(dy-sy*dh/sh)*height));
 +            gtk_snapshot_scale(snapshot,dw/sw,dh/sh);
@@ -7791,11 +7859,17 @@ index 0000000..afa3afc
 +                gtk_snapshot_scale(snapshot,1,-1);
 +            }
 +            gtk_snapshot_append_texture(snapshot,surface->texture,&GRAPHENE_RECT_INIT(0,0,width,height));
-+            gtk_snapshot_restore(snapshot);gtk_snapshot_pop(snapshot);
++            gtk_snapshot_restore(snapshot);
++            }
++            gtk_snapshot_pop(snapshot);
++            // The clip belongs to both cached and live paths.
 +            float borders[4]={2,2,2,2};
 +            GdkRGBA color=selected ? (GdkRGBA){1.0,0.29,0.43,1.0} : (GdkRGBA){0.88,0.88,0.92,1.0};
 +            GdkRGBA colors[4]={color,color,color,color};
 +            gtk_snapshot_append_border(snapshot,&clip,borders,colors);
++            if(h->portrait_request_us && !h->portrait_snapshot_us){h->portrait_snapshot_us=g_get_monotonic_time();record_host_event(6,h->portrait_request_us,h->portrait_snapshot_us,cached!=NULL);}
++            h->portrait_snapshot_count++;
++
 +        }
 +        rows=strchr(rows,'\n');if(rows)rows++;
 +    }
@@ -7866,6 +7940,7 @@ index 0000000..afa3afc
 +static gboolean close_request(GtkWindow *window, gpointer data) {
 +    ClbbHost *h = data;
 +    h->closing = TRUE;
++    portrait_cache_clear(h);
 +    unlock(h);
 +    if (h->control)
 +        g_socket_service_stop(h->control);
@@ -7955,6 +8030,9 @@ index 0000000..afa3afc
 +            static const char marker[]="[CLBB_EXIT] desktop_close\n";
 +            (void)write(STDERR_FILENO,marker,sizeof(marker)-1);
 +            _exit(0);
++        } else if (count == 2 && !strcmp(args[0],"read") && !strcmp(args[1],"diagnostics.portrait_render")) {
++            unsigned images=0;for(unsigned k=0;k<5;k++)if(h->portraits[k].image)images++;
++            reply=g_strdup_printf("{\"request_us\":%" G_GINT64_FORMAT ",\"first_snapshot_us\":%" G_GINT64_FORMAT ",\"cached_images\":%u,\"snapshot_copies\":%u,\"crop_size\":128}",h->portrait_request_us,h->portrait_snapshot_us,images,h->portrait_snapshot_count);
 +        } else if (count == 2 && strcmp(args[0], "read") == 0 &&
 +            strcmp(args[1], "diagnostics.frame_pacing") == 0) {
 +            ClbbFrameConfiguration read = atomic_load_explicit(
@@ -8115,7 +8193,7 @@ index 0000000..afa3afc
 +            h->agent_until = g_get_monotonic_time() + 2000000;
 +            h->suspend(h->runtime, 0);
 +            h->dispatching = TRUE;
-+            int handled = 0;
++            int handled = 0;gint64 input_us=g_get_monotonic_time();
 +            if (strcmp(args[0], "pointer") == 0) {
 +                h->x = g_ascii_strtod(args[1], NULL);
 +                h->y = g_ascii_strtod(args[2], NULL);
@@ -8125,6 +8203,7 @@ index 0000000..afa3afc
 +                    h->event(h->runtime, strcmp(args[0], "key") == 0 ? 1 : 2,
 +                             atoi(args[1]), atoi(args[2]), 0, h->x, h->y);
 +            h->dispatching = FALSE;
++            if(strcmp(args[0],"pointer"))portrait_redraw_after_input(h,input_us);
 +            gtk_widget_queue_draw(h->cursor_layer);
 +            reply = g_strdup_printf("OK handled=%d", handled);
 +        } else

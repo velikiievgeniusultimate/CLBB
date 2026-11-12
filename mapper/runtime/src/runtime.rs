@@ -1103,6 +1103,17 @@ impl Runtime {
         }
         text
     }
+    fn portrait_preview(&self)->String {
+        use std::fmt::Write;
+        let Some(sample)=self.host.fresh().filter(|s|s.frame.hero_id.int()==104)else{return String::new();};
+        let backend=sample.portrait.as_ref().map(|p|p.backend).or_else(||self.portrait.held.as_ref().filter(|h|h.epoch==sample.frame.token.as_str()).map(|h|h.backend));
+        let Some(backend)=backend else{return String::new();};
+        let mut out=format!("{}:{backend:x}\n",sample.frame.token.as_str());
+        if let Some(o)=&sample.portrait {for p in &o.portraits {
+            let _=writeln!(out,"{} {} {} {} {}",p.guid,p.center[0]-p.radius[0],p.center[1]-p.radius[1],p.radius[0]*2.,p.radius[1]*2.);
+        }}
+        out
+    }
     fn read(&mut self, key: &str) -> *const c_char {
         if self.host.fresh().is_none() { self.host.settings.clear_native_holds(); }
         let view = self.core.inspect();
@@ -1113,7 +1124,8 @@ impl Runtime {
             "status"|"diagnostics.status"=>if !self.error.is_empty(){self.error.clone()}else if !self.host.settings.boolean("enabled",0){"Управление CLBB выключено".into()}else if self.host.fresh().is_none(){"Ожидаю матч и кнопки героя".into()}else if self.suspended{"Профиль готов · управление приостановлено".into()}else{view.status_.owned()},
             "diagnostics.controller"=>self.controller_diagnostics(&view).to_string(),
             "diagnostics.input"=>self.input_diagnostics(&view).to_string(),
-            "portrait.overlay"=>if !self.suspended&&self.host.fresh().and_then(|s|s.portrait.as_ref()).is_some(){self.portrait.overlay()}else{String::new()},
+            "portrait.overlay"=>if !self.suspended&&self.host.fresh().is_some_and(|s|s.frame.hero_id.int()==104&&self.portrait.held.as_ref().is_some_and(|h|h.epoch==s.frame.token.as_str())){self.portrait.overlay()}else{String::new()},
+            "portrait.preview"=>self.portrait_preview(),
             "portrait.visible"=>self.portrait.held.is_some().to_string(),
             "diagnostics.portrait"=>serde_json::json!({"gesture":self.portrait,"native":self.host.fresh().and_then(|s|s.portrait.as_ref())}).to_string(),
             "diagnostics.aim"=>self.aim_diagnostics(&view).to_string(),
@@ -1431,6 +1443,25 @@ mod tests {
             aim: None, direction_visual: None,
             control_types: BTreeMap::from([("skill:2".into(), kind)]), control_holds: BTreeMap::new(), linked: None, portrait:None,
         }
+    }
+    #[test]
+    fn portrait_display_survives_optional_capture_gap_but_not_match_change() {
+        use crate::portrait_picker::{Observation,Portrait};use crate::source::text;
+        let mut events=Vec::new();let mut r=fixture(&mut events);let at=now_ns();
+        let mut sample=template_sample(104,1,at);
+        let o=Observation {backend:77,slot:"skill:2".into(),base:10430,active:10431,held:false,selected:-1,camera_guid:0,
+            portraits:vec![Portrait{index:0,guid:900,owner:88,center:[0.9,0.6],radius:[0.02,0.025]}],
+            resolution:[4000.,3111.],cancel_point:None,native_cancel:None,contact_owner:0,contact_point:None};
+        sample.portrait=Some(o.clone());r.host.sample=Some(Arc::new(sample.clone()));
+        r.portrait.begin(&mut r.host,69,sample.frame.token.as_str(),&o,Point::new(0.5,0.55),Point::new(0.9,0.8),Point::new(0.2,0.3),at);
+        let read=|r:&mut Runtime,key:&str|unsafe{CStr::from_ptr(r.read(key))}.to_str().unwrap().to_owned();
+        assert_eq!(read(&mut r,"portrait.overlay").lines().count(),1,"ready at key DOWN");
+        sample.portrait=None;r.host.sample=Some(Arc::new(sample.clone()));
+        assert_eq!(read(&mut r,"portrait.overlay").lines().count(),1,"display is independent of an optional native capture gap");
+        assert!(!read(&mut r,"portrait.preview").is_empty(),"same GPU cache identity remains bound to this hold");
+        assert_eq!(events.len(),1,"presentation authorizes no MOVE or UP");
+        sample.frame.token=text("other-match");r.host.sample=Some(Arc::new(sample));
+        assert!(read(&mut r,"portrait.overlay").is_empty());assert!(read(&mut r,"portrait.preview").is_empty());
     }
     #[test]
     fn stale_foreign_hero_forms_cannot_pollute_the_current_hero_settings() {

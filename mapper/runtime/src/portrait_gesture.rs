@@ -53,6 +53,42 @@ fn hit(copies: &[Copy], p: Point) -> Option<&Copy> {
         dx * dx + dy * dy <= 1.
     })
 }
+fn refresh_copies(h: &mut Held, o: &Observation) {
+    // Five stable slots, even when only a subset is selectable. The anchor
+    // is captured once at DOWN; a camera teleport never moves the copies.
+    if h.copy_radius.is_none() {
+        h.copy_radius = o.portraits.first().map(|p| {
+            [
+                (p.radius[0] * 1.4).clamp(0.012, 0.04),
+                (p.radius[1] * 1.4).clamp(0.012, 0.06),
+            ]
+        });
+    }
+    let [rx, ry] = h.copy_radius.unwrap_or([0.024, 0.031]);
+    let x = h.anchor.x.clamp(rx * 6.5, 1. - rx * 6.5);
+    let y = (h.anchor.y - 0.16).clamp(ry * 1.2, 1. - ry * 1.2);
+    h.copies = o
+        .portraits
+        .iter()
+        .map(|p| Copy {
+            index: p.index,
+            guid: p.guid,
+            owner: p.owner,
+            source: [
+                p.center[0] - p.radius[0],
+                p.center[1] - p.radius[1],
+                p.radius[0] * 2.,
+                p.radius[1] * 2.,
+            ],
+            destination: [
+                x + (p.index as f64 - 2.) * rx * 2.6 - rx,
+                y - ry,
+                rx * 2.,
+                ry * 2.,
+            ],
+        })
+        .collect();
+}
 impl Picker {
     pub fn contains(&self, key: i32) -> bool {
         self.ignored.contains(&key) || self.held.as_ref().is_some_and(|h| h.key == key)
@@ -101,6 +137,9 @@ impl Picker {
             release_goal: None,
             copy_radius: None,
         });
+        // Presentation is ready in this key-down call. Native capture and
+        // MOVE acknowledgement remain admission requirements for input only.
+        refresh_copies(self.held.as_mut().unwrap(), o);
         true
     }
     pub fn release(&mut self, key: i32, now: i64) -> bool {
@@ -183,43 +222,12 @@ impl Picker {
             }
             return;
         }
+        if !o.portraits.is_empty() || o.held {
+            refresh_copies(h, o);
+        }
         if !o.held {
             return;
         }
-        // Five stable slots, even when only a subset is selectable. The anchor
-        // is captured once at DOWN; a camera teleport never moves the copies.
-        if h.copy_radius.is_none() {
-            h.copy_radius = o.portraits.first().map(|p| {
-                [
-                    (p.radius[0] * 1.4).clamp(0.012, 0.04),
-                    (p.radius[1] * 1.4).clamp(0.012, 0.06),
-                ]
-            });
-        }
-        let [rx, ry] = h.copy_radius.unwrap_or([0.024, 0.031]);
-        let x = h.anchor.x.clamp(rx * 6.5, 1. - rx * 6.5);
-        let y = (h.anchor.y - 0.16).clamp(ry * 1.2, 1. - ry * 1.2);
-        h.copies = o
-            .portraits
-            .iter()
-            .map(|p| Copy {
-                index: p.index,
-                guid: p.guid,
-                owner: p.owner,
-                source: [
-                    p.center[0] - p.radius[0],
-                    p.center[1] - p.radius[1],
-                    p.radius[0] * 2.,
-                    p.radius[1] * 2.,
-                ],
-                destination: [
-                    x + (p.index as f64 - 2.) * rx * 2.6 - rx,
-                    y - ry,
-                    rx * 2.,
-                    ry * 2.,
-                ],
-            })
-            .collect();
         let target = if h.cancelled {
             None
         } else if let Some(goal) = h.release_goal {
@@ -311,7 +319,8 @@ impl Picker {
             use std::fmt::Write;
             let _ = writeln!(
                 out,
-                "{} {} {} {} {} {} {} {} {}",
+                "{} {} {} {} {} {} {} {} {} {}",
+                c.guid,
                 c.source[0],
                 c.source[1],
                 c.source[2],
@@ -542,5 +551,27 @@ mod tests {
         p.held.as_mut().unwrap().contact_owner = 99;
         p.poll(&mut w, "match", Some(&o), 9, 10);
         assert!(p.held.is_some());
+    }
+    #[test]
+    fn key_down_already_has_all_copies_without_native_capture_or_poll() {
+        let mut p = Picker::default();
+        let mut w = Wire::default();
+        let mut o = native();
+        o.held = false;
+        p.begin(
+            &mut w,
+            69,
+            "match",
+            &o,
+            Point::new(0.5, 0.55),
+            Point::new(0.94, 0.7),
+            Point::new(0.2, 0.3),
+            1,
+        );
+        assert_eq!(p.held.as_ref().unwrap().copies.len(), 5);
+        assert_eq!(p.overlay().lines().count(), 5);
+        assert_eq!(w.events.len(), 1, "only DOWN, no unacknowledged aiming");
+        step(&mut p, &mut w, &mut o, 2, 3);
+        assert_eq!(w.events.len(), 1);
     }
 }
