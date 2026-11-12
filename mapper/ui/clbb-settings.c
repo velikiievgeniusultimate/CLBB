@@ -572,6 +572,7 @@ static const char *action_title(const char *slot, int skill, const char *config)
   return "Кнопка";
 }
 static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,const char *config,const char *mode_config,const char *slot,int type,gboolean cancel) {
+  (void)type;
   gboolean personal=!strcmp(prefix,"hero");
   GtkWidget *box=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
   gtk_widget_add_css_class(box,"clbb-binding-scope");
@@ -585,10 +586,10 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
   }
   char *key=cancel?g_strdup_printf("%s.cancel_key",prefix):g_strdup_printf("%s.bindings.%s.key",prefix,config);
   bind_control(s,box,"Клавиша",key,cancel?'T':action_key(slot));g_free(key);
-  gboolean fixed=g_str_has_prefix(slot,"attack")||g_str_has_prefix(slot,"upgrade:")||g_str_has_prefix(slot,"combo:")||!strcmp(slot,"shop:quick")||!strcmp(slot,"extra:0")||!strcmp(slot,"extra:1");
+  gboolean fixed=g_str_has_prefix(slot,"combo:");
   if (!cancel&&!fixed) {
     key=g_strdup_printf("%s.bindings.%s.cast_mode",prefix,mode_config);
-    mode_control(s,box,"Нажатие",key,type==1?1:0,FALSE);g_free(key);
+    mode_control(s,box,"Нажатие",key,0,FALSE);g_free(key);
     if (g_str_has_prefix(slot,"skill:")||!strcmp(slot,"extra:2")) {
       key=g_strdup_printf("%s.bindings.%s.stop_movement",prefix,config);
       switch_control(s,box,"Останавливать движение",key,0);g_free(key);

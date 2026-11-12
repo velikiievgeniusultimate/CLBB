@@ -408,7 +408,9 @@ fn instant_choice_still_waits_for_ui_ack_and_normal_tap_and_direction_remain_ind
     key(&mut c, &mut h, 91, 32, true);
     let aux = h.next - 1;
     c.apply_input(&mut h, Input::Timer(Timer::Auxiliary), T + 108 * MS);
-    assert!(released(&h, aux), "ordinary auxiliary taps retain their bounded auto-UP");
+    assert!(!released(&h, aux), "default auxiliary action waits for physical UP");
+    key(&mut c, &mut h, 108, 32, false);
+    assert!(released(&h, aux));
     key(&mut c, &mut h, 109, 81, true);
     let direction = c.skillTouch_;
     key(&mut c, &mut h, 110, 81, false);

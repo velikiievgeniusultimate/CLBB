@@ -856,8 +856,9 @@ impl Controller {
         self.sync_clock(host);
         self.auxiliaryTaps_.push(AuxiliaryTap {
             id,
+            key: b.key,
             point: b.press,
-            until: self.now_ + 16_000_000,
+            until: if b.castMode == 1 { self.now_ + 16_000_000 } else { i64::MAX },
             cooldownSlot: if b.kind == "extra" {
                 b.slot.clone()
             } else {
@@ -865,7 +866,7 @@ impl Controller {
             },
             cooldownVariant: variant,
         });
-        host.timer(Timer::Auxiliary, Some(16));
+        if b.castMode == 1 { host.timer(Timer::Auxiliary, Some(16)); }
     }
     pub(crate) fn expire_auxiliary_taps(&mut self, host: &mut impl Host) {
         for i in (0..self.auxiliaryTaps_.len()).rev() {
@@ -876,7 +877,7 @@ impl Controller {
                 self.mark_cooldown_cast(&tap.cooldownSlot, tap.cooldownVariant)
             }
         }
-        if let Some(next) = self.auxiliaryTaps_.iter().map(|t| t.until).min() {
+        if let Some(next) = self.auxiliaryTaps_.iter().filter(|t| t.until != i64::MAX).map(|t| t.until).min() {
             host.timer(
                 Timer::Auxiliary,
                 Some(((next - self.now_ + 999_999) / 1_000_000).max(1)),

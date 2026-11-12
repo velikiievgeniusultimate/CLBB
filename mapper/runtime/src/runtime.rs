@@ -1353,7 +1353,7 @@ mod tests {
     fn polling_installs_native_defaults_before_core_binding_and_menu_reads() {
         let mut events = Vec::new();
         let mut runtime = fixture(&mut events);
-        for (kind, mode) in [(3, 0), (1, 1), (2, 0), (0, 1)] {
+        for (kind, mode) in [(3, 0), (1, 0), (2, 0), (0, 0)] {
             runtime.worker.shared.lock().unwrap().sample = Some(Arc::new(template_sample(30, kind, now_ns())));
             runtime.poll(1280., 720.);
             let view = runtime.core.inspect();
@@ -1373,17 +1373,17 @@ mod tests {
         let mut runtime = fixture(&mut events);
         runtime.worker.shared.lock().unwrap().sample = Some(Arc::new(template_sample(30, 3, now_ns() - 500_000_000)));
         runtime.poll(1280., 720.);
-        assert_eq!(runtime.host.settings.binding(30, "skill:2").cast_mode, 1);
+        assert_eq!(runtime.host.settings.binding(30, "skill:2").cast_mode, 0);
     }
     #[test]
-    fn native_charge_overrides_only_the_unsaved_tap_default_before_core_and_menu_read() {
+    fn native_charge_keeps_release_default_and_preserves_explicit_quick_cast() {
         let mut events = Vec::new(); let mut runtime = fixture(&mut events);
         for charge in [Some(true), Some(false), None] {
             let mut sample = template_sample(30, 1, now_ns());
             if let Some(charge) = charge { sample.control_holds.insert("skill:2".into(), charge); }
             runtime.worker.shared.lock().unwrap().sample = Some(Arc::new(sample));
             runtime.poll(1280., 720.);
-            let expected = if charge == Some(true) { 0 } else { 1 };
+            let expected = 0;
             assert_eq!(runtime.core.inspect().buttons[0].cast_mode, expected);
             assert_eq!(runtime.host.settings.integer("hero.bindings.skill:2.cast_mode", 30), expected);
         }
@@ -1404,11 +1404,11 @@ mod tests {
         assert_eq!(runtime.host.settings.binding(30, "skill:2").cast_mode, 0);
         runtime.host.sample = Some(Arc::new(template_sample(30, 1, now_ns() - 500_000_000)));
         let button = Button { slot: "skill:2".into(), kind: "skill".into(), skillId: 3030, ..Default::default() };
-        assert_eq!(runtime.host.binding(30, &button, "skill:2").cast_mode, 1);
-        assert_eq!(runtime.host.settings.integer("hero.bindings.skill:2.cast_mode", 30), 1);
+        assert_eq!(runtime.host.binding(30, &button, "skill:2").cast_mode, 0);
+        assert_eq!(runtime.host.settings.integer("hero.bindings.skill:2.cast_mode", 30), 0);
         runtime.host.settings.observe_native_holds(30, &BTreeMap::from([("skill:2".into(), true)]));
         let value = runtime.read("hero.bindings.skill:2.cast_mode");
-        assert_eq!(unsafe { CStr::from_ptr(value) }.to_str().unwrap(), "1");
+        assert_eq!(unsafe { CStr::from_ptr(value) }.to_str().unwrap(), "0");
     }
     #[test]
     fn control_diagnostics_show_current_native_and_mapped_state_but_never_stale_cache() {

@@ -93,7 +93,9 @@ pub struct QueuedSkill {
 #[derive(Clone, Default, Debug)]
 pub struct AuxiliaryTap {
     pub id: i32,
+    pub key: i32,
     pub point: Point,
+    /// i64::MAX means physical release; finite deadlines are explicit quick casts.
     pub until: i64,
     pub cooldownSlot: String,
     pub cooldownVariant: i32,

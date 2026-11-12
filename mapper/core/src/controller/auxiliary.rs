@@ -31,6 +31,7 @@ mod tests {
         ended: Vec<i32>,
         fail_down: bool,
         attack_key: i32,
+        attack_mode: i32,
         clock: Option<i64>,
         abort_ok: bool,
         abort_calls: usize,
@@ -70,7 +71,7 @@ mod tests {
         fn navigation(&mut self, _: Point, p: Point, _: bool) -> Result<Vec<Point>, String> { Ok(vec![p]) }
         fn binding(&mut self, _: i32, b: &Button, _: &str) -> Binding {
             Binding { key: if b.kind == "attack" { self.attack_key } else { 81 },
-                aim_type: 2, cast_mode: 0, stop_movement: false }
+                aim_type: 2, cast_mode: if b.kind == "attack" { self.attack_mode } else { 0 }, stop_movement: false }
         }
         fn cancel_key(&mut self, _: i32) -> i32 { 84 }
         fn timer(&mut self, _: Timer, _: Option<i64>) {}
@@ -233,9 +234,11 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_auxiliary_tap_early_up_and_rapid_repress_keep_separate_sixteen_ms_deadlines() {
+    fn explicitly_instant_auxiliary_early_up_and_rapid_repress_keep_separate_sixteen_ms_deadlines() {
         for initial in [Some(false), None] {
             let (mut c, mut h) = setup(initial);
+            h.attack_mode = 1;
+            send(&mut c, &mut h, frame(55, initial));
             key(&mut c, &mut h, 60, 32, true);
             let first = c.auxiliaryTaps_[0].id;
             key(&mut c, &mut h, 61, 32, false);
@@ -248,6 +251,27 @@ mod tests {
             c.apply_input(&mut h, Input::Timer(Timer::Auxiliary), T + 84 * MS);
             assert_eq!(h.ended, vec![first, second]);
         }
+    }
+
+    #[test]
+    fn default_auxiliary_holds_until_physical_up_and_preserves_other_fingers() {
+        let (mut c, mut h) = setup(Some(false));
+        let movement = c.movementTouch_;
+        key(&mut c, &mut h, 60, 32, true);
+        let aux = c.auxiliaryTaps_[0].id;
+        key(&mut c, &mut h, 61, 81, true);
+        let primary = c.skillTouch_;
+        c.apply_input(&mut h, Input::Timer(Timer::Auxiliary), T + 90 * MS);
+        assert!(h.active.contains_key(&aux));
+        others(&h, primary, movement);
+        key(&mut c, &mut h, 91, 32, false);
+        assert_eq!(h.ended, vec![aux]);
+        others(&h, primary, movement);
+        assert!(c.auxiliaryTaps_.is_empty());
+        key(&mut c, &mut h, 92, 32, true);
+        let second = c.auxiliaryTaps_[0].id;
+        key(&mut c, &mut h, 93, 32, false);
+        assert_eq!(h.ended, vec![aux, second]);
     }
 
     #[test]
@@ -459,6 +483,8 @@ mod tests {
     #[test]
     fn globally_retiring_a_tap_after_its_physical_up_does_not_tombstone_the_released_key() {
         let (mut c, mut h) = setup(Some(false));
+        h.attack_mode = 1;
+        send(&mut c, &mut h, frame(55, Some(false)));
         key(&mut c, &mut h, 60, 32, true);
         key(&mut c, &mut h, 61, 32, false);
         assert_eq!(c.auxiliaryTaps_.len(), 1);
@@ -578,6 +604,10 @@ impl Controller {
             .flatten();
         let hold = row.filter(|row| row.owner_present.get() && row.hold_to_release.get());
         if let Some(row) = hold {
+            if b.castMode == 1 {
+                self.begin_auxiliary_tap(host, b);
+                return;
+            }
             if !b.available || self.auxiliaryHolds_.len() + self.auxiliaryTaps_.len() >= 8 {
                 return;
             }
@@ -603,6 +633,14 @@ impl Controller {
         self.begin_auxiliary_tap(host, b);
     }
     pub(crate) fn release_auxiliary_key(&mut self, host: &mut impl Host, key: i32) {
+        for i in (0..self.auxiliaryTaps_.len()).rev() {
+            if self.auxiliaryTaps_[i].key == key && self.auxiliaryTaps_[i].until == i64::MAX {
+                let tap = self.auxiliaryTaps_.remove(i);
+                host.end(tap.id, tap.point);
+                self.sync_clock(host);
+                self.mark_cooldown_cast(&tap.cooldownSlot, tap.cooldownVariant);
+            }
+        }
         for i in (0..self.auxiliaryHolds_.len()).rev() {
             if self.auxiliaryHolds_[i].key == key {
                 self.trace(host, "auxiliary_hold", "physical_up");

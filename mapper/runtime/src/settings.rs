@@ -263,23 +263,8 @@ impl Settings {
             return "false".into();
         }
         if field == "cast_mode" {
-            if slot == "extra:2:20080" { return "1".into(); }
-            if matches!(scope, "hero" | "common") && slot != "skill:1:2521" {
-                if self.native_charge_slots.get(&hero).is_some_and(|slots| slots.contains(slot)) {
-                    return "0".into();
-                }
-                match self.native_skill_types.get(&hero).and_then(|types| types.get(slot)) {
-                    Some(1) => return "1".into(),
-                    Some(2 | 3 | 4) => return "0".into(),
-                    _ => {},
-                }
-            }
-            return if slot == "skill:1:2521" || slot == "skill:2" || tap_only(slot) {
-                "1"
-            } else {
-                "0"
-            }
-            .into();
+            // Geometry and native charge flags never opt users into quick cast.
+            return "0".into();
         }
         if field != "key" {
             return String::new();
@@ -357,11 +342,7 @@ impl Settings {
         };
         clbb_moba_core::controller::host::Binding {
             key: code,
-            cast_mode: if tap_only(slot) {
-                1
-            } else {
-                self.integer(&key("cast_mode"), hero)
-            },
+            cast_mode: self.integer(&key("cast_mode"), hero),
             aim_type: 0,
             stop_movement: self.boolean(&key("stop_movement"), hero),
         }
@@ -524,12 +505,6 @@ pub fn valid_key(key: i32) -> bool {
         })
         || ((key & !0xffff) == 0x03000000 && matches!(key & 0xffff, 4..=7 | 30..=65535))
 }
-pub fn tap_only(slot: &str) -> bool {
-    slot.starts_with("attack")
-        || slot.starts_with("upgrade:")
-        || slot == "shop:quick"
-        || ["extra:0", "extra:1"].contains(&slot)
-}
 fn native_skill_slot(slot: &str) -> bool {
     slot.strip_prefix("skill:")
         .is_some_and(|index| !index.is_empty() && index.bytes().all(|v| v.is_ascii_digit())
@@ -539,12 +514,35 @@ fn native_skill_slot(slot: &str) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn every_unconfigured_action_defaults_to_release_and_quick_cast_is_explicit() {
+        let mut s = Settings::default();
+        let slots = ["skill:0", "skill:1", "skill:2", "skill:3", "skill:1:2521",
+            "combo:0", "combo:1", "attack", "attack:minion", "attack:tower",
+            "upgrade:0", "upgrade:1", "upgrade:2", "upgrade:3", "shop:quick",
+            "extra:0", "extra:1", "extra:2", "extra:3", "extra:2:20080"];
+        for hero in [0, 25, 30, 73, 131] {
+            for kind in 0..=4 {
+                s.observe_native_templates(hero, &BTreeMap::from([("skill:2".into(), kind)]));
+                for slot in slots {
+                    assert_eq!(s.binding(hero, slot).cast_mode, 0, "hero={hero}, slot={slot}, type={kind}");
+                }
+            }
+        }
+        for slot in slots {
+            s.set(&format!("common.bindings.{slot}.cast_mode"), "1", 0).unwrap();
+            assert_eq!(s.binding(73, slot).cast_mode, 1);
+            s.set(&format!("hero.bindings.{slot}.cast_mode"), "0", 73).unwrap();
+            assert_eq!(s.binding(73, slot).cast_mode, 0);
+            assert_eq!(s.binding(25, slot).cast_mode, 1);
+        }
+    }
+    #[test]
     fn native_skill_templates_share_cast_defaults_between_menu_and_bindings() {
         let mut s = Settings::default();
         s.observe_native_templates(30, &BTreeMap::from([
             ("skill:0".into(), 1), ("skill:1".into(), 2), ("skill:2".into(), 3),
         ]));
-        for (slot, expected) in [("skill:0", 1), ("skill:1", 0), ("skill:2", 0)] {
+        for (slot, expected) in [("skill:0", 0), ("skill:1", 0), ("skill:2", 0)] {
             assert_eq!(s.integer(&format!("hero.bindings.{slot}.cast_mode"), 30), expected);
             assert_eq!(s.binding(30, slot).cast_mode, expected);
         }
@@ -552,7 +550,7 @@ mod tests {
         let saved = serde_json::to_string(&s).unwrap();
         assert_eq!(saved, "{\"values\":{}}");
         let restored: Settings = serde_json::from_str(&saved).unwrap();
-        assert_eq!(restored.binding(30, "skill:2").cast_mode, 1);
+        assert_eq!(restored.binding(30, "skill:2").cast_mode, 0);
     }
     #[test]
     fn native_template_updates_preserve_explicit_modes_keys_and_form_settings() {
@@ -578,32 +576,32 @@ mod tests {
         }
     }
     #[test]
-    fn native_defaults_follow_current_hero_type_and_unknown_returns_to_fallback() {
+    fn native_geometry_changes_never_enable_quick_cast() {
         let mut s = Settings::default();
         s.observe_native_templates(30, &BTreeMap::from([("skill:2".into(), 3)]));
         assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
-        assert_eq!(s.binding(31, "skill:2").cast_mode, 1);
+        assert_eq!(s.binding(31, "skill:2").cast_mode, 0);
         s.observe_native_templates(31, &BTreeMap::from([("skill:2".into(), 2)]));
         assert_eq!(s.binding(31, "skill:2").cast_mode, 0);
         assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
         s.observe_native_templates(30, &BTreeMap::from([("skill:2".into(), 1)]));
-        assert_eq!(s.binding(30, "skill:2").cast_mode, 1);
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
         s.observe_native_templates(30, &BTreeMap::from([("skill:2".into(), 3)]));
         s.observe_native_templates(30, &BTreeMap::from([("skill:2".into(), 0)]));
-        assert_eq!(s.binding(30, "skill:2").cast_mode, 1);
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
         s.observe_native_templates(30, &BTreeMap::from([("skill:0".into(), 1)]));
-        assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 0);
         s.observe_native_templates(30, &BTreeMap::new());
         assert_eq!(s.binding(30, "skill:0").cast_mode, 0);
     }
     #[test]
-    fn native_selection_defaults_to_release_and_verified_next_form_reverts_to_its_template() {
+    fn native_selection_and_following_forms_default_to_release() {
         let mut s=Settings::default();
         s.observe_native_templates(131,&BTreeMap::from([("skill:2".into(),4)]));
         assert_eq!(s.binding(131,"skill:2").cast_mode,0);
-        assert_eq!(s.binding(25,"skill:2").cast_mode,1);
+        assert_eq!(s.binding(25,"skill:2").cast_mode,0);
         s.observe_native_templates(131,&BTreeMap::from([("skill:2".into(),1)]));
-        assert_eq!(s.binding(131,"skill:2").cast_mode,1);
+        assert_eq!(s.binding(131,"skill:2").cast_mode,0);
         s.set("hero.bindings.skill:2.cast_mode","1",131).unwrap();
         s.observe_native_templates(131,&BTreeMap::from([("skill:2".into(),4)]));
         assert_eq!(s.binding(131,"skill:2").cast_mode,1,"a native default must preserve an explicit user's mode");
@@ -617,31 +615,31 @@ mod tests {
             ("skill:1".into(), 2), ("skill:1:2521".into(), 3),
             ("combo:0".into(), 1), ("extra:2".into(), 1), ("attack".into(), 3),
         ]));
-        assert_eq!(s.binding(25, "skill:1:2521").cast_mode, 1);
+        assert_eq!(s.binding(25, "skill:1:2521").cast_mode, 0);
         assert_eq!(s.binding(25, "combo:0").cast_mode, 0);
         assert_eq!(s.binding(25, "extra:2").cast_mode, 0);
-        assert_eq!(s.binding(25, "attack").cast_mode, 1);
+        assert_eq!(s.binding(25, "attack").cast_mode, 0);
         assert_eq!(s.integer("common.bindings.skill:1.cast_mode", 25), 0);
         s.set("common.bindings.extra:2.cast_mode", "3", 25).unwrap();
         s.observe_native_templates(25, &BTreeMap::from([("extra:2".into(), 1)]));
         assert_eq!(s.binding(25, "extra:2").cast_mode, 3);
     }
     #[test]
-    fn native_charge_is_independent_of_tap_geometry_and_unknown_reverts_to_template() {
+    fn native_charge_and_tap_geometry_share_the_release_default() {
         let mut s = Settings::default();
         s.observe_native_templates(30, &BTreeMap::from([("skill:0".into(), 1)]));
-        assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 0);
         s.observe_native_holds(30, &BTreeMap::from([("skill:0".into(), true), ("skill:2".into(), true)]));
         for slot in ["skill:0", "skill:2"] {
             assert_eq!(s.binding(30, slot).cast_mode, 0);
             assert_eq!(s.integer(&format!("hero.bindings.{slot}.cast_mode"), 30), 0);
         }
         s.observe_native_holds(30, &BTreeMap::from([("skill:0".into(), false)]));
-        assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
-        assert_eq!(s.binding(30, "skill:2").cast_mode, 1);
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 0);
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
         s.observe_native_holds(30, &BTreeMap::from([("skill:0".into(), true)]));
         s.observe_native_holds(30, &BTreeMap::new());
-        assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
+        assert_eq!(s.binding(30, "skill:0").cast_mode, 0);
         assert!(s.values.is_empty());
     }
     #[test]
@@ -658,12 +656,12 @@ mod tests {
         assert_eq!(s.binding(30, "skill:0").cast_mode, 1);
         assert_eq!(s.binding(30, "skill:1").cast_mode, 0);
         assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
-        assert_eq!(s.binding(31, "skill:2").cast_mode, 1);
+        assert_eq!(s.binding(31, "skill:2").cast_mode, 0);
         assert_eq!(s.binding(30, "extra:2").cast_mode, 0);
-        assert_eq!(s.binding(30, "attack").cast_mode, 1);
+        assert_eq!(s.binding(30, "attack").cast_mode, 0);
         assert_eq!(s.binding(30, "combo:0").cast_mode, 0);
         s.clear_native_holds();
-        assert_eq!(s.binding(30, "skill:2").cast_mode, 1);
+        assert_eq!(s.binding(30, "skill:2").cast_mode, 0);
         assert_eq!(s.values, saved);
         let restored: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(restored.values, saved);
@@ -812,7 +810,7 @@ mod tests {
         s.set("hero.bindings.skill:1.key", "87", 25).unwrap();
         s.set("hero.bindings.skill:1:2521.key", "87", 25).unwrap();
         assert_eq!(s.binding(25, "skill:1:2521").key, 87);
-        assert_eq!(s.binding(25, "skill:1:2521").cast_mode, 1);
+        assert_eq!(s.binding(25, "skill:1:2521").cast_mode, 0);
     }
     #[test]
     fn global_override_inherits() {
@@ -840,7 +838,7 @@ mod purify_settings_tests {
     #[test]
     fn purify_mode_is_shared_without_changing_aimed_spells() {
         let mut s=Settings::default();
-        assert_eq!(s.integer("common.bindings.extra:2:20080.cast_mode",73),1);
+        assert_eq!(s.integer("common.bindings.extra:2:20080.cast_mode",73),0);
         s.values.insert("common.bindings.extra:2:20080.cast_mode".into(),"0".into());
         s.values.insert("common.bindings.extra:2.cast_mode".into(),"3".into());
         for hero in [25,73] {assert_eq!(s.integer("hero.bindings.extra:2:20080.cast_mode",hero),0);assert_eq!(s.binding(hero,"extra:2").cast_mode,3);}
