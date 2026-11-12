@@ -9,23 +9,40 @@ typedef struct {
   GMainLoop *loop;
   guint writes;
   guint visible;
+  char *layout;
 } Preview;
 static const char *read_value(void *data, const char *key) {
   Preview *p = data;
-  if (g_str_has_prefix(key, "hero.bindings.") && !strstr(key, ".override") &&
-      !strstr(key, "skill:") && !strstr(key, "combo:")) {
-    const char *slot = key + strlen("hero.bindings.");
-    const char *dot = strrchr(slot, '.');
-    if (dot) {
-      char *o = g_strdup_printf("hero.bindings.%.*s.override",
-                                (int)(dot - slot), slot);
-      const char *enabled = g_hash_table_lookup(p->values, o);
-      g_free(o);
-      if (g_strcmp0(enabled, "true")) {
-        char *c = g_strdup_printf("common.bindings.%s", slot);
-        const char *v = g_hash_table_lookup(p->values, c);
-        g_free(c);
-        return v;
+  if (!strcmp(key,"hero.controls")) {
+    const char *custom=g_hash_table_lookup(p->values,"preview.controls");
+    if (custom) return custom;
+    int hero=atoi(g_hash_table_lookup(p->values,"hero.id")?g_hash_table_lookup(p->values,"hero.id"):"0");
+    g_free(p->layout);p->layout=NULL;
+    if (hero<=0) return "";
+    GString *rows=g_string_new(NULL);g_string_append_printf(rows,"1\t%d\n",hero);
+    gboolean linked=!g_strcmp0(g_hash_table_lookup(p->values,"hero.linked_controls"),"1");
+    for (int n=0;n<(linked?2:3);++n) {
+      char *key=g_strdup_printf("hero.skill%d_type",n);const char *type=g_hash_table_lookup(p->values,key);
+      g_string_append_printf(rows,"skill:%d\tskill:%d\tskill:%d\t%d\t%d\t%s\n",n,n,n,hero*100+n*10+10,hero*100+n*10+10,type?type:n==2?"1":"2");g_free(key);
+    }
+    const char *slots[]={"extra:0","extra:1","extra:2","extra:3","attack","attack:minion","attack:tower","shop:quick","upgrade:0","upgrade:1","upgrade:2"};
+    for (guint n=0;n<G_N_ELEMENTS(slots);++n) g_string_append_printf(rows,"%s\t%s\t%s\t%d\t%d\t%d\n",slots[n],slots[n],slots[n],n==2?20020:0,n==2?20020:0,n==2?2:1);
+    if (linked) for (int n=0;n<2;++n) g_string_append_printf(rows,"combo:%d\tcombo:%d\tcombo:%d\t0\t0\t1\n",n,n,n);
+    p->layout=g_string_free(rows,FALSE);return p->layout;
+  }
+  if (g_str_has_prefix(key,"hero.movement.")&&!g_str_has_suffix(key,".override")) {
+    char *marker=g_strconcat(key,".override",NULL);
+    gboolean own=!g_strcmp0(g_hash_table_lookup(p->values,marker),"true");g_free(marker);
+    if (!own) return g_hash_table_lookup(p->values,key+5);
+  }
+  if (g_str_has_prefix(key,"hero.bindings.")) {
+    const char *dot=strrchr(key,'.');
+    if (dot&&(!strcmp(dot,".key")||!strcmp(dot,".cast_mode")||!strcmp(dot,".stop_movement"))) {
+      char *marker=g_strconcat(key,".override",NULL);
+      gboolean own=!g_strcmp0(g_hash_table_lookup(p->values,marker),"true");g_free(marker);
+      if (!own) {
+        char *common=g_strconcat("common.",key+5,NULL);
+        const char *v=g_hash_table_lookup(p->values,common);g_free(common);return v;
       }
     }
   }
@@ -85,6 +102,10 @@ static gboolean write_value(void *data, const char *key, const char *value) {
     g_strfreev(fields);
   }
   g_hash_table_replace(p->values, g_strdup(key), g_strdup(value));
+  if ((g_str_has_prefix(key,"hero.movement.")&&!g_str_has_suffix(key,".override")) || (g_str_has_prefix(key,"hero.bindings.")&&(g_str_has_suffix(key,".key")||g_str_has_suffix(key,".cast_mode")||g_str_has_suffix(key,".stop_movement")))) {
+    char *marker=g_strconcat(key,".override",NULL);
+    g_hash_table_replace(p->values,marker,g_strdup("true"));
+  }
   p->writes++;
   return TRUE;
 }
@@ -184,11 +205,13 @@ int main(int argc, char **argv) {
   ClbbSettings *s = clbb_settings_create(GTK_OVERLAY(overlay), &callbacks);
   gboolean selftest = FALSE;
   gboolean linked_hero = FALSE;
+  gboolean expand_first = FALSE;
   const char *tab = "main";
   guint timeout = 0;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--self-test"))
       selftest = TRUE;
+    else if (!strcmp(argv[i], "--expand-first")) expand_first=TRUE;
     else if (!strcmp(argv[i], "--linked-hero"))
       linked_hero = TRUE;
     else if (!strcmp(argv[i], "--tab") && i + 1 < argc)
@@ -203,6 +226,19 @@ int main(int argc, char **argv) {
     clbb_settings_refresh(s);
   }
   if (selftest) {
+    GHashTable *mouse_codes = g_hash_table_new(g_direct_hash, g_direct_equal);
+    for (guint button = 1; button <= 255; ++button) {
+      gint code = clbb_settings_mousecode(button);
+      g_assert_cmpint(code, >, 0);
+      g_assert_false(g_hash_table_contains(mouse_codes, GINT_TO_POINTER(code)));
+      g_hash_table_add(mouse_codes, GINT_TO_POINTER(code));
+      g_assert_cmpint(0x02000000 | (code & ~0x02000000), ==, code);
+    }
+    g_assert_cmpint(clbb_settings_mousecode(8), ==, 0x02000008);
+    g_assert_cmpint(clbb_settings_mousecode(9), ==, 0x02000010);
+    g_assert_cmpint(clbb_settings_mousecode(10), ==, 0x02000020);
+    g_assert_cmpint(clbb_settings_mousecode(0), ==, 0);
+    g_hash_table_unref(mouse_codes);
     GtkWidget *stack = find_type(clbb_settings_panel(s), GTK_TYPE_STACK);
     g_assert_nonnull(gtk_stack_get_child_by_name(GTK_STACK(stack), "controls"));
     g_assert_null(gtk_stack_get_child_by_name(GTK_STACK(stack), "hero"));
@@ -225,6 +261,30 @@ int main(int argc, char **argv) {
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(heading), FALSE);
     g_assert_false(clbb_settings_is_capturing(s));
     g_assert_cmpuint(p.writes, ==, before_expand);
+    // Changing one personal field must leave neighboring fields inherited.
+    g_assert(write_value(&p,"common.bindings.skill:0.key","81"));
+    g_assert(write_value(&p,"common.bindings.skill:0.cast_mode","1"));
+    g_assert(write_value(&p,"hero.bindings.skill:0.key","88"));
+    g_assert(write_value(&p,"common.bindings.skill:0.key","89"));
+    clbb_settings_refresh(s);
+    g_assert_cmpstr(read_value(&p,"hero.bindings.skill:0.key"),==,"88");
+    g_assert_cmpstr(read_value(&p,"hero.bindings.skill:0.cast_mode"),==,"1");
+    GtkWidget *reset=gtk_widget_get_last_child(find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key"));
+    g_assert_true(gtk_widget_get_sensitive(reset));g_signal_emit_by_name(reset,"clicked");
+    g_assert_cmpstr(read_value(&p,"hero.bindings.skill:0.key"),==,"89");
+    g_assert_false(gtk_widget_get_sensitive(reset));
+    put(&p,"common.bindings.skill:0.key","81");
+    clbb_settings_refresh(s);
+    // Absent controls are removed, rather than left as disabled phantom rows.
+    put(&p,"preview.controls","1\t25\nskill:0\tskill:0\tskill:0\t2510\t2510\t3\n");
+    clbb_settings_refresh(s);
+    g_assert_nonnull(find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key"));
+    g_assert_null(find_control(clbb_settings_panel(s),"hero.bindings.extra:3.key"));
+    g_assert_null(find_control(clbb_settings_panel(s),"hero.bindings.skill:3.key"));
+    put(&p,"preview.controls","");clbb_settings_refresh(s);
+    g_assert_null(find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key"));
+    g_hash_table_remove(p.values,"preview.controls");clbb_settings_refresh(s);
+    g_print("CLBB_HERO_LIVE_LAYOUT_OK present controls only, field inheritance, reset, stale data hides rows\n");
     g_print("CLBB_COLLAPSIBLE_CONTROLS_OK merged page, initially collapsed, refresh preserves state, no settings writes\n");
     const char *volume_keys[]={"audio.volume","audio.game_volume","audio.voice_volume"};
     for (guint i=0;i<G_N_ELEMENTS(volume_keys);i++) {
@@ -289,7 +349,7 @@ int main(int argc, char **argv) {
     g_assert_cmpint(clbb_settings_keycode(GDK_KEY_Shift_L), ==, 0);
     g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "Q"));
     g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "F7"));
-    GtkWidget *q = find_button(GTK_WIDGET(clbb_settings_panel(s)), "Q");
+    GtkWidget *q = find_type(find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key"),GTK_TYPE_BUTTON);
     g_signal_emit_by_name(q, "clicked");
     GListModel *controllers =
         gtk_widget_observe_controllers(GTK_WIDGET(clbb_settings_panel(s)));
@@ -311,12 +371,11 @@ int main(int argc, char **argv) {
     put(&p, "hero.id", "1");
     put(&p, "hero.name", "Мия");
     clbb_settings_refresh(s);
-    g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "R"));
+    g_assert_null(find_control(clbb_settings_panel(s),"hero.bindings.skill:3.key"));
     put(&p, "hero.id", "25");
     put(&p, "hero.name", "Кагура");
     clbb_settings_refresh(s);
     g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "W"));
-    g_assert(write_value(&p, "hero.bindings.extra:2.override", "true"));
     g_assert(write_value(&p, "hero.bindings.extra:2.key", "86"));
     clbb_settings_refresh(s);
     g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "V"));
@@ -340,7 +399,6 @@ int main(int argc, char **argv) {
     g_assert_cmpint(gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(distance_spin)), ==, 200);
     const char *stops[] = {"hero.bindings.skill:0.stop_movement",
                            "hero.bindings.skill:1.stop_movement",
-                           "hero.bindings.skill:1:2521.stop_movement",
                            "hero.bindings.skill:2.stop_movement",
                            "common.bindings.extra:2.stop_movement",
                            "hero.bindings.extra:2.stop_movement"};
@@ -358,12 +416,12 @@ int main(int argc, char **argv) {
         find_control(window, "common.bindings.extra:0.stop_movement"));
     g_assert_null(
         find_control(window, "common.bindings.shop:quick.stop_movement"));
-    g_assert(write_value(&p, "hero.bindings.extra:2.override", "false"));
+    g_assert(write_value(&p, "hero.bindings.extra:2.stop_movement.override", "false"));
     clbb_settings_refresh(s);
     GtkWidget *spell_stop =
         find_type(find_control(window, "hero.bindings.extra:2.stop_movement"),
                   GTK_TYPE_SWITCH);
-    g_assert_false(gtk_widget_get_sensitive(spell_stop));
+    g_assert_true(gtk_widget_get_sensitive(spell_stop));
     GtkWidget *presets = find_control(window, "display.preset");
     GtkWidget *width = find_control(window, "display.width");
     GtkWidget *height = find_control(window, "display.height");
@@ -496,7 +554,7 @@ int main(int argc, char **argv) {
     g_assert_nonnull(find_control(window, "hero.bindings.combo:1.key"));
     g_assert_null(find_control(window, "hero.bindings.combo:0.cast_mode"));
     g_assert_null(find_control(window, "hero.bindings.combo:1.cast_mode"));
-    g_assert_null(find_control(window, "hero.bindings.skill:0.cast_mode"));
+    g_assert_nonnull(find_control(window, "hero.bindings.skill:0.cast_mode"));
     g_assert_nonnull(find_control(window, "hero.bindings.skill:1.cast_mode"));
     g_assert_null(find_control(window, "hero.bindings.skill:2.key"));
     g_assert(write_value(&p, "hero.bindings.combo:0.key", "88"));
@@ -519,6 +577,11 @@ int main(int argc, char **argv) {
         gtk_list_box_select_row(
             GTK_LIST_BOX(nav),
             gtk_list_box_get_row_at_index(GTK_LIST_BOX(nav), n));
+    if (expand_first) {
+      GtkWidget *row=find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key");
+      GtkWidget *reveal=gtk_widget_get_ancestor(row,GTK_TYPE_REVEALER);
+      gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(gtk_widget_get_parent(reveal))),TRUE);
+    }
     g_signal_connect(clbb_settings_panel(s), "notify::visible",
                      G_CALLBACK(visible_changed), &p);
     gtk_window_present(preview);

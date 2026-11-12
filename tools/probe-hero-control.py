@@ -353,7 +353,8 @@ def run(args, report: dict):
         raise RuntimeError("Requested key overlaps a host settings/fullscreen/cursor shortcut")
     movement_ms = 0
     if args.movement:
-        if int(probe.command("read movement.button")) != 0x02000002:
+        effective_movement=probe.command("read hero.movement.button")
+        if int(effective_movement or probe.command("read movement.button")) != 0x02000002:
             raise RuntimeError("--movement requires the existing movement binding to be RMB")
         movement_ms = bounded_int(40, 600)(probe.command("read movement.hold_ms")) + 25
     report["initial_checks"] = {"expected_hero": True, "contacts_empty": True, "mapper_ready": True}

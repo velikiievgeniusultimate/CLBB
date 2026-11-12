@@ -7139,10 +7139,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..9f3dafc
+index 0000000..c92e46e
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1097 @@
+@@ -0,0 +1,1098 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7561,7 +7561,8 @@ index 0000000..9f3dafc
 +            guint b = gdk_button_event_get_button(event);
 +            if (b == 1)
 +                return FALSE;
-+            code = b == 3 ? 2 : b == 2 ? 4 : (int)b;
++            code = clbb_settings_mousecode(b);
++            if (code) code &= ~0x02000000;
 +        }
 +        GtkWidget *game = game_surface(GTK_WIDGET(h->window));
 +        if (!game)

@@ -17,6 +17,9 @@ typedef struct ClbbSettings ClbbSettings;
  * name (default CLBB), status (read-only runtime status)
  * diagnostics.source_ms (read-only sample duration, in milliseconds)
  * movement.button (Qt-style key/mouse code; default 0x02000002 = RMB)
+ * hero.movement.<field> / .override: optional per-hero movement field; unchanged
+ * fields inherit movement.<field>. Fields: button, click_mode, hold_ms,
+ * click_distance_percent. Hero changes reapply the effective movement values.
  * movement.click_mode (0 straight, 1 navigation), movement.hold_ms (40..600)
  * audio.volume (0..100), audio.muted
  * display.width / display.height (read-only current sizes, 256..8192)
@@ -42,7 +45,14 @@ typedef struct ClbbSettings ClbbSettings;
  * extra:0 (recall), extra:1 (regen), extra:2 (battle spell), extra:3;
  * attack, attack:minion, attack:tower, shop:quick, upgrade:0..3.
  * An unset key is "0". Duplicate hero bindings are permitted.
- * Global slots have a per-hero override switch; disabled means common value.
+ * hero.bindings.<slot>.<field>.override: per-field boolean. Editing a personal
+ * field enables its override; writing false resets that field to the common
+ * value. Unchanged neighboring fields continue inheriting common edits.
+ * hero.controls: read-only, current owned native UI layout; empty outside a
+ * fresh match. Header: 1 TAB heroId LF. Rows: native slot TAB config slot TAB
+ * mode-config slot TAB base skill ID TAB current skill ID TAB type LF.
+ * Only currently present active native buttons are listed; cooldown does not
+ * itself remove a button. The Hero page is built from this bounded layout.
  * LMB (0x02000001) must always be rejected by the settings owner.
  * .cast_mode is not offered for attack, upgrade, shop, recall or regeneration.
  */
@@ -64,6 +74,11 @@ GtkWidget *clbb_settings_panel(ClbbSettings *settings);
 void clbb_settings_destroy(ClbbSettings *settings);
 /* Also used by the native input adapter. Returns 0 for an unsupported key. */
 gint clbb_settings_keycode(guint keyval);
+/* Stable binding code for a GDK button; preserves existing Qt mouse masks.
+ * GDK2/3 -> middle/right; GDK8..29 -> legacy one-bit masks. Other buttons
+ * 4..7,30..65535 use 0x03000000|GDKbutton. Primary LMB remains unbindable.
+ * Both capture and native gameplay delivery must use this same conversion. */
+gint clbb_settings_mousecode(guint button);
 gint clbb_settings_chord(gint code, GdkModifierType state);
 G_END_DECLS
 #endif

@@ -1,6 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![recursion_limit="512"]
 pub mod aim;
+mod hero_names;
 mod control_audit;
 mod target_contacts;
 mod target_cancel_geometry;

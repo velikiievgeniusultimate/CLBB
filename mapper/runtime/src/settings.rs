@@ -46,7 +46,29 @@ impl Settings {
             }
             let _ = s.save();
         }
+        if s.migrate_field_inheritance() { let _ = s.save(); }
         s
+    }
+    fn migrate_field_inheritance(&mut self) -> bool {
+        if self.values.contains_key("migration.field_inheritance") { return false; }
+        let saved = self.values.clone();
+        for (key, _) in &saved {
+            if !key.starts_with("heroes.") { continue; }
+            if let Some((base, tail)) = key.split_once(".bindings.") {
+                if let Some((slot, field)) = tail.rsplit_once('.') {
+                    if !matches!(field, "key" | "cast_mode" | "stop_movement") { continue; }
+                    let parent = if slot == "extra:2:20080" { "extra:2" } else { slot };
+                    let explicit = native_skill_slot(slot) || slot.starts_with("combo:") || saved.get(&format!("{base}.bindings.{parent}.override")).is_some_and(|v|matches!(v.as_str(),"true"|"1"));
+                    self.values.insert(format!("{key}.override"), explicit.to_string());
+                }
+            } else if key.contains(".movement.") && [".button",".click_mode",".hold_ms",".click_distance_percent"].iter().any(|f|key.ends_with(f)) {
+                self.values.insert(format!("{key}.override"), "true".into());
+            } else if key.ends_with(".cancel_key") {
+                self.values.insert(format!("{key}.override"), "true".into());
+            }
+        }
+        self.values.insert("migration.field_inheritance".into(), "1".into());
+        true
     }
     fn import_resolution(&mut self, raw: &str) {
         let last_width = raw
@@ -133,12 +155,31 @@ impl Settings {
         if key == "enabled" { return "true".into(); }
         if let Some(tail) = key.strip_prefix("hero.bindings.") {
             if let Some((slot, field)) = tail.rsplit_once('.') {
-                if !(slot.starts_with("skill:") || slot.starts_with("combo:"))
-                    && field != "override"
-                    && !self.boolean(&format!("hero.bindings.{}.override", if slot == "extra:2:20080" { "extra:2" } else { slot }), hero)
-                {
-                    return self.get(&format!("common.bindings.{slot}.{field}"), hero);
+                if matches!(field, "key" | "cast_mode" | "stop_movement") {
+                    let canonical = Self::canonical(key, hero);
+                    let parent = if slot == "extra:2:20080" { "extra:2" } else { slot };
+                    let legacy = (native_skill_slot(slot) || slot.starts_with("combo:") || self.values.get(&Self::canonical(&format!("hero.bindings.{parent}.override"),hero)).is_some_and(|v|matches!(v.as_str(),"true"|"1"))) && self.values.contains_key(&canonical);
+                    let explicit = self.values.get(&format!("{canonical}.override")).map(|v|matches!(v.as_str(),"true"|"1")).unwrap_or(legacy);
+                    if !explicit { return self.get(&format!("common.bindings.{tail}"),hero); }
                 }
+            }
+        }
+        if let Some(field)=key.strip_prefix("hero.movement.").filter(|f|!f.ends_with(".override")) {
+            let name=Self::canonical(key,hero);
+            let explicit=self.values.get(&format!("{name}.override")).map(|v|matches!(v.as_str(),"true"|"1")).unwrap_or(self.values.contains_key(&name));
+            if !explicit {return self.get(&format!("movement.{field}"),hero);}
+        }
+        if key == "hero.cancel_key" {
+            let name=Self::canonical(key,hero);
+            let explicit=self.values.get(&format!("{name}.override")).map(|v|matches!(v.as_str(),"true"|"1")).unwrap_or(self.values.contains_key(&name));
+            if !explicit { return self.get("common.cancel_key",hero); }
+        }
+        // A form-specific personal binding inherits the shared button role.
+        // Preserve explicitly stored legacy form-wide values when present.
+        if let Some(field)=key.strip_prefix("common.bindings.skill:1:2521.") {
+            let base=format!("common.bindings.skill:1.{field}");
+            if !self.values.contains_key(key) {
+                if let Some(value)=self.values.get(&base) {return value.clone();}
             }
         }
         if key == "display.fps_limit" {
@@ -199,7 +240,8 @@ impl Settings {
             "hotkeys.settings" => F7.to_string(),
             "hotkeys.confine" => F12.to_string(),
             "hotkeys.fullscreen" => F11.to_string(),
-            "hero.cancel_key" => "84".into(),
+            "hero.cancel_key" | "common.cancel_key" => "84".into(),
+            "hero.cancel_key.override" => "false".into(),
             _ => self.binding_default(key, hero),
         };
         value
@@ -214,7 +256,7 @@ impl Settings {
         if field == "override" {
             return "false".into();
         }
-        if scope == "hero" && !(slot.starts_with("skill:") || slot.starts_with("combo:")) {
+        if scope == "hero" {
             return self.get(&format!("common.bindings.{slot}.{field}"), hero);
         }
         if field == "stop_movement" {
@@ -222,7 +264,7 @@ impl Settings {
         }
         if field == "cast_mode" {
             if slot == "extra:2:20080" { return "1".into(); }
-            if scope == "hero" && slot != "skill:1:2521" {
+            if matches!(scope, "hero" | "common") && slot != "skill:1:2521" {
                 if self.native_charge_slots.get(&hero).is_some_and(|slots| slots.contains(slot)) {
                     return "0".into();
                 }
@@ -305,9 +347,7 @@ impl Settings {
         matches!(self.get(key, hero).as_str(), "true" | "1")
     }
     pub fn binding(&self, hero: i32, slot: &str) -> clbb_moba_core::controller::host::Binding {
-        let personal = slot.starts_with("skill:") || slot.starts_with("combo:")
-            || self.boolean(&format!("hero.bindings.{slot}.override"), hero);
-        let prefix = if personal { "hero" } else { "common" };
+        let prefix = "hero";
         let key = |f| format!("{prefix}.bindings.{slot}.{f}");
         let code = self.integer(&key("key"), hero);
         let code = if valid_key(code) && !self.reserved(code, hero) {
@@ -361,9 +401,9 @@ impl Settings {
             "display.show_fps" | "audio.muted" | "debug.recording" | "debug.auto_marks" => matches!(value, "true" | "false" | "0" | "1"),
             "audio.input_device" | "audio.output_device" => !value.is_empty() && value.len() <= 255 && value.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.:-".contains(&b)),
             "audio.volume" | "audio.game_volume" | "audio.voice_volume" => integer.is_some_and(|v| (0..=100).contains(&v)),
-            "movement.click_mode" => matches!(value, "0" | "1"),
-            "movement.click_distance_percent" => integer.is_some_and(|v| (0..=500).contains(&v)),
-            "movement.hold_ms" => integer.is_some_and(|v| (40..=600).contains(&v)),
+            "movement.click_mode" | "hero.movement.click_mode" => matches!(value, "0" | "1"),
+            "movement.click_distance_percent" | "hero.movement.click_distance_percent" => integer.is_some_and(|v| (0..=500).contains(&v)),
+            "movement.hold_ms" | "hero.movement.hold_ms" => integer.is_some_and(|v| (40..=600).contains(&v)),
             "hotkeys.settings" | "hotkeys.confine" | "hotkeys.fullscreen" => {
                 integer.is_some_and(|v| {
                     valid_key(v)
@@ -378,7 +418,7 @@ impl Settings {
                 v==0 || (v>0 && v & !0x0fffffff==0 && valid_key(base) && base!=0
                     && (v & 0x0e000000!=0 || !["hotkeys.settings","hotkeys.confine","hotkeys.fullscreen"].iter().any(|key|self.integer(key,hero)==v)))
             }),
-            "hero.cancel_key" | "movement.button" => {
+            "hero.cancel_key" | "common.cancel_key" | "movement.button" | "hero.movement.button" => {
                 integer.is_some_and(|v| valid_key(v) && !self.reserved(v, hero))
             }
             _ if is_binding && key.ends_with(".key") => {
@@ -388,6 +428,8 @@ impl Settings {
                 matches!(value, "0" | "1" | "2" | "3")
             }
             _ if is_binding && key.ends_with(".cast_mode") => matches!(value, "0" | "1"),
+            _ if key.starts_with("hero.movement.")&&key.ends_with(".override") => matches!(value,"true"|"false"|"0"|"1"),
+            "hero.cancel_key.override" => matches!(value, "true" | "false" | "0" | "1"),
             _ if is_binding && (key.ends_with(".override") || key.ends_with(".stop_movement")) => {
                 matches!(value, "true" | "false" | "0" | "1")
             }
@@ -397,15 +439,21 @@ impl Settings {
             return Err("Недопустимое значение или занятая системная кнопка".into());
         }
         let name = Self::canonical(key, hero);
-        let old = self.values.insert(name.clone(), value.into());
-        if let Err(e) = self.save() {
-            if let Some(old) = old {
-                self.values.insert(name, old);
-            } else {
-                self.values.remove(&name);
-            }
-            return Err(e);
+        let before = self.values.clone();
+        self.values.insert(name.clone(), value.into());
+        if key == "hero.cancel_key" || (key.starts_with("hero.movement.")&&!key.ends_with(".override")) || (key.starts_with("hero.bindings.") && [".key", ".cast_mode", ".stop_movement"].iter().any(|f|key.ends_with(f))) {
+            self.values.insert(format!("{name}.override"), "true".into());
         }
+        // Keep older clients' whole-button override switch compatible. New UI
+        // writes per-field markers and never changes neighboring settings.
+        if let Some(tail) = key.strip_prefix("hero.bindings.").and_then(|k|k.strip_suffix(".override")) {
+            if !tail.contains('.') {
+                for field in ["key", "cast_mode", "stop_movement"] {
+                    self.values.insert(Self::canonical(&format!("hero.bindings.{tail}.{field}.override"),hero),value.into());
+                }
+            }
+        }
+        if let Err(e) = self.save() { self.values=before; return Err(e); }
         Ok(())
     }
     fn reserved(&self, key: i32, hero: i32) -> bool {
@@ -470,7 +518,11 @@ pub fn valid_key(key: i32) -> bool {
         || ((32..=126).contains(&key))
         || ((0x01000000..=0x010000ff).contains(&key)
             && ![0x01000020, 0x01000021, 0x01000022, 0x01000023].contains(&key))
-        || ((MOUSE | 2)..=(MOUSE | 31)).contains(&key)
+        || ((key & MOUSE) != 0 && {
+            let mask = key ^ MOUSE;
+            mask >= 2 && mask <= (1 << 24) && (mask as u32).is_power_of_two()
+        })
+        || ((key & !0xffff) == 0x03000000 && matches!(key & 0xffff, 4..=7 | 30..=65535))
 }
 pub fn tap_only(slot: &str) -> bool {
     slot.starts_with("attack")
@@ -768,7 +820,7 @@ mod tests {
         s.set("common.bindings.extra:2.key", "88", 25).unwrap();
         assert_eq!(s.binding(25, "extra:2").key, 88);
         s.set("hero.bindings.extra:2.key", "70", 25).unwrap();
-        assert_eq!(s.binding(25, "extra:2").key, 88);
+        assert_eq!(s.binding(25, "extra:2").key, 70);
         s.set("hero.bindings.extra:2.override", "true", 25).unwrap();
         assert_eq!(s.binding(25, "extra:2").key, 70);
         assert_eq!(s.binding(26, "extra:2").key, 88);
@@ -796,5 +848,109 @@ mod purify_settings_tests {
         s.values.insert("heroes.73.bindings.extra:2:20080.cast_mode".into(),"1".into());
         assert_eq!(s.integer("hero.bindings.extra:2:20080.cast_mode",73),1);
         assert_eq!(s.integer("hero.bindings.extra:2:20080.cast_mode",25),0);
+    }
+}
+
+#[cfg(test)]
+mod field_inheritance_tests {
+    use super::*;
+    #[test]
+    fn each_field_inherits_until_edited_and_resets_independently() {
+        let mut s=Settings::default();
+        s.set("common.bindings.skill:0.key","81",0).unwrap();
+        s.set("common.bindings.skill:0.cast_mode","0",0).unwrap();
+        s.set("hero.bindings.skill:0.key","88",73).unwrap();
+        s.set("common.bindings.skill:0.key","89",0).unwrap();
+        s.set("common.bindings.skill:0.cast_mode","1",0).unwrap();
+        assert_eq!(s.binding(73,"skill:0").key,88);
+        assert_eq!(s.binding(25,"skill:0").key,89);
+        assert_eq!(s.binding(73,"skill:0").cast_mode,1);
+        s.set("hero.bindings.skill:0.cast_mode","0",73).unwrap();
+        s.set("hero.bindings.skill:0.key.override","false",73).unwrap();
+        assert_eq!(s.binding(73,"skill:0").key,89);
+        assert_eq!(s.binding(73,"skill:0").cast_mode,0);
+        s.set("common.bindings.skill:0.key","90",0).unwrap();
+        assert_eq!(s.binding(73,"skill:0").key,90);
+        assert_eq!(s.binding(25,"skill:0").cast_mode,1);
+    }
+    #[test]
+    fn explicit_equal_value_is_still_personal_and_spells_cross_heroes() {
+        let mut s=Settings::default();
+        s.set("common.bindings.extra:2.key","70",0).unwrap();
+        s.set("hero.bindings.extra:2.key","70",73).unwrap();
+        s.set("common.bindings.extra:2.key","71",0).unwrap();
+        assert_eq!(s.binding(73,"extra:2").key,70);
+        assert_eq!(s.binding(25,"extra:2").key,71);
+        s.set("common.bindings.extra:2.cast_mode","3",0).unwrap();
+        assert_eq!(s.binding(73,"extra:2").cast_mode,3);
+        assert_eq!(s.binding(25,"extra:2").cast_mode,3);
+    }
+    #[test]
+    fn migration_preserves_active_legacy_choices_and_dormant_overrides() {
+        let mut s=Settings::default();
+        for (k,v) in [("common.bindings.extra:2.key","70"),("heroes.73.bindings.extra:2.key","71"),("heroes.73.bindings.extra:2.override","false"),("heroes.25.bindings.extra:2.key","72"),("heroes.25.bindings.extra:2.override","true"),("heroes.73.bindings.skill:0.key","90"),("heroes.73.cancel_key","85")] {s.values.insert(k.into(),v.into());}
+        assert!(s.migrate_field_inheritance());
+        assert_eq!(s.binding(73,"extra:2").key,70);
+        assert_eq!(s.binding(25,"extra:2").key,72);
+        assert_eq!(s.binding(73,"skill:0").key,90);
+        assert_eq!(s.integer("hero.cancel_key",73),85);
+        s.set("hero.bindings.skill:0.key.override","false",73).unwrap();
+        assert!(!s.migrate_field_inheritance());
+        assert_eq!(s.binding(73,"skill:0").key,81);
+    }
+    #[test]
+    fn failed_persistence_rolls_back_both_value_and_override_marker() {
+        let mut s=Settings::default();
+        let path=std::env::temp_dir().join(format!("clbb-inheritance-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::write(&path,b"not a directory").unwrap();s.path=path.join("settings.json");
+        let before=s.values.clone();
+        assert!(s.set("hero.bindings.extra:2.key","70",73).is_err());
+        assert_eq!(s.values,before);std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn all_os_mouse_buttons_roundtrip_and_non_buttons_are_rejected() {
+        for raw in 2..=255 {
+            let key=match raw {2=>MOUSE|4,3=>MOUSE|2,8..=29=>MOUSE|(1<<(raw-5)),_=>0x03000000|raw};
+            assert!(valid_key(key),"raw mouse {raw}");
+            assert_eq!(MOUSE|(key&!MOUSE),key);
+        }
+        for invalid in [MOUSE|1,MOUSE|3,MOUSE|6,0x03000001,0x03000002,0x03010000] {assert!(!valid_key(invalid),"{invalid:x}");}
+    }
+}
+
+#[cfg(test)]
+mod movement_inheritance_tests {
+    use super::*;
+    #[test]
+    fn movement_key_mode_distance_and_threshold_override_independently() {
+        let mut s=Settings::default();
+        s.set("hero.movement.button",&(MOUSE|32).to_string(),73).unwrap();
+        s.set("movement.click_mode","1",0).unwrap();
+        s.set("movement.click_distance_percent","200",0).unwrap();
+        assert_eq!(s.integer("hero.movement.button",73),MOUSE|32);
+        assert_eq!(s.integer("hero.movement.button",25),MOUSE|2);
+        assert_eq!(s.integer("hero.movement.click_mode",73),1);
+        assert_eq!(s.integer("hero.movement.click_distance_percent",73),200);
+        s.set("hero.movement.click_mode","0",73).unwrap();
+        s.set("hero.movement.hold_ms","300",73).unwrap();
+        s.set("movement.hold_ms","100",0).unwrap();
+        assert_eq!(s.integer("hero.movement.click_mode",73),0);
+        assert_eq!(s.integer("hero.movement.hold_ms",73),300);
+        assert_eq!(s.integer("hero.movement.hold_ms",25),100);
+        s.set("hero.movement.button.override","false",73).unwrap();
+        assert_eq!(s.integer("hero.movement.button",73),MOUSE|2);
+        assert_eq!(s.integer("hero.movement.hold_ms",73),300);
+    }
+    #[test]
+    fn common_second_skill_key_applies_to_untouched_umbrella_form() {
+        let mut s=Settings::default();
+        s.set("common.bindings.skill:1.key","88",0).unwrap();
+        s.set("common.bindings.skill:1.cast_mode","0",0).unwrap();
+        assert_eq!(s.binding(25,"skill:1:2521").key,88);
+        assert_eq!(s.binding(25,"skill:1:2521").cast_mode,0);
+        s.set("hero.bindings.skill:1:2521.key","87",25).unwrap();
+        s.set("common.bindings.skill:1.key","89",0).unwrap();
+        assert_eq!(s.binding(25,"skill:1:2521").key,87);
+        assert_eq!(s.binding(73,"skill:1").key,89);
     }
 }

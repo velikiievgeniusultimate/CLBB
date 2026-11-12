@@ -1,4 +1,5 @@
 //! Single-threaded controller, direct touch delivery and a read-only source worker.
+use crate::hero_names::hero_display_name;
 use crate::platform::linux::{ProcessMemory, now_ns};
 use crate::{
     navigation::NavMesh,
@@ -480,8 +481,7 @@ impl Host for Adapter {
             binding.aim_type=*sample.control_types.get(&button.slot).unwrap_or(&0);
         }
         if config == "extra:2" && button.skillId == 20080 {
-            let prefix = if self.settings.boolean("hero.bindings.extra:2.override", hero) { "hero" } else { "common" };
-            binding.cast_mode = self.settings.integer(&format!("{prefix}.bindings.extra:2:20080.cast_mode"), hero);
+            binding.cast_mode = self.settings.integer("hero.bindings.extra:2:20080.cast_mode", hero);
         }
         binding
     }
@@ -651,18 +651,22 @@ impl Runtime {
 
         self.input(Input::Trace(self.host.trace || recording));
         if recording {self.recorder.push(now_ns(),"settings",serde_json::json!({"values":self.host.settings.values}));}
-        self.input(Input::MovementMode(
-            self.host.settings.integer("movement.click_mode", 0),
-        ));
-        self.input(Input::MovementClickPercent(
-            self.host.settings.integer("movement.click_distance_percent", 0),
-        ));
-        self.input(Input::HoldThreshold(
-            self.host.settings.integer("movement.hold_ms", 0) as i64,
-        ));
+        let hero=self.host.fresh().map(|s|s.frame.hero_id.int()).unwrap_or(self.core.inspect().heroId_);
+        self.configure_movement(hero);
         self.input(Input::RefreshBindings);
         self.input(Input::Enabled(
             !self.suspended && self.host.settings.boolean("enabled", 0),
+        ));
+    }
+    fn configure_movement(&mut self, hero:i32) {
+        self.input(Input::MovementMode(
+            self.host.settings.integer("hero.movement.click_mode", hero),
+        ));
+        self.input(Input::MovementClickPercent(
+            self.host.settings.integer("hero.movement.click_distance_percent", hero),
+        ));
+        self.input(Input::HoldThreshold(
+            self.host.settings.integer("hero.movement.hold_ms", hero) as i64,
         ));
     }
     fn poll(&mut self, width: f64, height: f64) {
@@ -681,7 +685,9 @@ impl Runtime {
             }
             let view = sample.frame.view_matrix.values.map(|v| v.value);
             self.host.inverse = projection::inverse_product(&sample.projection, &view);
+            let hero_changed=self.host.sample.as_ref().map(|old|old.frame.hero_id.int())!=Some(sample.frame.hero_id.int());
             self.host.sample = Some(sample.clone());
+            if hero_changed {self.configure_movement(sample.frame.hero_id.int());}
             if self.host.fresh().is_some() {
                 self.host.settings.observe_native_templates(sample.frame.hero_id.int(), &sample.control_types);
                 self.host.settings.observe_native_holds(sample.frame.hero_id.int(), &sample.control_holds);
@@ -933,7 +939,7 @@ impl Runtime {
         } else {
             code
         };
-        if key == self.host.settings.integer("movement.button", 0) {
+        if key == self.host.settings.integer("hero.movement.button", self.core.inspect().heroId_) {
             self.debug_route_reason="movement_binding";
             return self.input(Input::Mouse {
                 button: 2,
@@ -975,13 +981,36 @@ impl Runtime {
             repeat,
         })
     }
+    fn hero_controls(&self) -> String {
+        let Some(sample) = self.host.fresh().filter(|s|s.frame.ready.get()&&s.frame.hero_id.int()>0&&s.frame.ui.ready.get()&&s.frame.ui.hero_id.int()==s.frame.hero_id.int()) else { return String::new(); };
+        let hero=sample.frame.hero_id.int();
+        let mut text=format!("1\t{hero}\n");
+        let mut seen=std::collections::BTreeSet::new();
+        let linked=sample.linked.is_some();
+        for b in sample.frame.ui.buttons.iter().take(sample.frame.ui.button_count.min(32) as usize)
+            .chain(sample.frame.ui.capability_controls.iter().take(sample.frame.ui.capability_count.min(32) as usize)) {
+            if !matches!(b.kind.as_str(),"skill"|"extra"|"attack"|"upgrade"|"quick_buy") || !b.active.get() || !b.press_uv.valid() || !seen.insert(b.slot.as_str()) {continue;}
+            let slot=b.slot.as_str();
+            if linked && matches!(slot,"skill:2"|"skill:3") {continue;}
+            let variant=sample.frame.skill_state.buttons.iter().take(sample.frame.skill_state.count.min(32) as usize)
+                .find(|v|v.slot.as_str()==slot&&v.base_skill_id.int()==b.skill_id.int()).map(|v|v.active_skill_id.int()).filter(|v|*v>0).unwrap_or(b.skill_id.int());
+            let config=if hero==25 && slot=="skill:1" && variant==2521 {"skill:1:2521"}else{slot};
+            let kind=sample.control_types.get(slot).copied().unwrap_or(0);
+            let mode_config=if slot=="extra:2"&&b.skill_id.int()==20080 {"extra:2:20080"}else{config};
+            text.push_str(&format!("{slot}\t{config}\t{mode_config}\t{}\t{variant}\t{kind}\n",b.skill_id.int()));
+        }
+        if linked {
+            for n in 0..2 {text.push_str(&format!("combo:{n}\tcombo:{n}\tcombo:{n}\t0\t0\t1\n"));}
+        }
+        text
+    }
     fn read(&mut self, key: &str) -> *const c_char {
         if self.host.fresh().is_none() { self.host.settings.clear_native_holds(); }
         let view = self.core.inspect();
         let hero = view.heroId_;
         let v=match key {
             "audio.input_devices"|"audio.output_devices"|"audio.status"|"audio.capture_status"|"audio.playback_status"=>crate::audio::read(key),
-            "hero.id"=>hero.to_string(),"hero.name"=>if hero==25{"Кагура".into()}else if hero>0{format!("Герой {hero}")}else{"Вне матча".into()},
+            "hero.id"=>hero.to_string(),"hero.name"=>hero_display_name(hero),
             "status"|"diagnostics.status"=>if !self.error.is_empty(){self.error.clone()}else if !self.host.settings.boolean("enabled",0){"Управление CLBB выключено".into()}else if self.host.fresh().is_none(){"Ожидаю матч и кнопки героя".into()}else if self.suspended{"Профиль готов · управление приостановлено".into()}else{view.status_.owned()},
             "diagnostics.controller"=>self.controller_diagnostics(&view).to_string(),
             "diagnostics.input"=>self.input_diagnostics(&view).to_string(),
@@ -1040,6 +1069,7 @@ impl Runtime {
                     "capability_controls": sample.frame.ui.capability_controls.iter().take(sample.frame.ui.capability_count.min(32) as usize).map(native).collect::<Vec<_>>(),
                 }).to_string()
             }).unwrap_or_else(|| "{\"ready\":false}".into()),
+            "hero.controls"=>self.hero_controls(),
             "common.battle_spell_id"=>self.host.fresh().and_then(|s|s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize).find(|b|b.kind.as_str()=="extra"&&b.slot.as_str()=="extra:2")).map(|b|b.skill_id.int()).unwrap_or(0).to_string(),
             "hero.linked_controls"=>if self.host.fresh().is_some_and(|s|s.linked.is_some()) {"1".into()}else{"0".into()},
             "hero.skill0_type"|"hero.skill1_type"|"hero.skill2_type"|"hero.skill3_type"=>{
@@ -1297,6 +1327,27 @@ mod tests {
             aim: None, direction_visual: None,
             control_types: BTreeMap::from([("skill:2".into(), kind)]), control_holds: BTreeMap::new(), linked: None,
         }
+    }
+    #[test]
+    fn hero_controls_exposes_only_fresh_present_buttons_and_current_forms() {
+        let mut events=Vec::new();let mut r=fixture(&mut events);
+        assert!(r.hero_controls().is_empty());
+        let mut sample=template_sample(73,2,now_ns());
+        r.host.sample=Some(Arc::new(sample.clone()));
+        let layout=r.hero_controls();assert!(layout.starts_with("1\t73\n"));
+        assert!(layout.contains("skill:2\tskill:2\tskill:2\t7330\t7330\t2"));
+        assert!(!layout.contains("skill:3"));assert!(!layout.contains("extra:3"));
+        sample.frame.ui.hero_id=crate::source::number(25.);
+        r.host.sample=Some(Arc::new(sample.clone()));assert!(r.hero_controls().is_empty());
+        sample.frame.ui.hero_id=crate::source::number(73.);
+        sample.frame.ui.ready=crate::source::flag(false);
+        r.host.sample=Some(Arc::new(sample.clone()));assert!(r.hero_controls().is_empty());
+        sample.frame.ui.ready=crate::source::flag(true);
+        sample.frame.ui.buttons[0].active=crate::source::flag(false);
+        r.host.sample=Some(Arc::new(sample.clone()));assert_eq!(r.hero_controls(),"1\t73\n");
+        sample.frame.ui.buttons[0].active=crate::source::flag(true);
+        sample.frame.time_ns=crate::source::number((now_ns()-300_000_000)as f64);
+        r.host.sample=Some(Arc::new(sample));assert!(r.hero_controls().is_empty());
     }
     #[test]
     fn polling_installs_native_defaults_before_core_binding_and_menu_reads() {
