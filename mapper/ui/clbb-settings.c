@@ -767,7 +767,7 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
     char **v=g_strsplit(lines[n],"\t",7);
     if (g_strv_length(v)==6&&valid_action(v[0])&&valid_action(v[1])&&
         (!strcmp(v[0],v[1])||(g_str_has_prefix(v[0],"skill:")&&g_str_has_prefix(v[1],v[0])&&v[1][strlen(v[0])]==':'))&&
-        (!strcmp(v[1],v[2])||(!strcmp(v[0],"extra:2")&&((atoi(v[3])==20080&&!strcmp(v[2],"extra:2:20080"))||(atoi(v[3])==20030&&!strcmp(v[2],"extra:2:20030")))))&&!g_hash_table_contains(seen,v[0])) {
+        (!strcmp(v[1],v[2])||(!strcmp(v[0],"extra:2")&&((atoi(v[3])==20080&&!strcmp(v[2],"extra:2:20080"))||(atoi(v[3])==20030&&!strcmp(v[2],"extra:2:20030"))||(atoi(v[3])==20190&&!strcmp(v[2],"extra:2:20190")))))&&!g_hash_table_contains(seen,v[0])) {
       g_hash_table_add(seen,g_strdup(v[0]));
       int type=CLAMP(atoi(v[5]),0,4);any=TRUE;can_cancel|=g_str_has_prefix(v[0],"skill:")||g_str_has_prefix(v[0],"combo:")||g_str_has_prefix(v[0],"extra:");
       if (g_str_has_prefix(v[0],"attack")) {
@@ -1460,7 +1460,7 @@ void clbb_settings_refresh(ClbbSettings *s) {
     case CONTROL_MODE:
       if (c->battle_spell_mode) {
         int spell_id=read_int(s,"common.battle_spell_id",0);
-        gboolean plain = spell_id==20080 || spell_id==20030;
+        gboolean plain = spell_id==20080 || spell_id==20030 || spell_id==20190;
         if (plain != c->plain_spell_mode) {
           const char *const plain_modes[] = {"При отпускании", "Моментальное нажатие", NULL};
           const char *const aimed_modes[] = {"Моментальное прожатие", "Обычный навык", "Моментальный с наведением", "Прожатие с удержанием", NULL};

@@ -134,7 +134,7 @@ fn additional_direction_template(motion:&str,package:&str,rect:i32,params:&[f64]
     let shape=match package {
         "IndicatorPackage_TwoPartAndPos_Direction" if matches!(rect,1|2)=>11.,
         "IndicatorPackage_Multi_JianTou" if rect==0=>7.,
-        "IndicatorPackage_TwoPart_Direction" if rect==19=>6.,
+        "IndicatorPackage_TwoPart_Direction" if matches!(rect,1|19)=>6.,
         _=>return false,
     };
     motion=="IndicatorMotionRot" && params.len()>=2 && params[0]==shape
@@ -634,7 +634,7 @@ impl MotionPlan {
         // Verified shared self-use buttons have no aiming indicator. Their
         // base pair is not a missing Range plan: validate config identity and
         // reciprocal native owners before publishing Tap, on every hero.
-        if matches!(skill,20010|20030|20080) && mc.name == "IndicatorMotionBase" && pc.name == "IndicatorPackageBase" {
+        if matches!(skill,20010|20030|20080|20190) && mc.name == "IndicatorMotionBase" && pc.name == "IndicatorPackageBase" {
             let config = owner(r, comp, "m_Config", &mut checks)?;
             let config_class = r.pointer(config)?;
             checks.push((config, config_class.to_le_bytes().to_vec()));
@@ -1511,7 +1511,7 @@ mod tests {
             assert!(!additional_direction_template(pair.0,pair.1,1,&[11.,4.1]));
         }
         assert_eq!(native_template(m,p),None,"class names alone do not authorize this direction family");
-        for(package,rect,shape)in [("IndicatorPackage_Multi_JianTou",0,7.),("IndicatorPackage_TwoPart_Direction",19,6.)] {
+        for(package,rect,shape)in [("IndicatorPackage_Multi_JianTou",0,7.),("IndicatorPackage_TwoPart_Direction",19,6.),("IndicatorPackage_TwoPart_Direction",1,6.)] {
             assert!(additional_direction_template(m,package,rect,&[shape,5.2]));
             assert!(!additional_direction_template(m,package,rect+1,&[shape,5.2]));
             assert!(!additional_direction_template(m,package,rect,&[11.,5.2]));
@@ -1616,7 +1616,7 @@ mod tests {
             let mut r=additional_direction_fixture();r.memory.0.borrow_mut()[1056..1060].copy_from_slice(&skill.to_le_bytes());
             assert!(additional_direction_contract(&mut r,128,skill,m,p,&mut Vec::new()).is_err());
         }
-        for(package,rect,shape)in [("IndicatorPackage_Multi_JianTou",0i32,7f32),("IndicatorPackage_TwoPart_Direction",19,6.)] {
+        for(package,rect,shape)in [("IndicatorPackage_Multi_JianTou",0i32,7f32),("IndicatorPackage_TwoPart_Direction",19,6.),("IndicatorPackage_TwoPart_Direction",1,6.)] {
             let mut r=additional_direction_fixture();
             r.memory.0.borrow_mut()[1060..1064].copy_from_slice(&rect.to_le_bytes());
             r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&shape.to_le_bytes());
@@ -1751,7 +1751,7 @@ mod tests {
     }
     #[test]
     fn inspire_and_regen_are_owner_checked_taps_without_an_aim_plan() {
-        for skill in [20010i32,20030] {
+        for skill in [20010i32,20030,20190] {
             let mut r=purify_fixture();
             {let mut b=r.memory.0.borrow_mut();for at in [552,2576] {b[at..at+4].copy_from_slice(&skill.to_le_bytes());}}
             assert_eq!(MotionPlan::discover_behavior(&mut r,128,skill).unwrap().1,1);

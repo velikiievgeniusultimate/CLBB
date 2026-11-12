@@ -652,6 +652,14 @@ int main(int argc, char **argv) {
     g_assert_cmpstr(read_value(&p,"common.bindings.extra:2.cast_mode"),==,"3");
     g_hash_table_remove(p.values,"preview.controls");put(&p,"hero.id","25");clbb_settings_refresh(s);
     g_print("CLBB_INSPIRE_PLAIN_BUTTON_UI_OK two modes independent of aimed battle spells\n");
+    put(&p,"hero.id","127");put(&p,"common.battle_spell_id","20190");
+    put(&p,"preview.controls","1\t127\nextra:2\textra:2\textra:2:20190\t20190\t20190\t1\n");
+    clbb_settings_refresh(s);
+    GtkWidget *vengeance_mode=find_type(find_control(window,"common.bindings.extra:2:20190.cast_mode"),GTK_TYPE_DROP_DOWN);
+    g_assert_nonnull(vengeance_mode);
+    g_assert_cmpuint(g_list_model_get_n_items(gtk_drop_down_get_model(GTK_DROP_DOWN(vengeance_mode))),==,2);
+    g_print("CLBB_VENGEANCE_PLAIN_BUTTON_UI_OK separate two-mode spell\n");
+
     g_print("CLBB_SETTINGS_SELFTEST_OK key normalization, reserved LMB, hotkey "
             "conflicts, refresh, hero switch, overrides, stop movement, "
             "atomic display apply, preserved draft, atomic FPS VSync, "
