@@ -602,6 +602,7 @@ fn linked_geometry(frame: &clbb_moba_core::controller::snapshot::Frame, endpoint
 pub struct Runtime {
     updates: crate::updater::Updates,
     gestures: crate::linked_gesture::Gestures,
+    portrait: crate::portrait_gesture::Picker,
     core: Controller,
     host: Adapter,
     worker: Worker,
@@ -627,7 +628,7 @@ impl Runtime {
         let mut v = Self {
             updates:crate::updater::Updates::new(),
             recorder: recorder.clone(), debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0, debug_route_reason:"initial", debug_full_state_at:0, debug_state_key:(0,-1,0,0),
-            gestures: Default::default(),
+            gestures: Default::default(), portrait:Default::default(),
             core: Controller::new(),
             host: Adapter {
                 settings,
@@ -666,7 +667,7 @@ impl Runtime {
         }
         if matches!(&event,Input::Release|Input::Invalid(_)|Input::Enabled(false)) {
             if Host::abort_all_touches(&mut self.host) {
-                self.gestures.forget_after_native_reset();
+                self.gestures.forget_after_native_reset();self.portrait.reset();
             } else {
                 self.gestures.reset_after_failed_native_abort(&mut self.host);
             }
@@ -677,7 +678,7 @@ impl Runtime {
     }
     fn reconcile_native_reset(&mut self) {
         if self.last_reset_generation!=self.host.reset_generation {
-            self.gestures.forget_after_native_reset();
+            self.gestures.forget_after_native_reset();self.portrait.reset();
             self.last_reset_generation=self.host.reset_generation;
         }
     }
@@ -807,6 +808,7 @@ impl Runtime {
             }
         });
         self.gestures.poll(&mut self.host,sample.as_ref().map(|s|s.frame.token.as_str()).unwrap_or(""),sample.as_ref().and_then(|s|s.linked.as_ref()),sample.as_ref().map(|s|s.frame.skill_id.int()).unwrap_or(0),sample.as_ref().map(|s|s.frame.skill_state.sample_start_ns.value as i64).unwrap_or(0),now,cancel_feedback);
+        self.portrait.poll(&mut self.host,sample.as_ref().map(|s|s.frame.token.as_str()).unwrap_or(""),sample.as_ref().and_then(|s|s.portrait.as_ref()),sample.as_ref().map(|s|s.frame.time_ns.value as i64).unwrap_or(0),now);
         self.reconcile_native_reset();
         self.debug_observe();
     }
@@ -937,7 +939,7 @@ impl Runtime {
             self.debug_state_key=state_key;self.debug_full_state_at=now;
             self.recorder.push(now,"controller_state",v.encode());
         }
-        self.recorder.push(now,"controller",serde_json::json!({"render":crate::render_metrics::snapshot(),"queue":{"depth":v.queue_depth,"front_slot":v.queue_front_slot.as_str(),"front_key":v.queue_front_key,"front_held":v.queue_front_held},"cast":{"key":v.skillKey_,"held":v.skillKeyHeld_,"mode":v.skillCastMode_,"start_ns":v.castStartedNs_,"previous_end_ns":v.lastSkillEndNs_,"sample_start_ns":v.frameCoreSampleStartNs_,"touch_sequence":v.touchSequence_,"transport_sequence":v.verifiedTransportSequence_,"cancel_pending":v.skillCancelPending_,"cancel_ack":v.skillCancelAcknowledged_,"binding_variant":v.skillBindingVariant_,"cooldown_variant":v.skillCooldownVariant_},"input":self.input_diagnostics(&v),"aim":self.aim_diagnostics(&v),"contacts":self.host.touches.iter().enumerate().filter_map(|(i,v)|v.then_some(i)).collect::<Vec<_>>(),"linked_gestures":self.gestures.active,"linked_ignored":self.gestures.ignored_keys() }));
+        self.recorder.push(now,"controller",serde_json::json!({"render":crate::render_metrics::snapshot(),"queue":{"depth":v.queue_depth,"front_slot":v.queue_front_slot.as_str(),"front_key":v.queue_front_key,"front_held":v.queue_front_held},"cast":{"key":v.skillKey_,"held":v.skillKeyHeld_,"mode":v.skillCastMode_,"start_ns":v.castStartedNs_,"previous_end_ns":v.lastSkillEndNs_,"sample_start_ns":v.frameCoreSampleStartNs_,"touch_sequence":v.touchSequence_,"transport_sequence":v.verifiedTransportSequence_,"cancel_pending":v.skillCancelPending_,"cancel_ack":v.skillCancelAcknowledged_,"binding_variant":v.skillBindingVariant_,"cooldown_variant":v.skillCooldownVariant_},"input":self.input_diagnostics(&v),"aim":self.aim_diagnostics(&v),"contacts":self.host.touches.iter().enumerate().filter_map(|(i,v)|v.then_some(i)).collect::<Vec<_>>(),"portrait_picker":self.portrait,"native_portrait_picker":self.host.fresh().and_then(|s|s.portrait.as_ref()),"linked_gestures":self.gestures.active,"linked_ignored":self.gestures.ignored_keys() }));
         if v.pendingRelease_!=0 { if self.debug_pending_since==0 {self.debug_pending_since=now;} }
         else {self.debug_pending_since=0;}
         let delta=v.direct.clamped_world(v.traceDesired_)-v.logicalObserved_;
@@ -971,7 +973,7 @@ impl Runtime {
             self.debug_pointer_at=now_ns();self.recorder.push(self.debug_pointer_at,"input_event",serde_json::json!({"kind":kind,"code":code,"down":down,"repeat":repeat,"pointer":[p.x,p.y]}));
         }
         if kind == 0 {
-            self.debug_route_reason="pointer";
+            self.debug_route_reason="pointer";self.portrait.pointer=p;
             if !self.suspended {
                 self.input(Input::Pointer(p));
             }
@@ -1000,6 +1002,23 @@ impl Runtime {
         if active_match && key!=0 && self.host.conflicts.contains_key(&key) && down {
             self.debug_route_reason="conflicting_binding_disabled";
             return true;
+        }
+        if self.portrait.contains(key){
+            self.debug_route_reason="portrait_held_key";
+            if !down&&!repeat{self.portrait.pointer=p;self.portrait.release(key,now_ns());}return true;
+        }
+        if down&&!repeat&&key!=0&&key==self.host.settings.integer("hero.cancel_key",hero){self.portrait.cancel(now_ns());}
+        if down&&!repeat&&active_match {
+            if let Some(sample)=self.host.sample.clone(){if let Some(o)=&sample.portrait {
+                if key!=0&&key==self.host.settings.binding(hero,&o.slot).key {
+                    let button=sample.frame.ui.buttons.iter().take(sample.frame.ui.button_count.min(32)as usize).find(|b|b.slot.as_str()==o.slot&&b.active.get()&&b.press_uv.valid());
+                    if let Some(button)=button.filter(|_|sample.frame.hero_screen_uv.valid()) {
+                        let v=sample.frame.hero_screen_uv.values;let b=button.press_uv.values;
+                        self.debug_route_reason="native_portrait_picker";
+                        return self.portrait.begin(&mut self.host,key,sample.frame.token.as_str(),o,Point::new(v[0].value,v[1].value),Point::new(b[0].value,b[1].value),p,now_ns());
+                    }
+                }
+            }}
         }
         let keyboard=self.host.settings.integer("hero.movement.click_mode",hero)==2;
         if keyboard && (active_match || !down) {
@@ -1094,6 +1113,9 @@ impl Runtime {
             "status"|"diagnostics.status"=>if !self.error.is_empty(){self.error.clone()}else if !self.host.settings.boolean("enabled",0){"Управление CLBB выключено".into()}else if self.host.fresh().is_none(){"Ожидаю матч и кнопки героя".into()}else if self.suspended{"Профиль готов · управление приостановлено".into()}else{view.status_.owned()},
             "diagnostics.controller"=>self.controller_diagnostics(&view).to_string(),
             "diagnostics.input"=>self.input_diagnostics(&view).to_string(),
+            "portrait.overlay"=>if !self.suspended&&self.host.fresh().and_then(|s|s.portrait.as_ref()).is_some(){self.portrait.overlay()}else{String::new()},
+            "portrait.visible"=>self.portrait.held.is_some().to_string(),
+            "diagnostics.portrait"=>serde_json::json!({"gesture":self.portrait,"native":self.host.fresh().and_then(|s|s.portrait.as_ref())}).to_string(),
             "diagnostics.aim"=>self.aim_diagnostics(&view).to_string(),
             "diagnostics.cancel"=>self.cancel_diagnostics(&view).to_string(),
             "diagnostics.native_frame"=>self.host.fresh().map(|sample| {
@@ -1341,7 +1363,7 @@ mod tests {
         let recorder=Recorder::new();
         Runtime {
             updates:crate::updater::Updates::new(),
-            gestures: Default::default(),
+            gestures: Default::default(), portrait:Default::default(),
             core: Controller::new(),
             host: Adapter {
                 settings: Settings::default(),
@@ -1407,7 +1429,7 @@ mod tests {
             plan_revision: 1, game_clock_ms: 1, match_owners: [1, 2, 3, 4], frame,
             projection: [0.; 16], logic: [0.; 2], indicator: 0,
             aim: None, direction_visual: None,
-            control_types: BTreeMap::from([("skill:2".into(), kind)]), control_holds: BTreeMap::new(), linked: None,
+            control_types: BTreeMap::from([("skill:2".into(), kind)]), control_holds: BTreeMap::new(), linked: None, portrait:None,
         }
     }
     #[test]

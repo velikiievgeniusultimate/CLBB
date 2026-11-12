@@ -11,46 +11,53 @@ pub struct Path {
 }
 impl Path {
     pub fn new<M: Memory>(r: &mut Reflection<M>, object: u64, component: bool) -> Result<Self> {
+        fn add(p:u64,n:u64)->Result<u64>{p.checked_add(n).ok_or("Native transform address overflow".into())}
         if object == 0 {
             return Err("Native transform is absent".into());
         }
         let cached = r.field(object, "m_CachedPtr")?;
         let mut native = r.pointer(cached)?;
+        if native == 0 || native > u64::MAX - 4096 {
+            return Err("Native transform is destroyed or invalid".into());
+        }
         let mut checks = vec![(cached, native.to_le_bytes().to_vec())];
         if component {
-            let owner = native + 48;
+            let owner = add(native, 48)?;
             native = r.pointer(owner)?;
+            if native == 0 || native > u64::MAX - 4096 {
+                return Err("Native transform owner is destroyed or invalid".into());
+            }
             checks.push((owner, native.to_le_bytes().to_vec()));
         }
-        let components = r.pointer(native + 48)?;
-        let transform = r.pointer(components + 8)?;
-        if r.pointer(transform + 48)? != native {
+        let components = r.pointer(add(native, 48)?)?;
+        let transform = r.pointer(add(components, 8)?)?;
+        if r.pointer(add(transform, 48)?)? != native {
             return Err("Transform has a different native owner".into());
         }
-        let hierarchy = r.pointer(transform + 56)?;
-        let mut index = r.integer(transform + 64)? as u32;
-        let raw = r.read(hierarchy + 24, 16)?;
+        let hierarchy = r.pointer(add(transform, 56)?)?;
+        let mut index = r.integer(add(transform, 64)?)? as u32;
+        let raw = r.read(add(hierarchy, 24)?, 16)?;
         let trs = u64_at(&raw, 0);
         let parents = u64_at(&raw, 8);
         for (address, value) in [
-            (native + 48, components),
-            (components + 8, transform),
-            (transform + 48, native),
-            (transform + 56, hierarchy),
+            (add(native, 48)?, components),
+            (add(components, 8)?, transform),
+            (add(transform, 48)?, native),
+            (add(transform, 56)?, hierarchy),
         ] {
             checks.push((address, value.to_le_bytes().to_vec()));
         }
-        checks.push((transform + 64, index.to_le_bytes().to_vec()));
-        checks.push((hierarchy + 24, raw));
+        checks.push((add(transform, 64)?, index.to_le_bytes().to_vec()));
+        checks.push((add(hierarchy, 24)?, raw));
         let mut transforms = Vec::new();
         let mut seen = std::collections::HashSet::new();
         while index != u32::MAX {
             if index > 65536 || !seen.insert(index) || seen.len() > 128 {
                 return Err("Invalid native transform hierarchy".into());
             }
-            transforms.push(trs + index as u64 * 48);
-            let parent = r.read(parents + index as u64 * 4, 4)?;
-            checks.push((parents + index as u64 * 4, parent.clone()));
+            transforms.push(add(trs,index as u64 * 48)?);
+            let parent = r.read(add(parents,index as u64 * 4)?, 4)?;
+            checks.push((add(parents,index as u64 * 4)?, parent.clone()));
             index = i32_at(&parent, 0) as u32;
         }
         if transforms.is_empty() {

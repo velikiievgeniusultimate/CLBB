@@ -6,6 +6,8 @@ mod control_audit;
 mod target_contacts;
 mod target_cancel_geometry;
 mod target_selection;
+pub mod portrait_picker;
+mod portrait_gesture;
 pub mod linked_gesture;
 pub mod math;
 pub mod navigation;

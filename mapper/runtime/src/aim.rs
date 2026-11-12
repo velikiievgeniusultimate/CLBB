@@ -460,6 +460,29 @@ impl MotionPlan {
         Ok((checks,comp,motion,package,motion_class,package_class))
     }
     /// Names and field types only; unverified motion classes never become live plans.
+    pub fn audit_registry_schema<M: Memory>(r: &mut Reflection<M>, indicator:u64, skill:i32)->Result<serde_json::Value> {
+        let(checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
+        let mut schema=Vec::new();
+        for(role,obj)in[("comp",comp),("motion",motion),("package",package)] {
+            let mut class=r.pointer(obj)?;
+            for _ in 0..16 {
+                if class==0 {break;}
+                let c=r.class(class)?;let mut fs=Vec::new();
+                for(name,f)in &c.fields {
+                    let mut value=serde_json::Value::Null;
+                    if !f.is_static&&f.offset<=1_048_576 {
+                        let at=obj.checked_add(f.offset as u64).ok_or("Audit field overflow")?;
+                        if f.kind==18 {if let Ok(p)=r.pointer(at) {if p!=0 {value=serde_json::json!({"address":format!("{p:#x}"),"class":r.pointer(p).and_then(|k|r.class(k)).map(|k|k.name).ok()});}}}
+                    }
+                    fs.push(serde_json::json!({"name":name,"kind":f.kind,"static":f.is_static,"reference":value}));
+                }
+                fs.sort_by_key(|v|v["name"].as_str().unwrap_or("").to_owned());
+                schema.push(serde_json::json!({"role":role,"address":format!("{obj:#x}"),"class":c.name,"fields":fs}));class=c.parent;
+            }
+        }
+        check(r,&checks)?;
+        Ok(serde_json::json!({"skill":skill,"motion":mc.name,"package":pc.name,"schema":schema,"scope":"read-only registry topology; no production authorization"}))
+    }
     pub fn audit_registry_identity<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -> Result<serde_json::Value> {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;

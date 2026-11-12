@@ -259,6 +259,8 @@ pub struct UiPlan {
     pub optional: crate::optional_ui::OptionalUi,
     pub linked: Option<crate::control_audit::CurvePlan>,
     linked_retry: i64,
+    portrait: Option<crate::portrait_picker::Plan>,
+    portrait_retry: i64,
     last_choice_slot: String,
 }
 pub(crate) fn skill_button_class<M: Memory>(r: &mut Reflection<M>, class: &crate::reflection::Class) -> Result<bool> {
@@ -534,7 +536,7 @@ impl UiPlan {
         let optional = crate::optional_ui::OptionalUi::prepare(r, object, &objects, local_show)?;
         let linked=crate::control_audit::CurvePlan::discover(r,object,&buttons).ok();
         Ok(Self {
-            linked, linked_retry:0,last_choice_slot:String::new(),
+            linked, linked_retry:0,portrait:None,portrait_retry:0,last_choice_slot:String::new(),
             object,
             checks,
             objects,
@@ -850,6 +852,7 @@ pub struct Sample {
     /// Current coherent charge lifecycle observations; absence is unknown.
     pub control_holds: std::collections::BTreeMap<String, bool>,
     pub linked: Option<crate::linked_gesture::Observation>,
+    pub portrait: Option<crate::portrait_picker::Observation>,
 }
 struct Plan {
     checks: Checks,
@@ -946,6 +949,7 @@ impl MatchEpoch {
 }
 pub struct Source<M: Memory> {
     pub reflection: Reflection<M>,
+    pub portrait_error: String,
     plan: Option<Plan>,
     pub token: String,
     generation: u64,
@@ -956,7 +960,7 @@ pub struct Source<M: Memory> {
 impl<M: Memory> Source<M> {
     pub fn new(memory: M, token: String) -> Result<Self> {
         Ok(Self {
-            reflection: Reflection::new(memory)?,
+            reflection: Reflection::new(memory)?,portrait_error:String::new(),
             plan: None,
             token,
             generation: 0,
@@ -1693,6 +1697,17 @@ impl<M: Memory> Source<M> {
             if let Some(unit)=query {frame.direction_input.direction_xz=v2(unit);frame.direction_input.source=text("KeySkilleCheckMesh.currentDirect");}
             else {frame.direction_input.ready=flag(false);}
         }
+        let portrait = if hero==104 {
+            if plan.ui.portrait.as_ref().is_some_and(|p|p.validate(r).is_err()){plan.ui.portrait=None;plan.ui.portrait_retry=0;}
+            if plan.ui.portrait.is_none() && now>=plan.ui.portrait_retry {
+                plan.ui.portrait=match crate::portrait_picker::Plan::discover(r,plan.ui.object,&plan.ui.buttons,plan.match_owners[2]){Ok(p)=>Some(p),Err(e)=>{self.portrait_error=e;None}};
+                plan.ui.portrait_retry=now.saturating_add(100_000_000);
+            }
+            let checkpoint=consumed.len();
+            let observed=plan.ui.portrait.as_ref().and_then(|p|match p.sample(r,plan.ui.matrix,frame.ui.active_slot.as_str(),&mut consumed){Ok(o)=>{self.portrait_error.clear();Some(o)},Err(e)=>{self.portrait_error=e;None}});
+            if observed.is_none(){consumed.truncate(checkpoint);}
+            observed
+        } else {None};
         check(r, &consumed)
             .map_err(|_| "Camera/actor/UI/native feedback changed during sample".to_string())?;
         let end = now.saturating_add(phase.elapsed().as_nanos().min(i64::MAX as u128) as i64);
@@ -1713,7 +1728,7 @@ impl<M: Memory> Source<M> {
             direction_visual,
             control_types,
             control_holds,
-            linked,
+            linked, portrait,
         })
     }
 }

@@ -134,20 +134,44 @@ fn run()->Result<()> {
             queue.push_back((*object,name,0usize));
         }
     }
+    if let Some(filter) = &filter {
+        if let Some(hex) = filter.strip_prefix("0x") {
+            let object = u64::from_str_radix(hex,16).map_err(|_|"Invalid diagnostic object")?;
+            queue.clear(); queue.push_back((object,"diagnostic_object".into(),0usize));
+        }
+    }
     let mut seen=BTreeSet::new();let mut objects=Vec::new();
     while let Some((object,path,depth))=queue.pop_front() {
         if seen.len()>=768||started.elapsed()>Duration::from_secs(8){break;}
         if object==0||!seen.insert(object){continue;}
         let Ok((name,fields))=schema(&mut r,object) else{continue};
+        let metadata=fields.iter().map(|(name,f)|json!({"name":name,"kind":f.kind,"offset":f.offset,"static":f.is_static})).collect::<Vec<_>>();
         let mut values=serde_json::Map::new();
         let geometry=widget(&mut r,object);
         let button_geometry=button_widget(&mut r,object);
         for (key,field) in fields {
-            if field.is_static||field.offset>65536||(!interesting(&key)&&depth>0){continue;}
+            if field.is_static||field.offset>65536{continue;}
             let address=object+field.offset;
             if matches!(field.kind,14|18|21|29){
                 let Ok(child)=r.pointer(address) else{continue};
                 if child==0 {continue;}
+                if field.kind == 29 {
+                    if let Ok(header) = r.read(child,32) {
+                        let count=clbb_mapper::reflection::u64_at(&header,24);
+                        let class=clbb_mapper::reflection::u64_at(&header,0);
+                        let array_name=r.read(class,24).ok().and_then(|v|r.cstring(clbb_mapper::reflection::u64_at(&v,16)).ok());
+                        values.insert(key.clone(),json!({"array":array_name,"object":child,"count":count}));
+                        if count<=32 && depth<5 {
+                            if let Ok(raw)=r.read(child+32,count as usize*8) {
+                                for (i,v) in raw.chunks_exact(8).enumerate() {
+                                    let item=clbb_mapper::reflection::u64_at(v,0);
+                                    if item!=0 {queue.push_back((item,format!("{path}.{key}[{i}]"),depth+1));}
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let Ok(child_class)=r.class(r.pointer(child).unwrap_or(0)) else{continue};
                 if child_class.name=="String" {
                     if let Ok(text)=managed_string(&mut r,child){values.insert(key,json!(text));}
@@ -162,9 +186,9 @@ fn run()->Result<()> {
                         queue.push_back((child,format!("{path}.{key}"),depth+1));
                     }
                 }
-            } else if field.kind==8&&interesting(&key) {
+            } else if matches!(field.kind,8|9) {
                 if let Ok(v)=r.integer(address){values.insert(key,json!(v));}
-            } else if field.kind==2&&["active","enable","show","visible","choose","select"].iter().any(|part|key.to_ascii_lowercase().contains(part)) {
+            } else if field.kind==2 {
                 if let Ok(raw)=r.read(address,1){if raw[0]<=1{values.insert(key,json!(raw[0]==1));}}
             }
         }
@@ -173,7 +197,7 @@ fn run()->Result<()> {
             let position=Path::new(&mut r,object,component).ok()?.position(&r).ok()?;
             math::project(view,projection,position,false)
         });
-        objects.push(json!({"path":path,"object":object,"class":name,"values":values,"widget":geometry,"button_widget":button_geometry,"anchor_uv":anchor}));
+        objects.push(json!({"path":path,"object":object,"class":name,"fields":metadata,"values":values,"widget":geometry,"button_widget":button_geometry,"anchor_uv":anchor}));
     }
     if birth(pid)?!=initial_birth||std::fs::read_link(format!("/proc/{pid}/exe")).map_err(|e|e.to_string())?!=executable{return Err("runtime identity changed".into());}
     let topology_unchanged=r.pointer(at)?==list&&r.list(list)?==frames;

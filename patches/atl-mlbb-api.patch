@@ -2080,18 +2080,20 @@ index 560084b..f1d378b 100644
  	gtk_widget_insert_before(GTK_WIDGET(popover), decor_view, NULL);
  	gtk_popover_present(popover);
 diff --git a/src/api-impl-jni/widgets/android_view_SurfaceView.c b/src/api-impl-jni/widgets/android_view_SurfaceView.c
-index 11b6564..cb3af29 100644
+index 11b6564..258e5ee 100644
 --- a/src/api-impl-jni/widgets/android_view_SurfaceView.c
 +++ b/src/api-impl-jni/widgets/android_view_SurfaceView.c
-@@ -1,4 +1,7 @@
+@@ -1,4 +1,9 @@
  #include <gtk/gtk.h>
 +#include <stdint.h>
++
++extern void clbb_portrait_overlay_host(GtkWidget *, GtkSnapshot *) __attribute__((weak));
 +
 +extern void clbb_render_frame_event_host(uint64_t, unsigned int, unsigned int, unsigned int, unsigned int) __attribute__((weak));
  
  #include "../defines.h"
  #include "../util.h"
-@@ -54,6 +57,13 @@ static void surface_view_widget_snapshot(GtkWidget *widget, GdkSnapshot *snapsho
+@@ -54,10 +59,19 @@ static void surface_view_widget_snapshot(GtkWidget *widget, GdkSnapshot *snapsho
  			gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(0, gtk_widget_get_height(widget)));
  			gtk_snapshot_scale(snapshot, 1, -1);
  		}
@@ -2105,7 +2107,13 @@ index 11b6564..cb3af29 100644
  		gtk_snapshot_append_texture(snapshot, surface_view_widget->texture, &bounds);
  		if (surface_view_widget->needs_flip)
  			gtk_snapshot_restore(snapshot);
-@@ -161,6 +171,8 @@ JNIEXPORT jlong JNICALL Java_android_view_SurfaceView_native_1constructor(JNIEnv
+ 	}
++	if (surface_view_widget->texture && clbb_portrait_overlay_host)
++		clbb_portrait_overlay_host(widget, snapshot);
+ 	if (surface_view_widget->frame_callback) {
+ 		surface_view_widget->frame_callback(surface_view_widget);
+ 		surface_view_widget->frame_callback = NULL;
+@@ -161,6 +175,8 @@ JNIEXPORT jlong JNICALL Java_android_view_SurfaceView_native_1constructor(JNIEnv
  	GtkWidget *dummy = surface_view_widget_new();
  	gtk_widget_set_name(dummy, "dummy widget for SurfaceView");
  	GtkWidget *graphics_offload = gtk_graphics_offload_new(dummy);
@@ -7139,10 +7147,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..7931b12
+index 0000000..ff415e4
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1115 @@
+@@ -0,0 +1,1157 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7252,6 +7260,7 @@ index 0000000..7931b12
 +    gint64 agent_until;
 +    gint64 fps_refresh_at;
 +    gboolean show_fps;
++    gboolean portrait_visible;
 +    char fps_text[32];
 +    GtkWidget *cursor_layer;
 +    GtkWidget *viewport;
@@ -7748,6 +7757,44 @@ index 0000000..7931b12
 +                            G_OBJECT(widget), G_CONNECT_AFTER);
 +}
 +
++/* Crop the original game texture on the GPU. No screen capture, image
++ * matching, CPU texture download, second window, or retained game artwork. */
++void clbb_portrait_overlay_host(GtkWidget *widget, GtkSnapshot *snapshot) {
++    GtkRoot *root=gtk_widget_get_root(widget);
++    if(!root || !GTK_IS_WINDOW(root))return;
++    ClbbHost *h=g_object_get_data(G_OBJECT(root),"clbb-mapper-attached");
++    if(!h || h->closing || clbb_settings_is_visible(h->settings) || game_surface(GTK_WIDGET(root))!=widget)return;
++    SurfaceViewWidget *surface=SURFACE_VIEW_WIDGET(widget);
++    if(!surface->texture)return;
++    const char *rows=h->read(h->runtime,"portrait.overlay");
++    double width=gtk_widget_get_width(widget),height=gtk_widget_get_height(widget);
++    for(int i=0;rows && *rows && i<5;i++) {
++        double sx,sy,sw,sh,dx,dy,dw,dh;int selected;
++        if(sscanf(rows,"%lf %lf %lf %lf %lf %lf %lf %lf %d",&sx,&sy,&sw,&sh,&dx,&dy,&dw,&dh,&selected)!=9)break;
++        gboolean valid=TRUE;double numbers[]={sx,sy,sw,sh,dx,dy,dw,dh};
++        for(unsigned int n=0;n<8;n++)if(!isfinite(numbers[n]) || numbers[n]<0 || numbers[n]>1)valid=FALSE;
++        if(valid && sw>0 && sh>0 && dw>0 && dh>0 && sx+sw<=1 && sy+sh<=1 && dx+dw<=1 && dy+dh<=1) {
++            graphene_rect_t dest=GRAPHENE_RECT_INIT(dx*width,dy*height,dw*width,dh*height);
++            GskRoundedRect clip;gsk_rounded_rect_init_from_rect(&clip,&dest,MIN(dest.size.width,dest.size.height)/2.0);
++            gtk_snapshot_push_rounded_clip(snapshot,&clip);
++            gtk_snapshot_save(snapshot);
++            gtk_snapshot_translate(snapshot,&GRAPHENE_POINT_INIT((dx-sx*dw/sw)*width,(dy-sy*dh/sh)*height));
++            gtk_snapshot_scale(snapshot,dw/sw,dh/sh);
++            if(surface->needs_flip) {
++                gtk_snapshot_translate(snapshot,&GRAPHENE_POINT_INIT(0,height));
++                gtk_snapshot_scale(snapshot,1,-1);
++            }
++            gtk_snapshot_append_texture(snapshot,surface->texture,&GRAPHENE_RECT_INIT(0,0,width,height));
++            gtk_snapshot_restore(snapshot);gtk_snapshot_pop(snapshot);
++            float borders[4]={2,2,2,2};
++            GdkRGBA color=selected ? (GdkRGBA){1.0,0.29,0.43,1.0} : (GdkRGBA){0.88,0.88,0.92,1.0};
++            GdkRGBA colors[4]={color,color,color,color};
++            gtk_snapshot_append_border(snapshot,&clip,borders,colors);
++        }
++        rows=strchr(rows,'\n');if(rows)rows++;
++    }
++}
++
 +static gboolean tick(gpointer data) {
 +    ClbbHost *h = data;
 +    if (h->closing)
@@ -7781,6 +7828,9 @@ index 0000000..7931b12
 +    h->poll(h->runtime, surface ? gtk_widget_get_width(surface) : 0,
 +            surface ? gtk_widget_get_height(surface) : 0);
 +    h->dispatching = FALSE;
++    gboolean portrait_visible=!strcmp(h->read(h->runtime,"portrait.visible"),"true");
++    if(surface && (portrait_visible || h->portrait_visible))gtk_widget_queue_draw(surface);
++    h->portrait_visible=portrait_visible;
 +    if (++h->ticks % 500 == 0 && clbb_settings_is_visible(h->settings))
 +        clbb_settings_refresh(h->settings);
 +    return G_SOURCE_CONTINUE;

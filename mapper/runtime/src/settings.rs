@@ -553,6 +553,7 @@ pub fn hold_duration_skill(hero: i32, slot: &str) -> bool {
     let base=variant_base(slot).unwrap_or(slot);
     (hero==126 && matches!(base,"skill:0"|"skill:1"|"skill:2"))
         || (hero==78 && base=="skill:0")
+        || (hero==104 && base=="skill:2")
 }
 pub fn valid_key(key: i32) -> bool {
     key == 0

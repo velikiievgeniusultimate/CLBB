@@ -11,7 +11,7 @@ use clbb_moba_core::controller::snapshot as s;
 use std::collections::HashMap;
 
 pub(crate) const SOURCE: &str = "UILockHeroSkill.UICamera.activeTouches";
-fn fields<M: Memory>(
+pub(crate) fn fields<M: Memory>(
     r: &mut Reflection<M>,
     checks: &mut Checks,
     object: u64,
@@ -37,7 +37,7 @@ fn fields<M: Memory>(
     }
     Ok((name, out))
 }
-fn address(
+pub(crate) fn address(
     object: u64,
     metadata: &HashMap<String, Field>,
     name: &str,
@@ -56,20 +56,20 @@ fn address(
         f.kind,
     ))
 }
-fn ptr<M: Memory>(r: &Reflection<M>, checks: &mut Checks, at: u64) -> Result<u64> {
+pub(crate) fn ptr<M: Memory>(r: &Reflection<M>, checks: &mut Checks, at: u64) -> Result<u64> {
     Ok(u64_at(&capture(r, checks, at, 8)?, 0))
 }
-fn int<M: Memory>(r: &Reflection<M>, checks: &mut Checks, at: u64) -> Result<i32> {
+pub(crate) fn int<M: Memory>(r: &Reflection<M>, checks: &mut Checks, at: u64) -> Result<i32> {
     Ok(i32_at(&capture(r, checks, at, 4)?, 0))
 }
-fn boolean<M: Memory>(r: &Reflection<M>, checks: &mut Checks, at: u64) -> Result<bool> {
+pub(crate) fn boolean<M: Memory>(r: &Reflection<M>, checks: &mut Checks, at: u64) -> Result<bool> {
     match capture(r, checks, at, 1)?[0] {
         0 => Ok(false),
         1 => Ok(true),
         _ => Err("target_invalid_bool".into()),
     }
 }
-fn guid<M: Memory>(r: &Reflection<M>, checks: &mut Checks, field: (u64, u8)) -> Result<u32> {
+pub(crate) fn guid<M: Memory>(r: &Reflection<M>, checks: &mut Checks, field: (u64, u8)) -> Result<u32> {
     let raw = capture(r, checks, field.0, 4)?;
     if field.1 == 8 && i32_at(&raw, 0) < 0 {
         return Err("target_negative_guid".into());
