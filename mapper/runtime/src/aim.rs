@@ -148,6 +148,14 @@ fn additional_direction_template(motion:&str,package:&str,rect:i32,params:&[f64]
     motion=="IndicatorMotionRot" && params.len()>=2 && params[0]==shape
         && params[1].is_finite() && params[1]>0. && params[1]<1e4
 }
+// Layla's measured ultimate uses the same unit-vector result as the existing
+// two-part arrows, but RectType2. Do not broaden that shared family: only this
+// observed skill/config tuple is admitted; distance is not an aiming radius.
+fn layla_ultimate_direction_template(skill:i32,motion:&str,package:&str,rect:i32,params:&[f64])->bool {
+    skill==1830 && motion=="IndicatorMotionRot" && package=="IndicatorPackage_TwoPart_Direction"
+        && rect==2 && params==[6.,16.]
+}
+
 fn native_range_shape(motion:&str,package:&str)->Option<f64> {
     match (motion,package) {
         ("IndicatorMotionRotAndPosRot"|"IndicatorMotionFaTiaoQiu2","IndicatorPackage_JianTou_Yuan")=>Some(8.),
@@ -307,7 +315,8 @@ fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     let config=u64_at(&capture(r,checks,config_at,8)?,0);
     typed_field(r,config,"m_ShowRectPara",29)?;
     let(rect,params)=native_rect_config(r,comp,skill,checks)?;
-    if !additional_direction_template(motion,package,rect,&params) {
+    if !additional_direction_template(motion,package,rect,&params)
+        && !layla_ultimate_direction_template(skill,motion,package,rect,&params) {
         return Err("Unverified additional direction configuration".into());
     }
     Ok(true)
@@ -1821,6 +1830,30 @@ mod tests {
         r.memory.0.borrow_mut()[1056..1060].copy_from_slice(&20080i32.to_le_bytes());
         assert!(check(&r,&checks).is_err());
         assert!(additional_direction_contract(&mut r,128,20140,m,p,&mut Vec::new()).is_err());
+    }
+    #[test]
+    fn layla_ultimate_rect2_is_exact_and_does_not_broaden_existing_family() {
+        let m="IndicatorMotionRot";let p="IndicatorPackage_TwoPart_Direction";
+        assert!(layla_ultimate_direction_template(1830,m,p,2,&[6.,16.]));
+        assert!(!additional_direction_template(m,p,2,&[6.,16.]));
+        for skill in [810,8430,20140,1831,1810,1823,0,-1] {
+            assert!(!layla_ultimate_direction_template(skill,m,p,2,&[6.,16.]));
+        }
+        for rect in [0,1,3,19] {assert!(!layla_ultimate_direction_template(1830,m,p,rect,&[6.,16.]));}
+        for params in [&[6.][..],&[6.,0.],&[6.,15.],&[7.,16.],&[6.,f64::NAN]] {
+            assert!(!layla_ultimate_direction_template(1830,m,p,2,params));
+        }
+        assert!(!layla_ultimate_direction_template(1830,"IndicatorMotionPos",p,2,&[6.,16.]));
+        assert!(!layla_ultimate_direction_template(1830,m,"IndicatorPackageEasy",2,&[6.,16.]));
+        let mut r=additional_direction_fixture();
+        for(at,value)in [(1056,1830i32),(1060,2)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        for(at,value)in [(1568,6f32),(1572,16.)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        let mut checks=Vec::new();
+        assert!(additional_direction_contract(&mut r,128,1830,m,p,&mut checks).unwrap());
+        assert_eq!(native_range_shape(m,p),None);
+        r.memory.0.borrow_mut()[1056..1060].copy_from_slice(&1831i32.to_le_bytes());
+        assert!(check(&r,&checks).is_err());
+        assert!(additional_direction_contract(&mut r,128,1830,m,p,&mut Vec::new()).is_err());
     }
     #[test]
     fn verified_additional_direction_uses_unit_receipt_independent_of_ratio() {

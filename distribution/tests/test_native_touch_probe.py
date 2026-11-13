@@ -58,6 +58,22 @@ def native_frame(now=10_000_000_000, hero=118, active=11810):
             "control_holds": {"skill:0": False}}
 
 
+class HeldCancelGeometryTests(unittest.TestCase):
+    def test_uses_current_held_widget_and_rejects_old_or_foreign_skill(self):
+        value = native_frame()
+        value["frame"]["ui"]["active_slot"] = text("skill:0")
+        value["frame"]["skill_id"] = number(11810)
+        value["frame"]["ui"]["cancel_uv"] = vector([.7, .3])
+        with mock.patch.object(nativeprobe.time, "monotonic_ns", return_value=10_000_000_000):
+            self.assertEqual(nativeprobe.held_cancel_point(value,118,"skill:0",11810,"owned-native:118"),[.7,.3])
+            for slot,skill in [("skill:1",11810),("skill:0",11820)]:
+                with self.assertRaises(RuntimeError):
+                    nativeprobe.held_cancel_point(value,118,slot,skill,"owned-native:118")
+            value["frame"]["ui"]["active_slot"] = {"present":0,"size":0,"value":""}
+            with self.assertRaises(RuntimeError):
+                nativeprobe.held_cancel_point(value,118,"skill:0",11810,"owned-native:118")
+
+
 class FakeClock:
     def __init__(self):
         self.now = 10.

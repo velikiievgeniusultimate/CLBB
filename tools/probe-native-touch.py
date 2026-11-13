@@ -232,6 +232,15 @@ def wait_natural_up(probe, report, deadline, not_before=None):
         wait_until(min(deadline, time.monotonic() + .025))
 
 
+def held_cancel_point(native, hero, slot, skill, epoch):
+    """A pre-DOWN cancel widget may retain another skill's old position."""
+    validate_native_button(native, hero, slot, skill, epoch=epoch)
+    frame = native["frame"]
+    if active_slot(frame["ui"]) != slot or number(frame["skill_id"]) != skill:
+        raise RuntimeError("Current native cancel geometry is not owned by the held skill")
+    return vector2(frame["ui"]["cancel_uv"])
+
+
 def run_input(args, report, probe):
     idle(probe, args.hero)
     initial = sample(probe, report, "preflight")
@@ -244,7 +253,8 @@ def run_input(args, report, probe):
         u, v = button["press"]
         moves = [[min(.98, u + .12), v], [u, min(.98, v + .12)],
                  [max(.02, u - .12), v], [u, max(.02, v - .12)]]
-    schedule = make_schedule(args.hold_ms, moves, args.cancel_uv)
+    native_cancel = getattr(args, "native_cancel", False)
+    schedule = make_schedule(args.hold_ms, moves, [0., 0.] if native_cancel else args.cancel_uv)
     report["native_button"], report["schedule"] = button, schedule
     attempted = False
     cleanup_deadline = None
@@ -278,6 +288,10 @@ def run_input(args, report, probe):
             expected_hero(probe, args.hero, deadline=hold_deadline)
             if probe.read("diagnostics.delivery", deadline=hold_deadline).get("raw_gesture_active") is not True:
                 raise RuntimeError("Native finger ended before the requested held MOVE")
+            if native_cancel and point["kind"] == "cancel":
+                fresh = probe.read("diagnostics.native_frame", deadline=hold_deadline)
+                point = {**point, "uv": held_cancel_point(fresh, args.hero, args.slot, args.skill, button["epoch"])}
+                report["held_cancel_geometry"] = {"sample": fresh, "uv": point["uv"]}
             start = time.monotonic_ns()
             reply = probe.command(f"move-held {point['uv'][0]:.12f} {point['uv'][1]:.12f}", deadline=hold_deadline)
             report.setdefault("move_receipts", []).append({**point, "index": index,
@@ -299,8 +313,8 @@ def run_input(args, report, probe):
             "all_requested_moves_acknowledged": len(report.get("move_receipts", [])) == len(schedule),
             "natural_up_observed": True,
             "native_up_dispatch_acknowledged": report.get("native_up_dispatch_acknowledged") is True,
-            "cancel_drag_requested": args.cancel_uv is not None,
-            "cancellation_result": "not_inferred_from_drag_or_exit_status" if args.cancel_uv is not None else None}
+            "cancel_drag_requested": native_cancel or args.cancel_uv is not None,
+            "cancellation_result": "not_inferred_from_drag_or_exit_status" if native_cancel or args.cancel_uv is not None else None}
     except (Exception, KeyboardInterrupt) as error:
         report["input_error"] = f"{type(error).__name__}: {error}"
         raise
@@ -366,11 +380,14 @@ def main(argv=None):
     parser.add_argument("--expected-pid", type=hero_probe.bounded_int(1, 0x7fffffff))
     parser.add_argument("--hold-ms", type=hero_probe.bounded_int(16, 5000), default=700)
     parser.add_argument("--moves", type=parse_moves, help="JSON UV waypoints; default4 offsets around the current native press")
+    parser.add_argument("--native-cancel", action="store_true", help="Read held skill cancellation geometry immediately before the final MOVE")
     parser.add_argument("--cancel-uv", type=float, nargs=2, help="Explicit final cancel drag point; never inferred automatically")
     parser.add_argument("--output-dir", type=Path, required=True, help="Must be a new directory")
     args = parser.parse_args(argv)
     if not args.slot or len(args.slot) > 64 or any(character.isspace() for character in args.slot):
         parser.error("Use one exact native slot of1..64 characters")
+    if args.native_cancel and args.cancel_uv is not None:
+        parser.error("Choose --native-cancel or --cancel-uv")
     if args.cancel_uv is not None and not finite_uv(args.cancel_uv):
         parser.error("--cancel-uv requires finite UV values in0..1")
     args.output_dir = args.output_dir.resolve()
@@ -381,7 +398,7 @@ def main(argv=None):
     report = {"format": "clbb-native-touch-probe", "version": 1, "status": "observation_only",
         "start_ns": time.monotonic_ns(), "commands": [], "samples": [],
         "request": {"hero": args.hero, "slot": args.slot, "skill": args.skill, "hold_ms": args.hold_ms,
-                    "moves": args.moves, "cancel_uv": args.cancel_uv},
+                    "moves": args.moves, "cancel_uv": args.cancel_uv, "native_cancel": args.native_cancel},
         "limits": "Raw baseline only. No mapper begin/end, movement, settings or hero changes. Native actor/registry receipts have independent read brackets. Exit0 does not prove application, accuracy or cancellation."}
     with (args.output_dir / "summary.json").open("x", encoding="utf-8") as output:
         try:
