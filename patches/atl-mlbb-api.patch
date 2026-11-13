@@ -1724,7 +1724,7 @@ index 7aa5fe4..50f09fd 100644
 +	atl_exec_restart();
 +}
 diff --git a/src/api-impl-jni/views/android_view_View.c b/src/api-impl-jni/views/android_view_View.c
-index 17c76b1..b430131 100644
+index 17c76b1..91958e0 100644
 --- a/src/api-impl-jni/views/android_view_View.c
 +++ b/src/api-impl-jni/views/android_view_View.c
 @@ -1,10 +1,12 @@
@@ -1740,7 +1740,15 @@ index 17c76b1..b430131 100644
  
  #include "../views/AndroidLayout.h"
  #include "../widgets/WrapperWidget.h"
-@@ -81,7 +83,7 @@ G_DEFINE_TYPE(JavaWidget, java_widget, GTK_TYPE_WIDGET)
+@@ -44,6 +46,7 @@ struct pointer {
+ };
+ 
+ GPtrArray *pointer_indices = NULL;
++int clbb_view_has_active_contacts(void) {return pointer_indices && pointer_indices->len>0;}
+ 
+ gpointer canceled_event = NULL;
+ WrapperWidget *cancel_triggerer = NULL;
+@@ -81,7 +84,7 @@ G_DEFINE_TYPE(JavaWidget, java_widget, GTK_TYPE_WIDGET)
  
  bool view_dispatch_motionevent(JNIEnv *env, WrapperWidget *wrapper, GtkPropagationPhase phase, jobject motion_event, gpointer event, int action)
  {
@@ -1749,7 +1757,7 @@ index 17c76b1..b430131 100644
  
  	jobject this = wrapper->jobj;
  	bool is_synthetic = event == motion_event;
-@@ -135,29 +137,79 @@ bool view_dispatch_motionevent(JNIEnv *env, WrapperWidget *wrapper, GtkPropagati
+@@ -135,29 +138,79 @@ bool view_dispatch_motionevent(JNIEnv *env, WrapperWidget *wrapper, GtkPropagati
  	if (action == ACTION_CANCEL)
  		ret = false;
  
@@ -1833,7 +1841,7 @@ index 17c76b1..b430131 100644
  
  	return ret;
  }
-@@ -188,6 +240,17 @@ static void transform_coords_to_widget_relative(GtkWidget *widget, double *x, do
+@@ -188,6 +241,17 @@ static void transform_coords_to_widget_relative(GtkWidget *widget, double *x, do
  	*y = p.y;
  }
  
@@ -1851,7 +1859,7 @@ index 17c76b1..b430131 100644
  void remove_pointer_fast(GPtrArray *pointer_indices, struct pointer *pointer)
  {
  	g_ptr_array_remove_index_fast(pointer_indices, pointer->index);
-@@ -200,6 +263,115 @@ void remove_pointer_fast(GPtrArray *pointer_indices, struct pointer *pointer)
+@@ -200,6 +264,115 @@ void remove_pointer_fast(GPtrArray *pointer_indices, struct pointer *pointer)
  	pointer->id = 0;
  }
  
@@ -1967,7 +1975,7 @@ index 17c76b1..b430131 100644
  static bool action_up_already_handled = false;
  
  // TODO: find a way to reconcile this with libandroid/input.c?
-@@ -232,14 +404,20 @@ static gboolean on_pointer_event(GtkEventControllerLegacy *event_controller, Gdk
+@@ -232,14 +405,20 @@ static gboolean on_pointer_event(GtkEventControllerLegacy *event_controller, Gdk
  
  	int action;
  	GdkEventType event_type = gdk_event_get_event_type(event);
@@ -1990,7 +1998,7 @@ index 17c76b1..b430131 100644
  			break;
  		case GDK_MOTION_NOTIFY:
  			if (!(gdk_event_get_modifier_state(event) & GDK_BUTTON1_MASK))
-@@ -266,6 +444,7 @@ static gboolean on_pointer_event(GtkEventControllerLegacy *event_controller, Gdk
+@@ -266,6 +445,7 @@ static gboolean on_pointer_event(GtkEventControllerLegacy *event_controller, Gdk
  	gdk_event_get_position(event, &raw_x, &raw_y);
  	x = raw_x, y = raw_y;
  	transform_coords_to_widget_relative(widget, &x, &y);
@@ -1998,7 +2006,7 @@ index 17c76b1..b430131 100644
  
  	if (!pointers[id].id) {
  		/* if this is a new sequence, add a slot for it */
-@@ -367,6 +546,7 @@ static gboolean scroll_cb(GtkEventControllerScroll *controller, gdouble dx, gdou
+@@ -367,6 +547,7 @@ static gboolean scroll_cb(GtkEventControllerScroll *controller, gdouble dx, gdou
  	hacky_get_cursor_position(widget, &raw_x, &raw_y);
  	x = raw_x, y = raw_y;
  	transform_coords_to_widget_relative(widget, &x, &y);
@@ -2006,7 +2014,7 @@ index 17c76b1..b430131 100644
  
  	if (scroll_unit == GDK_SCROLL_UNIT_SURFACE) {
  		dx /= MAGIC_SCROLL_FACTOR;
-@@ -896,6 +1076,8 @@ JNIEXPORT void JNICALL Java_android_view_View_nativeSetFullscreen(JNIEnv *env, j
+@@ -896,6 +1077,8 @@ JNIEXPORT void JNICALL Java_android_view_View_nativeSetFullscreen(JNIEnv *env, j
  {
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  	GtkWindow *window = GTK_WINDOW(gtk_widget_get_native(widget));
@@ -7147,10 +7155,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..4560db1
+index 0000000..a4422bd
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1249 @@
+@@ -0,0 +1,1419 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7172,9 +7180,12 @@ index 0000000..4560db1
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <unistd.h>
++#include <sys/stat.h>
++#include <string.h>
 +extern int clbb_view_touch(GtkWidget *, int, int, double, double);
 +extern const char *clbb_view_touch_status(void);
 +extern int clbb_view_cancel_mouse(GtkWidget *, int);
++extern int clbb_view_has_active_contacts(void);
 +typedef float (*ClbbGain)(void);
 +static _Atomic(ClbbGain) master_gain;
 +static _Atomic(ClbbGain) game_gain;
@@ -7234,6 +7245,17 @@ index 0000000..4560db1
 +    return gain ? gain() : clbb_master_gain();
 +}
 +typedef struct {
++    uint32_t abi,size,idle,recording;int32_t hero;uint32_t fresh;uint64_t owners[4];int64_t sample_ns;
++} ClbbReloadState;
++typedef struct {
++    uint64_t abi;
++    void (*configure)(const char*,const char*);size_t (*read)(const char*,unsigned char*,size_t);
++    void (*refresh)(void);float (*stream_gain)(void);
++} ClbbAudioServices;
++_Static_assert(sizeof(ClbbReloadState)==64,"Rust reload state ABI");
++_Static_assert(sizeof(ClbbAudioServices)==40,"Rust audio service ABI");
++typedef struct ClbbLiveModule ClbbLiveModule;
++typedef struct ClbbHost {
 +    GtkWindow *window;
 +    ClbbSettings *settings;
 +    void *library, *runtime;
@@ -7279,7 +7301,15 @@ index 0000000..4560db1
 +    unsigned raw_steps;
 +    guint raw_timer;
 +    int windowed_width, windowed_height;
++    void *boot_library;ClbbAudioServices audio_services;
++    int (*reload_state)(const void*,ClbbReloadState*);
++    ClbbReloadState reload_expected;
++    ClbbLiveModule *active_module,*pending_module;
++    GPtrArray *retired_modules;
++    gint64 reload_deadline;guint reload_generation;
++    char *live_path,*live_sha,*previous_path,*previous_sha,*reload_status;
 +} ClbbHost;
++static void live_reject(ClbbHost *h,const char *reason);
 +static GtkWidget *game_surface(GtkWidget *root) {
 +    GtkWidget *best = NULL;
 +    int area = 0;
@@ -7355,6 +7385,7 @@ index 0000000..4560db1
 +}
 +static gboolean write_setting(void *user, const char *key, const char *value) {
 +    ClbbHost *h = user;
++    if(h->pending_module)live_reject(h,"settings changed during staging");
 +    if (h->dispatching)
 +        return FALSE;
 +    if (!strcmp(key,"updates.open") && !strcmp(value,"1")) {
@@ -7882,12 +7913,142 @@ index 0000000..4560db1
 +    }
 +}
 +
++/* Hot reload is GTK-thread serialized. Retired libraries stay mapped: render,
++ * audio and TLS callbacks may still be returning through the previous image.
++ * Only opaque Runtime pointers cross this ABI; no Rust allocation is migrated. */
++#define CLBB_LIVE_ABI UINT64_C(0x434c424200010040)
++struct ClbbLiveModule {
++    ClbbHost *host;
++    void *library,*runtime;
++    void *(*create)(int (*)(void *,int,int,double,double),void *);
++    void (*destroy)(void *);void (*poll)(void *,double,double);
++    int (*event)(void *,int,int,int,int,double,double);
++    const char *(*read)(void *,const char *);
++    int (*write)(void *,const char *,const char *);
++    void (*suspend)(void *,int);int (*configure_pacing)(unsigned int,int);
++    int (*state)(const void *,ClbbReloadState *);
++    gboolean active,touch_attempted;
++    char *path,*sha;
++};
++static int live_touch(void *user,int edge,int finger,double x,double y) {
++    ClbbLiveModule *m=user;
++    if(!m->active){m->touch_attempted=TRUE;return 0;}
++    return touch(m->host,edge,finger,x,y);
++}
++static gboolean live_state(ClbbHost *h,ClbbReloadState *state) {
++    memset(state,0,sizeof(*state));
++    return h->reload_state && h->reload_state(h->runtime,state)==1 && state->abi==1 && state->size==64;
++}
++static gboolean live_quiet(ClbbHost *h,ClbbReloadState *state) {
++    return !h->closing && !h->dispatching && !h->raw_tap && !h->raw_timer &&
++        h->agent_until<=g_get_monotonic_time() && !g_hash_table_size(h->keys) && !g_hash_table_size(h->claimed) &&
++        !clbb_settings_is_capturing(h->settings) && !clbb_view_has_active_contacts() &&
++        live_state(h,state) && state->idle && !state->recording && (!state->hero || state->fresh);
++}
++static void live_route_callbacks(void *library) {
++#define ROUTE(field,type,symbol) atomic_store_explicit(&field,(type)dlsym(library,symbol),memory_order_release)
++    ROUTE(master_gain,ClbbGain,"clbb_audio_gain");ROUTE(game_gain,ClbbGain,"clbb_audio_game_gain");ROUTE(voice_gain,ClbbGain,"clbb_audio_voice_gain");
++    ROUTE(frame_wait,ClbbFrameWait,"clbb_frame_pacer_wait");ROUTE(frame_configuration,ClbbFrameConfiguration,"clbb_frame_pacer_configuration");
++    ROUTE(render_event,ClbbRenderEvent,"clbb_render_frame_event");
++    ROUTE(debug_enabled,ClbbDebugEnabled,"clbb_debug_recording");ROUTE(debug_motion,ClbbDebugMotion,"clbb_debug_motion");
++    ROUTE(debug_host_event,ClbbDebugHostEvent,"clbb_debug_host_event");ROUTE(debug_transport,ClbbDebugTransport,"clbb_debug_transport_status");
++#undef ROUTE
++}
++static void live_reject(ClbbHost *h,const char *reason) {
++    g_free(h->reload_status);h->reload_status=g_strdup(reason);
++    ClbbLiveModule *m=h->pending_module;h->pending_module=NULL;
++    if(m){if(m->runtime)m->destroy(m->runtime);m->runtime=NULL;g_ptr_array_add(h->retired_modules,m);}
++    fprintf(stderr,"[CLBB live mapper] rejected: %s\n",reason);
++}
++static gboolean live_same_match(const ClbbReloadState *a,const ClbbReloadState *b) {
++    if(!a->hero)return !b->hero;
++    return a->fresh && b->fresh && a->hero==b->hero && !memcmp(a->owners,b->owners,sizeof(a->owners));
++}
++static char *live_request(ClbbHost *h,const char *path,const char *expected_sha) {
++    ClbbReloadState before;
++    if(h->pending_module)return g_strdup("REJECTED reload already pending");
++    if(!live_quiet(h,&before))return g_strdup("REJECTED reload busy, recording, unsupported ABI or stale source");
++    if(!g_path_is_absolute(path)||strlen(expected_sha)!=64)return g_strdup("REJECTED reload path/hash");
++    for(unsigned n=0;n<64;n++)if(!g_ascii_isxdigit(expected_sha[n])||g_ascii_isupper(expected_sha[n]))return g_strdup("REJECTED reload hash");
++    struct stat st;
++    if(lstat(path,&st)||!S_ISREG(st.st_mode)||st.st_uid!=getuid()||(st.st_mode&022)||st.st_size<64||st.st_size>67108864)
++        return g_strdup("REJECTED reload file ownership/type/size");
++    gchar *bytes=NULL;gsize length=0;
++    if(!g_file_get_contents(path,&bytes,&length,NULL))return g_strdup("REJECTED reload unreadable");
++    char *actual=g_compute_checksum_for_data(G_CHECKSUM_SHA256,(guchar*)bytes,length);g_free(bytes);
++    if(strcmp(actual,expected_sha)){g_free(actual);return g_strdup("REJECTED reload checksum mismatch");}
++    if(h->live_sha && !strcmp(actual,h->live_sha)){g_free(actual);return g_strdup("OK reload unchanged");}
++    void *library=dlopen(path,RTLD_NOW|RTLD_LOCAL|RTLD_DEEPBIND|RTLD_NODELETE);
++    if(!library){g_free(actual);return g_strdup("REJECTED reload invalid library");}
++    uint64_t (*abi)(void)=dlsym(library,"clbb_mapper_abi");
++    if(!abi||abi()!=CLBB_LIVE_ABI){g_free(actual);return g_strdup("REJECTED reload incompatible ABI");}
++    ClbbLiveModule *m=g_new0(ClbbLiveModule,1);m->host=h;m->library=library;m->path=g_strdup(path);m->sha=actual;
++#define LIVE_LOAD(field,symbol) do{*(void**)(&m->field)=dlsym(library,symbol);if(!m->field)goto missing;}while(0)
++    LIVE_LOAD(create,"clbb_mapper_create");LIVE_LOAD(destroy,"clbb_mapper_destroy");LIVE_LOAD(poll,"clbb_mapper_poll");
++    LIVE_LOAD(event,"clbb_mapper_event");LIVE_LOAD(read,"clbb_mapper_read");LIVE_LOAD(write,"clbb_mapper_write");
++    LIVE_LOAD(suspend,"clbb_mapper_suspend");LIVE_LOAD(configure_pacing,"clbb_frame_pacer_configure");LIVE_LOAD(state,"clbb_mapper_reload_state");
++#undef LIVE_LOAD
++    const char *callbacks[]={"clbb_audio_gain","clbb_audio_game_gain","clbb_audio_voice_gain","clbb_frame_pacer_wait","clbb_frame_pacer_configuration","clbb_render_frame_event","clbb_debug_recording","clbb_debug_motion","clbb_debug_host_event","clbb_debug_transport_status",NULL};
++    for(unsigned n=0;callbacks[n];n++)if(!dlsym(library,callbacks[n]))goto missing;
++    if(library!=h->boot_library){
++        int (*install)(const ClbbAudioServices*)=dlsym(library,"clbb_mapper_install_audio_services");
++        if(!install||!install(&h->audio_services))goto missing;
++    }
++    m->runtime=m->create(live_touch,m);if(!m->runtime)goto missing;
++    m->suspend(m->runtime,1);
++    h->pending_module=m;h->reload_expected=before;h->reload_deadline=g_get_monotonic_time()+5000000;
++    g_free(h->reload_status);h->reload_status=g_strdup("staging");
++    return g_strdup("OK reload staged");
++missing:
++    if(m->runtime)m->destroy(m->runtime);
++    m->runtime=NULL;g_ptr_array_add(h->retired_modules,m);
++    return g_strdup("REJECTED reload missing/incompatible exports");
++}
++static void live_tick(ClbbHost *h) {
++    ClbbLiveModule *m=h->pending_module;if(!m)return;
++    ClbbReloadState old,current={0};
++    if(!live_quiet(h,&old)||!live_same_match(&h->reload_expected,&old)){live_reject(h,"input or match changed during staging");return;}
++    GtkWidget *surface=game_surface(GTK_WIDGET(h->window));
++    m->poll(m->runtime,surface?gtk_widget_get_width(surface):0,surface?gtk_widget_get_height(surface):0);
++    if(m->touch_attempted){live_reject(h,"candidate attempted input during staging");return;}
++    if(!m->state(m->runtime,&current)||current.abi!=1||current.size!=64||!current.idle||current.recording){live_reject(h,"candidate not quiescent");return;}
++    if(!live_same_match(&old,&current)){
++        if(g_get_monotonic_time()>h->reload_deadline)live_reject(h,"candidate did not establish the same current match");
++        return;
++    }
++    void *old_runtime=h->runtime;void(*old_destroy)(void*)=h->destroy;
++    h->suspend(old_runtime,1);
++    ClbbLiveModule *previous=h->active_module;if(previous)previous->active=FALSE;
++    g_free(h->previous_path);g_free(h->previous_sha);h->previous_path=h->live_path;h->previous_sha=h->live_sha;
++    h->live_path=g_strdup(m->path);h->live_sha=g_strdup(m->sha);h->library=m->library;h->runtime=m->runtime;
++    h->create=m->create;h->destroy=m->destroy;h->poll=m->poll;h->event=m->event;h->read=m->read;h->write=m->write;
++    h->suspend=m->suspend;h->configure_pacing=m->configure_pacing;h->reload_state=m->state;
++    h->active_module=m;h->pending_module=NULL;m->active=TRUE;
++    live_route_callbacks(m->library);apply_frame_pacing(h);
++    h->suspend(h->runtime,0);
++    h->event(h->runtime,0,0,0,0,h->x,h->y);
++    h->suspend(h->runtime,!gtk_window_is_active(h->window)||clbb_settings_is_visible(h->settings));
++    old_destroy(old_runtime);
++    if(previous){previous->runtime=NULL;g_ptr_array_add(h->retired_modules,previous);}
++    h->reload_generation++;g_free(h->reload_status);h->reload_status=g_strdup("committed");
++    clbb_settings_refresh(h->settings);
++    fprintf(stderr,"[CLBB live mapper] generation=%u sha256=%s committed\n",h->reload_generation,h->live_sha);
++}
++static char *live_diagnostics(ClbbHost *h) {
++    /* Paths/status are not interpolated: fixed statuses and hashes make the
++     * private response valid JSON even when a developer's home has quotes. */
++    return g_strdup_printf("{\"schema\":1,\"supported\":%s,\"generation\":%u,\"pending\":%s,\"status\":\"%s\",\"committed\":%s,\"sha256\":\"%s\",\"previous_sha256\":\"%s\",\"retained_modules\":%u}",
++        h->reload_state?"true":"false",h->reload_generation,h->pending_module?"true":"false",h->reload_status?h->reload_status:"unsupported",
++        h->reload_status&&!strcmp(h->reload_status,"committed")?"true":"false",h->live_sha?h->live_sha:"",h->previous_sha?h->previous_sha:"",h->retired_modules?h->retired_modules->len:0);
++}
++
 +static gboolean tick(gpointer data) {
 +    ClbbHost *h = data;
 +    if (h->closing)
 +        return G_SOURCE_REMOVE;
 +    if (h->dispatching)
 +        return G_SOURCE_CONTINUE;
++    live_tick(h);
 +    gint64 now=g_get_monotonic_time();
 +    if (now>=h->fps_refresh_at) {
 +        h->fps_refresh_at=now+250000;
@@ -8037,6 +8198,12 @@ index 0000000..4560db1
 +            static const char marker[]="[CLBB_EXIT] desktop_close\n";
 +            (void)write(STDERR_FILENO,marker,sizeof(marker)-1);
 +            _exit(0);
++        } else if (count==2 && !strcmp(args[0],"read") && !strcmp(args[1],"diagnostics.reload")) {
++            reply=live_diagnostics(h);
++        } else if (count==3 && !strcmp(args[0],"reload-mapper")) {
++            reply=live_request(h,args[1],args[2]);
++        } else if (count==1 && !strcmp(args[0],"rollback-mapper")) {
++            reply=h->previous_path&&h->previous_sha?live_request(h,h->previous_path,h->previous_sha):g_strdup("REJECTED no previous mapper");
 +        } else if (count == 2 && !strcmp(args[0],"read") && !strcmp(args[1],"diagnostics.portrait_render")) {
 +            unsigned images=0;for(unsigned k=0;k<5;k++)if(h->portraits[k].image)images++;
 +            reply=g_strdup_printf("{\"request_us\":%" G_GINT64_FORMAT ",\"first_snapshot_us\":%" G_GINT64_FORMAT ",\"cached_images\":%u,\"snapshot_copies\":%u,\"crop_size\":128}",h->portrait_request_us,h->portrait_snapshot_us,images,h->portrait_snapshot_count);
@@ -8338,6 +8505,17 @@ index 0000000..4560db1
 +    LOAD(configure_pacing, "clbb_frame_pacer_configure");
 +#undef LOAD
 +    h->runtime = h->create(touch, h);
++    h->boot_library=h->library;h->retired_modules=g_ptr_array_new();h->reload_status=g_strdup("initial");
++    uint64_t (*live_abi)(void)=dlsym(h->library,"clbb_mapper_abi");
++    int (*audio_services)(ClbbAudioServices*)=dlsym(h->library,"clbb_mapper_audio_services");
++    if(live_abi && live_abi()==CLBB_LIVE_ABI && audio_services && audio_services(&h->audio_services))
++        *(void**)(&h->reload_state)=dlsym(h->library,"clbb_mapper_reload_state");
++    Dl_info mapper_info;
++    if(dladdr((void*)h->create,&mapper_info)&&mapper_info.dli_fname){
++        h->live_path=g_canonicalize_filename(mapper_info.dli_fname,NULL);
++        gchar *bytes=NULL;gsize size=0;
++        if(g_file_get_contents(h->live_path,&bytes,&size,NULL)){h->live_sha=g_compute_checksum_for_data(G_CHECKSUM_SHA256,(guchar*)bytes,size);g_free(bytes);}
++    }
 +    atomic_store_explicit(&debug_transport,(ClbbDebugTransport)dlsym(h->library,"clbb_debug_transport_status"),memory_order_release);
 +    atomic_store_explicit(&debug_host_event,(ClbbDebugHostEvent)dlsym(h->library,"clbb_debug_host_event"),memory_order_release);
 +    atomic_store_explicit(&debug_enabled,(ClbbDebugEnabled)dlsym(h->library,"clbb_debug_recording"),memory_order_release);

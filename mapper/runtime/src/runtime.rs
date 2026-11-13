@@ -1160,6 +1160,7 @@ impl Runtime {
                 }).to_string()
             }).unwrap_or_else(|| "{}".into()),
             k if k.starts_with("updates.")=>self.updates.read(k),
+            "diagnostics.mapper_build"=>serde_json::json!({"abi":crate::live::ABI,"marker":option_env!("CLBB_MAPPER_BUILD_MARKER").unwrap_or("normal")}).to_string(),
             "diagnostics.fps"=>format!("{:.0}",crate::render_metrics::fps()),
             "diagnostics.render"=>crate::render_metrics::snapshot().to_string(),
             "diagnostics.direction_visual"=>self.host.fresh().map(|s|serde_json::json!({"spec":s.direction_visual,"origin":s.direction_origin,"hero":s.frame.hero_render_xyz.values.map(|v|v.value),"view":s.frame.view_matrix.values.map(|v|v.value),"projection":s.projection,"sample_start_ns":s.frame.direction_input.sample_start_ns.value,"sample_end_ns":s.frame.direction_input.sample_end_ns.value}).to_string()).unwrap_or_else(||"{}".into()),
@@ -1273,6 +1274,21 @@ impl Drop for Runtime {
         self.input(Input::Release);
         self.worker.stop.store(true, Ordering::Relaxed);
     }
+}
+// This snapshot observes controller ownership without suspending, cancelling,
+// serializing Rust objects or transferring their layout across module versions.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn clbb_mapper_reload_state(rt:*const Runtime,out:*mut crate::live::ReloadState)->i32 {
+    let(Some(rt),Some(out))=(unsafe{rt.as_ref()},unsafe{out.as_mut()})else{return 0};
+    let v=rt.core.inspect();let sample=rt.host.fresh();
+    *out=crate::live::ReloadState{abi:1,size:64,
+        idle:u32::from(!rt.host.touches.iter().any(|v|*v) && rt.gestures.active.is_empty() && rt.portrait.held.is_none()
+            && v.skillTouch_<0 && v.movementTouch_<0 && v.skillKeyHeld_==0 && v.movementHeld_==0
+            && v.movementPressed_==0 && v.pendingRelease_==0 && v.skillCancelPending_==0
+            && rt.host.timers.iter().all(Option::is_none)),
+        recording:u32::from(rt.recorder.is_enabled()),hero:rt.host.sample.as_ref().map(|s|s.frame.hero_id.int()).unwrap_or(0),
+        fresh:u32::from(sample.is_some()),owners:rt.host.sample.as_ref().map(|s|s.match_owners).unwrap_or([0;4]),
+        sample_ns:sample.map(|s|s.frame.time_ns.value as i64).unwrap_or(0)};1
 }
 // Pointers below are created and retained by the native GTK adapter. Dispatch is
 // GTK-thread only; it excludes reentry while a synchronous touch callback runs.
@@ -1421,6 +1437,35 @@ mod tests {
             error: String::new(),
             recorder, debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0, debug_route_reason:"initial", debug_full_state_at:0, debug_state_key:(0,-1,0,0),
         }
+    }
+    #[test]
+    fn live_state_reports_quiescence_without_releasing_or_writing_input() {
+        let mut events=Vec::new();let mut runtime=fixture(&mut events);
+        let mut state=crate::live::ReloadState::default();
+        assert_eq!(unsafe{clbb_mapper_reload_state(&runtime,&mut state)},1);
+        assert_eq!((state.abi,state.size,state.idle,state.recording),(1,64,1,0));
+        runtime.host.touches[4]=true;
+        assert_eq!(unsafe{clbb_mapper_reload_state(&runtime,&mut state)},1);assert_eq!(state.idle,0);
+        assert!(events.is_empty(),"an availability check must not cancel an actual held gesture");
+        runtime.host.touches[4]=false;
+        runtime.recorder.set_enabled(true);
+        unsafe{clbb_mapper_reload_state(&runtime,&mut state)};assert_eq!(state.recording,1);
+        runtime.recorder.set_enabled(false);
+        unsafe{clbb_mapper_reload_state(&runtime,&mut state)};assert_eq!(state.recording,0);
+        assert!(events.is_empty());
+        assert_eq!(unsafe{clbb_mapper_reload_state(std::ptr::null(),&mut state)},0);
+        assert_eq!(unsafe{clbb_mapper_reload_state(&runtime,std::ptr::null_mut())},0);
+    }
+    #[test]
+    fn live_state_retains_match_identity_even_when_source_becomes_stale() {
+        let mut events=Vec::new();let mut runtime=fixture(&mut events);
+        let mut sample=template_sample(18,2,now_ns());sample.match_owners=[101,202,303,404];
+        runtime.host.sample=Some(Arc::new(sample.clone()));
+        let mut state=crate::live::ReloadState::default();unsafe{clbb_mapper_reload_state(&runtime,&mut state)};
+        assert_eq!((state.hero,state.fresh),(18,1));assert_eq!(state.owners,[101,202,303,404]);
+        sample.frame.time_ns=crate::source::number((now_ns()-1_000_000_000)as f64);runtime.host.sample=Some(Arc::new(sample));
+        unsafe{clbb_mapper_reload_state(&runtime,&mut state)};
+        assert_eq!((state.hero,state.fresh),(18,0));assert_eq!(state.owners,[101,202,303,404]);
     }
     fn template_sample(hero: i32, kind: u8, at: i64) -> Sample {
         use crate::source::{flag, number, text, v2};

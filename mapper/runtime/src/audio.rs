@@ -33,11 +33,13 @@ fn state() -> &'static Arc<Mutex<State>> {
     })
 }
 pub fn configure(input: String, output: String) {
+    if crate::live::configure(&input,&output){return;}
     let mut s = state().lock().unwrap();
     s.input = input;
     s.output = output;
 }
 pub fn read(key: &str) -> String {
+    if let Some(text)=crate::live::read(key){return text;}
     if key == "audio.playback_status" {return crate::playback::status();}
     if key == "audio.capture_status" {
         let map = captures().lock().unwrap();
@@ -70,6 +72,7 @@ pub fn read(key: &str) -> String {
     }
 }
 pub fn refresh() {
+    if crate::live::refresh(){return;}
     state().lock().unwrap().refresh = true;
 }
 fn command(args: &[&str]) -> Result<String, String> {
@@ -691,6 +694,7 @@ pub extern "C" fn clbb_audio_set_stream_volume(value: i32) {
     STREAM_VOLUME.store(value.clamp(0, 100), std::sync::atomic::Ordering::Relaxed);
 }
 pub fn stream_gain() -> f32 {
+    if let Some(gain)=crate::live::stream_gain(){return gain;}
     clbb_audio_stream_volume() as f32 / 100.0
 }
 

@@ -33,3 +33,6 @@ pub mod audio;
 pub mod playback;
 
 mod attack;
+
+#[cfg(target_os="linux")]
+pub mod live;

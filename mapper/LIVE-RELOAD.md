@@ -1,0 +1,56 @@
+# Горячая замена маппера / Live mapper replacement
+
+Начиная с хоста alpha76, Rust-модули управления можно обновлять в работающей
+игре. Для первой установки самого загрузчика нужен один обычный перезапуск.
+После этого изменение `mapper/core` и `mapper/runtime` не требует перезапуска
+Android, выхода из аккаунта или повторного входа в тренировку.
+
+```sh
+python3 tools/reload-mapper.py --status
+python3 tools/reload-mapper.py
+python3 tools/reload-mapper.py --library /absolute/path/libclbb_mapper.so
+python3 tools/reload-mapper.py --rollback
+```
+
+Запускать от владельца игры, без `sudo`. По умолчанию собирается только
+Rust-библиотека в release. Новый файл сохраняется отдельно по SHA-256: уже
+загруженный inode никогда не перезаписывается. Выбранный неизменяемый пакет
+CLBB и пользовательские бинды команда не заменяет. Следующий обычный запуск
+использует выбранный пакет; экспериментальный модуль нужно отдельно включить
+в проверенную сборку перед публикацией.
+
+Замена отклоняется, если удерживаются клавиши/касания, выполняется движение
+маппера, активна запись отладки или захват нового бинда. Новая библиотека должна
+соответствовать C ABI v1 и предоставить все обязательные функции. Она сначала
+работает в режиме без ввода и должна подтвердить того же героя и владельцев
+того же матча. Неожиданное касание, изменение настроек/матча, новый пользовательский
+ввод или тайм-аут подготовки оставляют прежний модуль активным.
+
+Аудиозахват, микшер и маршрутизация остаются в первом закреплённом модуле;
+новые поколения обращаются к ним через маленькую C-таблицу. Их потоки и
+идентификаторы не пересоздаются. Rust-структуры и выделенная память между
+поколениями не передаются. Прежний экземпляр контроллера освобождается, его
+источник получает сигнал остановки, но библиотека остаётся отображённой:
+потоки звука, рендера и деструкторы TLS могут ещё возвращаться через старый код.
+
+Состояние: `read diagnostics.reload` через приватный сокет игры. Журнал успешных
+замен: `logs/live-mapper/`. Обычная команда закрытия игры не меняется.
+Изменения GTK-адаптера, графического/Android-слоя и самого ABI всё ещё требуют
+обновления хоста. Совместимость ABI не защищает от произвольного падения
+нативного кода внутри процесса: автоматическое сохранение старого маппера
+относится к проверяемым отказам загрузки/подготовки, а не к любому segfault.
+
+## English
+
+The alpha76+ host can replace Rust controller modules without restarting the
+game. Install the host once, then use the commands above as the game owner.
+The loader stages an immutable hash-named library, validates its C ABI and
+quiescence, and requires the same live match identity before committing.
+Busy input, recording, setting changes and failed staging retain the old
+controller. `--rollback` stages the preceding module through the same checks.
+
+The original audio service and SDK handles remain pinned. Cross-generation
+Rust object layouts/allocations are never exchanged. Libraries remain mapped
+for in-flight callbacks/TLS, while retired controller workers stop. Changes to
+GTK, Android, graphics or the loader ABI still require a host restart. An
+arbitrary native crash is not isolated by in-process ABI checks.
