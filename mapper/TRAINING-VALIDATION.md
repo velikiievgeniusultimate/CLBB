@@ -49,6 +49,9 @@ Rust-инструмент только читает память выбранн�
 башни, невидимые маркеры и вспомогательные существа: ближайшая запись сама по
 себе не является подходящим монстром. Сверяйте класс, типизированные флаги,
 здоровье, свежую позицию и изображение. Сохраняйте GUID цели на всём интервале.
+Порождение Заска находится именно в `m_ShowMonsters` с классом `ShowSummons`,
+а не обязательно в `m_ShowPlayerSummons`. Для проверки его перемещения нужны
+эта опция и свежий GUID, а не только позиция героя.
 `local_observables` содержит сырые типизированные поля локального героя.
 Название поля не доказывает его смысл: некоторые значения сбрасываются или
 убывают, а счётчики попаданий могут не учитывать тренировочные манекены.
@@ -101,6 +104,14 @@ Rust-инструмент только читает память выбранн�
 Rust-маппера можно через `tools/reload-mapper.py`; требования и ограничения
 описаны в `LIVE-RELOAD.md`. Диагностические бинарники не требуют замены игры.
 
+В тесте с отслеживанием мировой точки не отправляйте после UP сохранённую
+позицию курсора из начала удержания. При панорамировании это другой ввод,
+который может изменить цель до завершения отпускания. Сохраняйте последние
+когерентные координаты цели игры перед доставкой UP и сравнивайте результат
+с ними. Самостоятельная проекция точки на Y=0 не заменяет цель индикатора:
+его визуальная плоскость может иметь другую высоту. Эти требования относятся
+к измерению; дополнительные задержки в игровое управление из них не следуют.
+
 ## English
 
 Read the installed game's expanded skill/passive descriptions first. Derive
@@ -122,6 +133,10 @@ text as an alternate-form description. Check the current form before each
 input in short-lived states. For next-attack buffs and toggles, verify the
 entire arm/hit/reset or enable/cancel-disable/disable sequence; the initial
 cast alone does not validate the conditional controls.
+Zhask's summons are observed in `m_ShowMonsters` as `ShowSummons`; include that
+container and track fresh GUIDs. A world-tracking test must not resend an old
+cursor coordinate after UP. Compare the actual outcome with the last coherent
+native target before release, respecting the indicator's visual plane.
 
 ## Отказы диагностического аудита
 
