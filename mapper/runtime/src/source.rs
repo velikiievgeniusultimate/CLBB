@@ -310,6 +310,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Harley's native hat-return has no indicator registry entry. An
         // observed ordinary UI click returns to the original hat position.
         || (hero==42 && slot=="skill:1" && base==4220 && active==4221)
+        // Grock's observed second cast destroys his existing wall. The
+        // native Base/Base registry is not an aiming action.
+        || (hero==44 && slot=="skill:1" && base==4420 && active==4426)
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -2370,6 +2373,15 @@ mod tests {
         for(hero,slot,base,active)in [(56,"skill:0",5610,5610),(56,"skill:1",5620,5620),
             (56,"skill:0",5610,5611),(56,"skill:1",5620,5621),(56,"skill:0",5620,5623),
             (56,"skill:1",5610,5612),(55,"skill:0",5610,5612),(56,"skill:2",5620,5623)] {
+            assert!(!verified_button_only_form(hero,slot,base,active));
+        }
+    }
+    #[test]
+    fn grock_wall_removal_does_not_reclassify_wall_placement_or_another_hero() {
+        assert!(verified_button_only_form(44,"skill:1",4420,4426));
+        for(hero,slot,base,active)in [(44,"skill:1",4420,4420),(44,"skill:1",4420,4425),
+            (44,"skill:0",4420,4426),(44,"skill:2",4420,4426),(44,"skill:1",4410,4426),
+            (77,"skill:1",4420,4426),(25,"skill:1",4420,4426)] {
             assert!(!verified_button_only_form(hero,slot,base,active));
         }
     }
