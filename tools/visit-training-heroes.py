@@ -250,12 +250,11 @@ class Coordinator:
             binding = session.command("read hero.movement.button") or session.command("read movement.button")
             if int(binding) != 0x02000002:
                 raise BatchAbort("Combat fixture requires the existing RMB movement binding")
-            # The short movement alone can enter a tower's range and keep the
-            # hero in combat. First teleport to the empty river flank. Its
-            # fresh world receipt must agree with the expected map transform.
-            # Native observed receipt: batch-10-alpha70/hero-0011/leave-combat.json.
-            # The game clamps this map point to walkable ground beside a wall.
-            result["safe_world_receipt"] = river.teleport(session, (.12, .269), (-10.083984375, 10.494140625), .9, "combat-safe-flank")
+            # Use the independently verified open river point. The previous
+            # wall-adjacent flank can clamp differently (Miya observed 2.33
+            # world units away), so it is not a stable serial-test fixture.
+            # Keep the strict world receipt; do not widen tolerance to pass.
+            result["safe_world_receipt"] = river.teleport(session, river.CENTER[0], river.CENTER[1], .9, "combat-open-river")
             attempted = True
             session.command("begin")
             session.send_pointer((.5, .25))
