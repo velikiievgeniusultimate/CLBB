@@ -162,6 +162,14 @@ fn layla_ultimate_direction_template(skill:i32,motion:&str,package:&str,rect:i32
         && rect==2 && params==[6.,16.]
 }
 
+// Harley Q: actual expanded description and native 23-value fan layout.
+// RectType1 is not the previously observed generic multi-arrow RectType0.
+// Admit this exact skill/config only; no other hero gains direction semantics.
+fn harley_cards_direction_template(skill:i32,motion:&str,package:&str,rect:i32,params:&[f64])->bool {
+    skill==4210 && motion=="IndicatorMotionRot" && package=="IndicatorPackage_Multi_JianTou"
+        && rect==1 && params==[7.,6.5,70421.,6.5,0.4f32 as f64,0.,0.,3.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,3.,20.]
+}
+
 fn native_range_shape(motion:&str,package:&str)->Option<f64> {
     match (motion,package) {
         ("IndicatorMotionRotAndPosRot"|"IndicatorMotionFaTiaoQiu2","IndicatorPackage_JianTou_Yuan")=>Some(8.),
@@ -343,8 +351,20 @@ fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     let config=u64_at(&capture(r,checks,config_at,8)?,0);
     typed_field(r,config,"m_ShowRectPara",29)?;
     let(rect,params)=native_rect_config(r,comp,skill,checks)?;
+    // The shared reader intentionally captures only shape/extent. Harley's
+    // new exact layout additionally requires all 23 owned Single parameters.
+    let harley=if skill==4210 && motion=="IndicatorMotionRot" && package=="IndicatorPackage_Multi_JianTou" && rect==1 {
+        let array=owner(r,config,"m_ShowRectPara",checks)?;
+        let header=capture(r,checks,array,32)?;
+        if u64_at(&header,24)!=23 {false} else {
+            let raw=capture(r,checks,array+32,23*4)?;
+            let full=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+            harley_cards_direction_template(skill,motion,package,rect,&full)
+        }
+    } else {false};
     if !additional_direction_template(motion,package,rect,&params)
-        && !layla_ultimate_direction_template(skill,motion,package,rect,&params) {
+        && !layla_ultimate_direction_template(skill,motion,package,rect,&params)
+        && !harley {
         return Err("Unverified additional direction configuration".into());
     }
     Ok(true)
@@ -1832,6 +1852,30 @@ mod tests {
             r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&shape.to_le_bytes());
             assert!(additional_direction_contract(&mut r,128,12710,m,package,&mut Vec::new()).unwrap());
         }
+    }
+    #[test]
+    fn harley_cards_do_not_broaden_other_multi_arrow_skills() {
+        let m="IndicatorMotionRot";let p="IndicatorPackage_Multi_JianTou";
+        let config=[7.,6.5,70421.,6.5,0.4f32 as f64,0.,0.,3.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,3.,20.];
+        assert!(harley_cards_direction_template(4210,m,p,1,&config));
+        assert!(!additional_direction_template(m,p,1,&config));
+        for skill in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133,4211,12710] {
+            assert!(!harley_cards_direction_template(skill,m,p,1,&config));
+        }
+        for i in 0..config.len() {let mut bad=config;bad[i]=f64::NAN;assert!(!harley_cards_direction_template(4210,m,p,1,&bad));}
+        assert!(!harley_cards_direction_template(4210,m,p,0,&config));
+        assert!(!harley_cards_direction_template(4210,"IndicatorMotionPos",p,1,&config));
+        assert!(!harley_cards_direction_template(4210,m,"IndicatorPackageEasy",1,&config));
+    }
+    #[test]
+    fn harley_cards_configuration_remains_owned_and_fenced() {
+        let mut r=additional_direction_fixture();
+        {let mut b=r.memory.0.borrow_mut();b[1056..1060].copy_from_slice(&4210i32.to_le_bytes());b[1060..1064].copy_from_slice(&1i32.to_le_bytes());b[1560..1568].copy_from_slice(&23u64.to_le_bytes());
+            for (i,v)in [7f32,6.5,70421.,6.5,0.4,0.,0.,3.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,3.,20.].iter().enumerate(){b[1568+i*4..1572+i*4].copy_from_slice(&v.to_le_bytes());}}
+        let mut checks=Vec::new();assert!(additional_direction_contract(&mut r,128,4210,"IndicatorMotionRot","IndicatorPackage_Multi_JianTou",&mut checks).unwrap());
+        r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&6f32.to_le_bytes());
+        assert!(check(&r,&checks).is_err());
+        assert!(additional_direction_contract(&mut r,128,4210,"IndicatorMotionRot","IndicatorPackage_Multi_JianTou",&mut Vec::new()).is_err());
     }
     #[test]
     fn moskov_camera_lock_direction_requires_exact_owned_config() {
