@@ -307,6 +307,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Availability and the hit requirement come from the native variant.
         || (hero==56 && ((slot=="skill:0" && base==5610 && active==5612)
             || (slot=="skill:1" && base==5620 && active==5623)))
+        // Harley's native hat-return has no indicator registry entry. An
+        // observed ordinary UI click returns to the original hat position.
+        || (hero==42 && slot=="skill:1" && base==4220 && active==4221)
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -2367,6 +2370,15 @@ mod tests {
         for(hero,slot,base,active)in [(56,"skill:0",5610,5610),(56,"skill:1",5620,5620),
             (56,"skill:0",5610,5611),(56,"skill:1",5620,5621),(56,"skill:0",5620,5623),
             (56,"skill:1",5610,5612),(55,"skill:0",5610,5612),(56,"skill:2",5620,5623)] {
+            assert!(!verified_button_only_form(hero,slot,base,active));
+        }
+    }
+    #[test]
+    fn harley_hat_return_is_plain_only_for_the_actual_owned_return_form() {
+        assert!(verified_button_only_form(42,"skill:1",4220,4221));
+        for (hero,slot,base,active)in [(42,"skill:1",4220,4220),(42,"skill:1",4220,4222),
+            (42,"skill:0",4220,4221),(42,"skill:2",4220,4221),(42,"skill:1",4210,4221),
+            (42,"skill:1",4221,4221),(25,"skill:1",4220,4221),(84,"skill:1",4220,4221)] {
             assert!(!verified_button_only_form(hero,slot,base,active));
         }
     }
