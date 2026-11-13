@@ -865,6 +865,7 @@ pub struct Sample {
     pub indicator: u64,
     pub aim: Option<[f64; 3]>,
     pub direction_visual: Option<crate::projection::DirectionVisual>,
+    pub direction_origin: Option<crate::projection::DirectionOrigin>,
     pub control_types: std::collections::BTreeMap<String,u8>,
     /// Current coherent charge lifecycle observations; absence is unknown.
     pub control_holds: std::collections::BTreeMap<String, bool>,
@@ -1567,6 +1568,11 @@ impl<M: Memory> Source<M> {
                 }
             }
         }
+        let direction_origin=if hero==31 && skill==3190 && frame.ui.active_slot.as_str()=="skill:2" {
+            let checkpoint=consumed.len();
+            let value=plan.motions.get_mut(&skill).and_then(|m|m.sample_direction_origin(r,&mut consumed).ok().flatten());
+            if value.is_none(){consumed.truncate(checkpoint);}value
+        }else{None};
         // Choice feedback is native UI XY, never a world-space Direction ACK.
         frame.selection_input.reason=text(if selection_variant_unknown{"choice_variant_unknown"}else{"owner_receipt_unavailable"});
         if let Some(button)=plan.ui.buttons.iter().filter(|b|b.choice_family).min_by_key(|b|{
@@ -1751,7 +1757,7 @@ impl<M: Memory> Source<M> {
             logic,
             indicator: plan.indicator,
             aim,
-            direction_visual,
+            direction_visual, direction_origin,
             control_types,
             control_holds,
             linked, portrait,

@@ -120,7 +120,7 @@ impl Worker {
                                     "linked":sample.linked,"cancel_uv_valid":f.ui.cancel_uv.valid(),"cancel_uv":f.ui.cancel_uv.values.map(|v|v.value),
                                     "control_types":sample.control_types,"control_holds":sample.control_holds,
                                     "buttons":f.ui.buttons.iter().take(f.ui.button_count.min(32) as usize).map(|b|serde_json::json!({"slot":b.slot.as_str(),"kind":b.kind.as_str(),"skill":b.skill_id.int(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>(),
-                                    "hero":f.hero_id.int(),"hero_render":f.hero_render_xyz.values.map(|v|v.value),"hero_logic":sample.logic,"direction_visual":sample.direction_visual,"direction_source":f.direction_input.source.as_str(),
+                                    "hero":f.hero_id.int(),"hero_render":f.hero_render_xyz.values.map(|v|v.value),"hero_logic":sample.logic,"direction_visual":sample.direction_visual,"direction_origin":sample.direction_origin,"direction_source":f.direction_input.source.as_str(),
                                     "skill":f.skill_id.int(),"slot":f.ui.active_slot.as_str(),"resolution":f.ui.resolution_px.values.map(|v|v.value),"native_source":f.logical.source.as_str(),"view":f.view_matrix.values.map(|v|v.value),"projection":sample.projection,
                                     "aim":sample.aim,"center":f.ui.joystick.center_uv.values.map(|v|v.value),"radius":f.ui.joystick.radius_uv.values.map(|v|v.value),
                                     "logical_ready":f.logical.ready.get(),"input_ready":f.logical.input_ready.get(),"valid_drag":f.logical.valid_drag.get(),"first_drag":f.logical.first_drag.get(),
@@ -455,6 +455,15 @@ impl Host for Adapter {
         self.ray(p)?.at_plane(plane)
     }
     fn skill_direction_world(&mut self,p:Point,skill:i32)->Option<Point> {
+        if skill==3190 {
+            let sample=self.fresh()?;
+            if sample.frame.hero_id.int()!=31||sample.frame.skill_id.int()!=skill||sample.frame.ui.active_slot.as_str()!="skill:2" {return None;}
+            let origin=sample.direction_origin.filter(|o|o.skill==skill)?;
+            let direction=projection::direction_from_origin(&sample.frame.view_matrix.values.map(|n|n.value),&sample.projection,origin.point,p)?;
+            let hero=sample.frame.hero_render_xyz.values.map(|n|n.value);
+            if self.recorder.is_enabled(){self.recorder.push(now_ns(),"remote_direction_projection",serde_json::json!({"skill":skill,"origin":origin,"hero":hero,"pointer":[p.x,p.y],"direction":[direction.x,direction.y]}));}
+            return Some(Point::new(hero[0]+direction.x,hero[2]+direction.y));
+        }
         let (visual,hero,view,projection,token)={let s=self.fresh()?;(s.direction_visual,s.frame.hero_render_xyz.values.map(|n|n.value),s.frame.view_matrix.values.map(|n|n.value),s.projection,s.frame.token)};
         if let Some(spec)=visual.filter(|v|v.skill==skill) {
             let offset=self.wall_surface.offset_for_input(token.as_str(),hero,spec.wall,p,spec.observed);
@@ -1153,7 +1162,7 @@ impl Runtime {
             k if k.starts_with("updates.")=>self.updates.read(k),
             "diagnostics.fps"=>format!("{:.0}",crate::render_metrics::fps()),
             "diagnostics.render"=>crate::render_metrics::snapshot().to_string(),
-            "diagnostics.direction_visual"=>self.host.fresh().map(|s|serde_json::json!({"spec":s.direction_visual,"hero":s.frame.hero_render_xyz.values.map(|v|v.value),"view":s.frame.view_matrix.values.map(|v|v.value),"projection":s.projection,"sample_start_ns":s.frame.direction_input.sample_start_ns.value,"sample_end_ns":s.frame.direction_input.sample_end_ns.value}).to_string()).unwrap_or_else(||"{}".into()),
+            "diagnostics.direction_visual"=>self.host.fresh().map(|s|serde_json::json!({"spec":s.direction_visual,"origin":s.direction_origin,"hero":s.frame.hero_render_xyz.values.map(|v|v.value),"view":s.frame.view_matrix.values.map(|v|v.value),"projection":s.projection,"sample_start_ns":s.frame.direction_input.sample_start_ns.value,"sample_end_ns":s.frame.direction_input.sample_end_ns.value}).to_string()).unwrap_or_else(||"{}".into()),
             "diagnostics.hero_state"=>self.host.fresh().map(|s| {
                 let state=&s.frame.skill_state;
                 let form=state.buttons.iter().take(state.count.min(32) as usize).find(|b|b.slot.as_str()=="skill:1").map(|b|b.active_skill_id.int()).unwrap_or(0);
@@ -1440,7 +1449,7 @@ mod tests {
         Sample {
             plan_revision: 1, game_clock_ms: 1, match_owners: [1, 2, 3, 4], frame,
             projection: [0.; 16], logic: [0.; 2], indicator: 0,
-            aim: None, direction_visual: None,
+            aim: None, direction_visual: None, direction_origin:None,
             control_types: BTreeMap::from([("skill:2".into(), kind)]), control_holds: BTreeMap::new(), linked: None, portrait:None,
         }
     }

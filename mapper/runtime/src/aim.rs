@@ -240,6 +240,24 @@ fn fixed_part_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     }
     Ok(true)
 }
+fn camera_lock_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
+    motion_name:&str,package_name:&str,checks:&mut Checks)->Result<bool> {
+    if skill!=3190 || motion_name!="IndicatorMotionCameraLock" || package_name!="IndicatorPackageEasy_JianTou" {return Ok(false);}
+    let mut config=0;
+    for object in [comp,motion,package] {
+        let at=typed_field(r,object,"m_Config",17)?;
+        let linked=u64_at(&capture(r,checks,at,8)?,0);
+        if linked==0||(config!=0&&linked!=config){return Err("Camera-lock config owners differ".into());}config=linked;
+    }
+    typed_field(r,config,"m_ShowRectPara",29)?;
+    let(rect,params)=native_rect_config(r,comp,skill,checks)?;
+    if rect!=1||params!=[2.,99.] {return Err("Unverified camera-lock direction shape".into());}
+    for(object,field,expected)in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
+        typed_field(r,object,field,18)?;
+        if owner(r,object,field,checks)?!=expected{return Err("Camera-lock indicator owner changed".into());}
+    }
+    Ok(true)
+}
 // Hayabusa's shadow return selects native recipients from a direction. Its
 // HookLine motion has no m_OwnPackage; prove the shared config and both actual
 // comp owners instead. Other HookLine skills (e.g. Chou) remain unqualified.
@@ -557,7 +575,7 @@ impl MotionPlan {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
-        if !base_tap&&!shadow_direction&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        if !base_tap&&!shadow_direction&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
             if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
@@ -680,6 +698,11 @@ impl MotionPlan {
                 }}
             }
         }
+        if mc.name=="IndicatorMotionCameraLock" {
+            let at=typed_field(r,motion,"vFirstSelfPos",17)?;
+            let raw=capture(r,&mut checks,at,12)?;
+            values.insert("vFirstSelfPos".into(),serde_json::json!([f32_at(&raw,0),f32_at(&raw,4),f32_at(&raw,8)]));
+        }
         check(r,&checks)?;
         Ok(serde_json::json!({"duration_ns":elapsed.elapsed().as_nanos(),"motion":mc.name,"package":pc.name,"values":values}))
     }
@@ -703,12 +726,13 @@ impl MotionPlan {
         }
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
+        let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let kind=if let Some(kind)=native_template(&mc.name,&pc.name) {
             if kind==3 {native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Unverified native range family")?;}
             kind
         }
         else if base_tap {1}
-        else if shadow_direction {2}
+        else if shadow_direction || camera_direction {2}
         else if fixed_part_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)? {2}
         else if mc.name=="IndicatorMotionPos" && pc.name=="IndicatorPackage_TwoPartAndPos_Direction" {
@@ -777,7 +801,8 @@ impl MotionPlan {
         let name=motion_class.name.clone();
         let range_contract=native_range_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
-        let configured_direction=shadow_direction || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
+        let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
+        let configured_direction=shadow_direction || camera_direction || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
         let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,configured_direction);
         let expected = match skill {
@@ -825,7 +850,7 @@ impl MotionPlan {
             (Some((typed_field(r,package,"fDefaultRayLength",12)?,typed_field(r,package,"m_vStartOffsete",17)?,typed_field(r,package,"m_vEndOffsete",17)?)),
              Some(typed_field(r,package,"_dragArrow",18)?),
              Some((typed_field(r,motion,"m_dragged",2)?,typed_field(r,motion,"m_bVaildDraged",2)?)))
-        }else{(None,None,None)};
+        }else if camera_direction{(None,Some(typed_field(r,package,"<m_gMain>k__BackingField",18)?),None)}else{(None,None,None)};
         let circle_field = typed_field(r,package, "m_gYuan",18).ok().or_else(|| {
             point_visual_fallback(&name,&package_class.name)
                 .then(||typed_field(r,package,"<m_gMain>k__BackingField",18).ok()).flatten()
@@ -969,6 +994,21 @@ impl MotionPlan {
         }
         Ok(Some(spec))
     }
+    pub fn sample_direction_origin<M:Memory>(&mut self,r:&mut Reflection<M>,consumed:&mut Checks)->Result<Option<crate::projection::DirectionOrigin>> {
+        if self.skill!=3190||self.name!="IndicatorMotionCameraLock"||!self.direction_geometry{return Ok(None);}
+        self.validate(r)?;
+        let at=self.direction_arrow_field.ok_or("Camera-lock arrow root absent")?;
+        let object=u64_at(&capture(r,consumed,at,8)?,0);
+        let class=capture(r,consumed,object,8)?;
+        if r.class(u64_at(&class,0))?.name!="GameObject"{return Err("Camera-lock root is not a GameObject".into());}
+        if self.direction_endpoint.as_ref().is_none_or(|(owner,path)|*owner!=object||path.validate(r).is_err()) {
+            self.direction_endpoint=Some((object,Path::new(r,object,false)?));
+        }
+        let raw=capture_path(r,consumed,&self.direction_endpoint.as_ref().unwrap().1)?;
+        let point=crate::math::trs_chain(&raw,None).ok_or("Invalid camera-lock origin transform")?;
+        if point.iter().any(|v|!v.is_finite()||v.abs()>10000.)||point[1]< -1000. {return Err("Camera-lock origin is hidden".into());}
+        Ok(Some(crate::projection::DirectionOrigin{skill:self.skill,point}))
+    }
     pub fn validate<M: Memory>(&self, r: &Reflection<M>) -> Result<()> {
         check(r, &self.checks)
     }
@@ -1102,7 +1142,7 @@ impl MotionPlan {
             frame.direction_input = s::Direction {
                 ready: flag(true),
                 coherent: flag(true),
-                source: text(if self.name=="IndicatorMotionHookLine" {"IndicatorMotionHookLine.m_vDragResult"}else{"IndicatorMotionRot.m_vDragResult"}),
+                source: text(match self.name.as_str(){"IndicatorMotionHookLine"=>"IndicatorMotionHookLine.m_vDragResult","IndicatorMotionCameraLock"=>"IndicatorMotionCameraLock.m_vDragResult",_=>"IndicatorMotionRot.m_vDragResult"}),
                 token: frame.token,
                 hero_id: frame.hero_id,
                 slot: frame.ui.active_slot,
@@ -1679,6 +1719,39 @@ mod tests {
             r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&shape.to_le_bytes());
             assert!(additional_direction_contract(&mut r,128,12710,m,package,&mut Vec::new()).unwrap());
         }
+    }
+    #[test]
+    fn moskov_camera_lock_direction_requires_exact_owned_config() {
+        fn fixture()->Reflection<MutableMemory>{
+            let r=base_tap_fixture();
+            r.memory.0.borrow_mut()[1056..1060].copy_from_slice(&3190i32.to_le_bytes());
+            r.memory.0.borrow_mut()[1060..1064].copy_from_slice(&1i32.to_le_bytes());
+            for(at,value)in [(1568,2f32),(1572,99.)]{r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+            r
+        }
+        let m="IndicatorMotionCameraLock";let p="IndicatorPackageEasy_JianTou";
+        // The normal Rot subclass owns m_OwnPackage; fixture adds its typed field.
+        fn owned()->Reflection<MutableMemory>{
+            let r=fixture();let mut b=r.memory.0.borrow_mut();
+            let table=u64_at(&b[3072+0x78..3072+0x80],0)as usize;
+            let old=b[table..table+64].to_vec();let table=30200usize;
+            b[table..table+64].copy_from_slice(&old);b[3072+0x78..3072+0x80].copy_from_slice(&(table as u64).to_le_bytes());
+            let at=table+2*32;let name=30000usize;let ty=30100usize;
+            b[name..name+12].copy_from_slice(b"m_OwnPackage");b[name+12]=0;
+            b[at..at+8].copy_from_slice(&(name as u64).to_le_bytes());b[at+8..at+16].copy_from_slice(&(ty as u64).to_le_bytes());b[at+16..at+24].copy_from_slice(&3072u64.to_le_bytes());
+            b[ty+8..ty+12].copy_from_slice(&(18u32<<16).to_le_bytes());b[at+24..at+28].copy_from_slice(&48u32.to_le_bytes());
+            b[3072+0x104..3072+0x106].copy_from_slice(&3u16.to_le_bytes());b[304..312].copy_from_slice(&384u64.to_le_bytes());
+            drop(b);r
+        }
+        let mut r=owned();let mut checks=Vec::new();
+        assert!(camera_lock_direction_contract(&mut r,128,256,384,3190,m,p,&mut checks).unwrap());
+        assert_eq!(native_range_shape(m,p),None);
+        for skill in [3130,2126]{assert!(!camera_lock_direction_contract(&mut r,128,256,384,skill,m,p,&mut Vec::new()).unwrap());}
+        for(at,bytes)in [(416,1280u64.to_le_bytes().to_vec()),(304,128u64.to_le_bytes().to_vec()),(424,256u64.to_le_bytes().to_vec()),(1056,3130i32.to_le_bytes().to_vec()),(1060,0i32.to_le_bytes().to_vec()),(1568,6f32.to_le_bytes().to_vec()),(1572,0f32.to_le_bytes().to_vec())]{
+            let mut r=owned();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(camera_lock_direction_contract(&mut r,128,256,384,3190,m,p,&mut Vec::new()).is_err());
+        }
+        r.memory.0.borrow_mut()[304..312].copy_from_slice(&128u64.to_le_bytes());assert!(check(&r,&checks).is_err());
     }
     #[test]
     fn shadow_return_requires_exact_identity_and_all_config_owners() {

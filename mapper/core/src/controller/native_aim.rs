@@ -18,7 +18,7 @@ const ATTACK_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult";
 const ATTACK_RANGE_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio";
 const RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]";
 fn known_direction_source(hero:i32,skill:i32,source:&str)->bool {
-    source=="IndicatorMotionRot.m_vDragResult" || (hero==21&&skill==2126&&source=="IndicatorMotionHookLine.m_vDragResult") || (hero==84&&skill==8410&&source=="KeySkilleCheckMesh.currentDirect")
+    source=="IndicatorMotionRot.m_vDragResult" || (hero==31&&skill==3190&&source=="IndicatorMotionCameraLock.m_vDragResult") || (hero==21&&skill==2126&&source=="IndicatorMotionHookLine.m_vDragResult") || (hero==84&&skill==8410&&source=="KeySkilleCheckMesh.currentDirect")
 }
 const ANGLE_COS: f64 = 0.9999904807207345; // cos(0.25 degrees)
 
@@ -2287,6 +2287,9 @@ mod shadow_direction_source_tests {
     fn hook_line_receipt_is_scoped_to_hayabusa_return_only(){
         let source="IndicatorMotionHookLine.m_vDragResult";
         assert!(known_direction_source(21,2126,source));
+        let camera="IndicatorMotionCameraLock.m_vDragResult";
+        assert!(known_direction_source(31,3190,camera));
+        for (hero,skill)in [(31,3130),(21,3190),(25,3190)]{assert!(!known_direction_source(hero,skill,camera));}
         for (hero,skill) in [(21,2120),(21,2121),(26,2632),(25,2126)]{assert!(!known_direction_source(hero,skill,source));}
     }
 }

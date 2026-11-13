@@ -375,3 +375,34 @@ mod tests {
         }
     }
 }
+
+/// Remote cast pivot, separate from the local player's movement position.
+#[derive(Clone,Copy,Debug,serde::Serialize,serde::Deserialize)]
+pub struct DirectionOrigin {pub skill:i32,pub point:[f64;3]}
+pub fn direction_from_origin(view:&[f64;16],projection:&[f64;16],origin:[f64;3],pointer:Point)->Option<Point>{
+    if origin.iter().any(|v|!v.is_finite()){return None;}
+    let target=ray(&inverse_product(projection,view)?,pointer)?.at_plane(origin[1])?;
+    let delta=Point::new(target.x-origin[0],target.y-origin[2]);
+    (delta.x.hypot(delta.y)>1e-8).then_some(delta)
+}
+
+#[cfg(test)]
+mod remote_origin_tests {
+    use super::*;
+    #[test]
+    fn remote_arrow_origin_keeps_direction_through_camera_pan() {
+        let view=[0.7077527046203613,0.48100554943084717,-0.5174165964126587,0.,-0.0008955360390245914,0.7330173254013062,0.6802094578742981,0.,-0.7064598202705383,0.4809567332267761,-0.5192257165908813,0.,0.287473201751709,-1.4539549350738525,-14.592824935913086,1.];
+        let projection=[2.0574307441711426,0.,0.,0.,0.,2.645362615585327,0.,0.,0.,0.,-1.000800371170044,-1.,0.,0.,-0.4001600742340088,0.];
+        let origin=[0.6016845703125,0.1,0.94970703125];
+        for shift in [[0.,0.],[8.,-3.],[-5.,7.]] {
+            let mut camera=view;
+            for row in 0..3 {camera[12+row]-=view[row]*shift[0]+view[8+row]*shift[1];}
+            for delta in [[2.,0.],[-2.,0.],[0.,2.],[0.,-2.]] {
+                let target=[origin[0]+delta[0],origin[1],origin[2]+delta[1]];
+                let uv=crate::math::project(&camera,&projection,target,false).unwrap();
+                let actual=direction_from_origin(&camera,&projection,origin,Point::new(uv[0],uv[1])).unwrap();
+                assert!((actual.x-delta[0]).abs()<1e-7 && (actual.y-delta[1]).abs()<1e-7);
+            }
+        }
+    }
+}
