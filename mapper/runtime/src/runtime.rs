@@ -1285,7 +1285,7 @@ pub unsafe extern "C" fn clbb_mapper_reload_state(rt:*const Runtime,out:*mut cra
         idle:u32::from(!rt.host.touches.iter().any(|v|*v) && rt.gestures.active.is_empty() && rt.portrait.held.is_none()
             && v.skillTouch_<0 && v.movementTouch_<0 && v.skillKeyHeld_==0 && v.movementHeld_==0
             && v.movementPressed_==0 && v.pendingRelease_==0 && v.skillCancelPending_==0
-            && rt.host.timers.iter().all(Option::is_none)),
+            && rt.host.timers.iter().enumerate().all(|(index,timer)|index==timer_index(Timer::Main)||timer.is_none())),
         recording:u32::from(rt.recorder.is_enabled()),hero:rt.host.sample.as_ref().map(|s|s.frame.hero_id.int()).unwrap_or(0),
         fresh:u32::from(sample.is_some()),owners:rt.host.sample.as_ref().map(|s|s.match_owners).unwrap_or([0;4]),
         sample_ns:sample.map(|s|s.frame.time_ns.value as i64).unwrap_or(0)};1
@@ -1444,6 +1444,11 @@ mod tests {
         let mut state=crate::live::ReloadState::default();
         assert_eq!(unsafe{clbb_mapper_reload_state(&runtime,&mut state)},1);
         assert_eq!((state.abi,state.size,state.idle,state.recording),(1,64,1,0));
+        runtime.host.timer(Timer::Main,Some(16));
+        unsafe{clbb_mapper_reload_state(&runtime,&mut state)};assert_eq!(state.idle,1,"periodic controller heartbeat is not a held action");
+        runtime.host.timer(Timer::Tap,Some(16));
+        unsafe{clbb_mapper_reload_state(&runtime,&mut state)};assert_eq!(state.idle,0,"scheduled action completion still blocks replacement");
+        runtime.host.timer(Timer::Tap,None);
         runtime.host.touches[4]=true;
         assert_eq!(unsafe{clbb_mapper_reload_state(&runtime,&mut state)},1);assert_eq!(state.idle,0);
         assert!(events.is_empty(),"an availability check must not cancel an actual held gesture");
