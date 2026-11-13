@@ -38,6 +38,7 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--basic-probes", action="store_true")
     parser.add_argument("--cancel-probes", action="store_true")
+    parser.add_argument("--combat-settle", action="store_true")
     parser.add_argument("--gm-close-point", nargs=2, type=float, default=(.974, .1))
     parser.add_argument("--dry-run", action="store_true", help="Validate only; never connect to the game")
     args = parser.parse_args()
@@ -59,6 +60,8 @@ def main():
         argv.append("--basic-probes")
     if args.cancel_probes:
         argv.append("--cancel-probes")
+    if args.combat_settle:
+        argv.append("--combat-settle")
     return workflow.main(argv)
 
 

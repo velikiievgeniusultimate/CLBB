@@ -230,6 +230,62 @@ class Coordinator:
         selector.open()  # Same observed wrench/picker path as --open-picker.
         selector.choose(hero, 20)
         selector.confirm(hero)
+    def leave_combat(self, hero, directory):
+        """Training fixture only: cancel automatic attacks, then let the game's
+        observed five-second out-of-combat restriction expire. No mapper setting
+        or production delay is changed. Never cancel somebody else's gesture.
+        """
+        path = directory / "leave-combat.json"
+        result = {"hero": hero, "commands": [], "samples": [], "map_clicks": [], "world_receipts": [],
+                  "scope": "developer fixture only"}
+        session = None
+        attempted = False
+        try:
+            session = self.guarded_setup_class()(hero, result, directory / "leave-combat.phases")
+            session.expected_hero()
+            session.controls("before-move")
+            session.raw_idle()
+            if session.read("diagnostics.contacts").get("active") != []:
+                raise BatchAbort("Cannot settle combat while a contact is held")
+            binding = session.command("read hero.movement.button") or session.command("read movement.button")
+            if int(binding) != 0x02000002:
+                raise BatchAbort("Combat fixture requires the existing RMB movement binding")
+            # The short movement alone can enter a tower's range and keep the
+            # hero in combat. First teleport to the empty river flank. Its
+            # fresh world receipt must agree with the expected map transform.
+            # Native observed receipt: batch-10-alpha70/hero-0011/leave-combat.json.
+            # The game clamps this map point to walkable ground beside a wall.
+            result["safe_world_receipt"] = river.teleport(session, (.12, .269), (-10.083984375, 10.494140625), .9, "combat-safe-flank")
+            attempted = True
+            session.command("begin")
+            session.send_pointer((.5, .25))
+            session.command("mouse 2 1")
+            session.wait_until(time.monotonic() + .15)
+            movement = session.read("diagnostics.input")
+            result["movement"] = movement
+            if not (movement.get("movement_pressed") or movement.get("movement_held")) or movement.get("movement_touch", -1) < 0:
+                raise BatchAbort("Combat-settle movement contact was not observed")
+        finally:
+            errors = []
+            if session is not None and attempted:
+                for command in ("mouse 2 0", "end"):
+                    try:
+                        session.command(command, cleanup=True)
+                    except Exception as error:
+                        errors.append(str(error))
+                try:
+                    result["cleanup_contacts_empty"] = session.read("diagnostics.contacts").get("active") == []
+                except Exception as error:
+                    errors.append(str(error))
+            result["cleanup_errors"] = errors
+            with path.open("x") as output:
+                json.dump(result, output, ensure_ascii=False, indent=2)
+                output.write("\n")
+            if errors or (attempted and result.get("cleanup_contacts_empty") is not True):
+                raise BatchAbort(f"Combat-settle cleanup failed: {path}")
+        # No input lease remains during this actual native UI restriction.
+        time.sleep(5.3)
+        self.anchor.preflight(hero)
     def setup(self, hero, directory):
         path = directory / "setup.json"
         original = setup_tool.Setup
@@ -297,14 +353,14 @@ class Coordinator:
                 or not all((summary.get("watch_integrity_checks") or {"missing": False}).values())):
             raise BatchAbort(f"Probe or its cleanup/integrity failed; batch stops: {output}")
         return evidence
-    def return_center(self, hero, directory):
-        path = directory / "return-center.json"
+    def return_center(self, hero, directory, name="return-center"):
+        path = directory / f"{name}.json"
         result = {"format": "clbb-training-center-return", "hero": hero, "status": "observation_only", "commands": [], "samples": [],
                   "phases": [], "pressed_keys": [], "map_clicks": [], "world_receipts": [], "spawn_requests": []}
         with path.open("x") as output:
             session = None
             try:
-                session = self.guarded_setup_class()(hero, result, directory / "return-center.phases")
+                session = self.guarded_setup_class()(hero, result, directory / f"{name}.phases")
                 session.expected_hero()
                 session.controls("preflight")
                 session.raw_idle()
@@ -342,9 +398,14 @@ class Coordinator:
             self.report["heroes"].append(brief)
             with (directory / "report.json").open("x") as output:
                 try:
+                    if getattr(self.args, "combat_settle", False):
+                        self.phase(self.current_hero, "leave-combat", lambda: self.leave_combat(self.current_hero, directory),
+                                   self.current_hero, self.current_hero)
                     self.phase(hero, "choose", lambda: self.choose(hero, directory), self.current_hero, hero, allow_epoch_change=True)
                     self.current_hero = hero
                     self.phase(hero, "setup", lambda: self.setup(hero, directory), hero, hero)
+                    if getattr(self.args, "combat_settle", False):
+                        self.phase(hero, "center-before-probes", lambda: self.return_center(hero, directory, name="initial-center"), hero, hero)
                     audit = self.phase(hero, "contract", lambda: self.audit(hero, directory), hero, hero)
                     controls = self.anchor.preflight(hero)["controls"]
                     plans = plan_probes(audit, controls)
@@ -400,6 +461,7 @@ def main(argv=None):
     parser.add_argument("--output-dir", type=Path, required=True, help="Must be a new directory; failed batches are never auto-resumed")
     parser.add_argument("--basic-probes", action="store_true", help="Additionally run serial QWER probes for observed known templates")
     parser.add_argument("--cancel-probes", action="store_true", help="After basic visits, separately inspect held-skill cancellation; counters still require review")
+    parser.add_argument("--combat-settle", action="store_true", help="Training only: stop autoattacks and allow the native five-second combat restriction to expire before each hero change")
     parser.add_argument("--gm-close-point", type=float, nargs=2, default=(.974, .1), metavar=("U", "V"))
     args = parser.parse_args(argv)
     if any(not math.isfinite(value) or not 0 <= value <= 1 for value in args.gm_close_point):

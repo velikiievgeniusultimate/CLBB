@@ -198,6 +198,18 @@ class TrainingBatchTests(unittest.TestCase):
                 self.assertTrue(all(row["skip_reason"] == "basic_probes_not_requested" for row in item["skipped"]))
                 self.assertNotIn("passed", item)
 
+    def test_optional_combat_fixture_runs_before_choose_and_keeps_both_center_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instance, anchor, report, calls = coordinator(directory)
+            instance.args.combat_settle = True
+            instance.leave_combat = mock.Mock(side_effect=lambda hero, _directory: calls.append(("settle", hero)))
+            instance.return_center = mock.Mock(side_effect=lambda hero, _directory, name="return-center": calls.append((name, hero)))
+            with contextlib.redirect_stdout(io.StringIO()):
+                instance.run()
+            self.assertEqual(calls, [("settle", 25), ("choose", 25), ("setup", 25), ("initial-center", 25), ("return-center", 25),
+                                     ("settle", 25), ("choose", 97), ("setup", 97), ("initial-center", 97), ("return-center", 97)])
+            self.assertTrue(report["sequence_finished"])
+
     def test_process_change_after_setup_aborts_before_audit_or_next_hero(self):
         with tempfile.TemporaryDirectory() as directory:
             instance, anchor, report, calls = coordinator(directory)
