@@ -841,3 +841,41 @@ fn empty_target_up_before_first_owned_snapshot_is_eventually_cancelled() {
     let cancel=h.active[&id];send(&mut c,&mut h,cancel_receipt(90,cancel));
     assert!(ended(&h,id));assert_eq!(c.skillTouch_,-1);
 }
+
+#[test]
+fn native_closed_cancelled_target_with_retained_press_is_retired_after_two_game_ticks() {
+    let(mut c,mut h,id)=started(true);let movement=c.movementTouch_;
+    key(&mut c,&mut h,80,69,false);let point=h.active[&id];
+    let closed=|ms,clock|{
+        let mut f=point_receipt(ms,point,None);
+        f.selection_input.panel_visible=flag(false);f.selection_input.backend_state=n(3.);
+        f.selection_input.native_cancel=flag(true);f.selection_input.target_guid=n(0.);
+        f.game_clock_ms=n(clock);f
+    };
+    send(&mut c,&mut h,closed(90,40.));assert!(!ended(&h,id));
+    send(&mut c,&mut h,closed(100,40.));assert!(!ended(&h,id),"same native tick is not a second confirmation");
+    send(&mut c,&mut h,closed(110,41.));assert!(ended(&h,id));
+    assert!(h.active.contains_key(&movement));assert_eq!(h.abort_all_calls,0);
+}
+#[test]
+fn sticky_closed_cancel_is_not_end_proof_without_current_owned_contact_and_empty_guid() {
+    for case in 0..7 {
+        let(mut c,mut h,id)=started(false);key(&mut c,&mut h,80,69,false);let point=h.active[&id];
+        for (ms,clock)in [(90,40.),(110,41.)]{
+            let mut f=point_receipt(ms,point,None);let s=&mut f.selection_input;
+            s.panel_visible=flag(false);s.backend_state=n(3.);s.native_cancel=flag(true);s.target_guid=n(0.);f.game_clock_ms=n(clock);
+            match case {
+                0=>s.contact_present=Default::default(),
+                1=>s.raw_touch_xyz=v3(1.,1.,0.),
+                2=>s.native_cancel=Default::default(),
+                3=>s.target_guid=n(13016.),
+                4=>s.token=text("foreign-match"),
+                5=>s.backend_owner_id=BACKEND+1,
+                6=>s.sample_start_ns=n((T+59*MS)as f64),
+                _=>unreachable!(),
+            }
+            send(&mut c,&mut h,f);
+        }
+        assert!(!ended(&h,id),"case{case}");
+    }
+}

@@ -430,6 +430,29 @@ impl Controller {
             );
         }
     }
+    fn cancelled_target_contact(&self,s:&SelectionInput)->bool {
+        if !self.pendingRelease_ || self.skillKeyHeld_ || self.selection_.kind!=2
+            || self.selection_.revoked || self.selection_.owner!=s.owner_id
+            || self.selection_.backend_owner!=s.backend_owner_id
+            || !integer(s.backend_state,3,3) || !s.native_cancel.get()
+            || target_guid(s.target_guid)!=Some(0) || s.target_valid.get()
+            || !s.panel_visible.is_bool() || s.panel_visible.get()
+            || !s.contact_present.get() || s.contact_owner_id==0
+            || (self.selection_.contact_owner!=0 && self.selection_.contact_owner!=s.contact_owner_id)
+            || !integer(s.native_contact_id,i32::MIN,i32::MAX)
+            || !s.raw_touch_xyz.valid() || s.raw_touch_xyz.values[2].value.abs()>1.
+        {return false;}
+        let raw=&s.raw_touch_xyz.values;
+        let point=Point::new(raw[0].value*self.androidSize_.x/(self.androidSize_.x-1.),
+            (self.androidSize_.y-raw[1].value)*self.androidSize_.y/(self.androidSize_.y-1.));
+        // A cancelled backend can retain its press position rather than the
+        // last MOVE. Match this cast's actual command history, not a host ID.
+        // Integer native press rounding is allowed only for end-of-gesture
+        // cleanup; target casts and cancel acknowledgments stay exact.
+        finite(point) && self.causal_.history().any(|sent|
+            sent.time_ns>=self.castStartedNs_ && sent.time_ns as f64<=s.sample_start_ns.value
+                && distance(point,sent.pixels)<=1.)
+    }
     fn observe_selection_end(&mut self, host: &mut impl Host, f: &Frame) -> bool {
         let s = &f.selection_input;
         let b = self.find_button(&self.activeSlot_).unwrap();
@@ -449,7 +472,8 @@ impl Controller {
             f.ui.active_slot.as_str().is_empty()
                 && (self.coreSkill_ == 0 || (future && self.coreSkill_ == s.active_skill_id.int()))
         };
-        let empty = self.selection_.captured
+        let cancelled_contact=self.cancelled_target_contact(s);
+        let empty = ((self.selection_.captured
             && !self.selection_.revoked
             && self.selection_.owner == s.owner_id
             && s.panel_visible.is_bool()
@@ -457,7 +481,8 @@ impl Controller {
             && s.has_drag.is_bool()
             && !s.has_drag.get()
             && ui_empty
-            && (same_phase || future)
+            && (same_phase || future))
+            || (cancelled_contact && (same_phase || self.selection_.active==0)))
             && clock_valid
             && self.frameCoreSampleStartNs_ >= self.castStartedNs_
             && same(s.sample_end_ns, f.time_ns);
@@ -496,7 +521,7 @@ impl Controller {
             self.trace(
                 host,
                 "selection_native_end",
-                "owned_panel_capture_and_two_empty_native_ticks",
+                if cancelled_contact {"owned_cancelled_contact_and_two_native_ticks"} else {"owned_panel_capture_and_two_empty_native_ticks"},
             );
             self.finish_auto_completed_selection(host);
         } else {
@@ -507,7 +532,7 @@ impl Controller {
             self.trace(
                 host,
                 "selection_native_end",
-                "await_second_empty_native_tick",
+                if cancelled_contact {"await_second_cancelled_contact_tick"} else {"await_second_empty_native_tick"},
             );
         }
         true
