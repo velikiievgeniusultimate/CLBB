@@ -171,6 +171,31 @@ fn harley_cards_direction_template(skill:i32,motion:&str,package:&str,rect:i32,p
         && params[8..20].iter().all(|v|*v==0.) && params[20..]==[3.,20.]
 }
 
+// Captured Grock rework layouts. Keep the generic shape-nine Rect1 family
+// unchanged; only these current skill/config tuples qualify new geometry.
+fn grock_observed_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,params:&[f64])->Option<u8> {
+    match (skill,motion,package,rect,base) {
+        (4420,"IndicatorMotionRotAndPosRot","IndicatorPackage_JianTou_OtherPart",16,717) if params==[9.0,7.5,90440.0,0.3499999940395355,0.4000000059604645,0.0,1.0,0.0,0.0,0.0,1.0,0.30000001192092896,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,3.0,1.0,1.0,1.0] => Some(3),
+        (4430,"IndicatorMotion_Block","IndicatorPackage_JianTou_PosYuan",0,688) if params==[23.0,9.0,44001.0,9.0,0.800000011920929,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,3.5] => Some(2),
+        _=>None,
+    }
+}
+fn grock_configuration_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,motion:&str,package:&str,checks:&mut Checks)->Result<Option<u8>> {
+    if !matches!((skill,motion,package),(4420,"IndicatorMotionRotAndPosRot","IndicatorPackage_JianTou_OtherPart")|(4430,"IndicatorMotion_Block","IndicatorPackage_JianTou_PosYuan")) {return Ok(None);}
+    let (rect,_)=native_rect_config(r,comp,skill,checks)?;
+    let config=owner(r,comp,"m_Config",checks)?;
+    let base=typed_field(r,config,"m_BaseType",8)?;
+    let base=i32_at(&capture(r,checks,base,4)?,0);
+    typed_field(r,config,"m_ShowRectPara",29)?;
+    let array=owner(r,config,"m_ShowRectPara",checks)?;
+    let header=capture(r,checks,array,32)?;let count=u64_at(&header,24);
+    let expected=if skill==4420 {24}else{21};
+    if count!=expected {return Err("Grock native parameter count changed".into());}
+    let raw=capture(r,checks,array+32,count as usize*4)?;
+    let params=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+    grock_observed_template(skill,motion,package,rect,base,&params).map(Some).ok_or_else(||"Unverified Grock native configuration".into())
+}
+
 fn native_range_shape(motion:&str,package:&str)->Option<f64> {
     match (motion,package) {
         ("IndicatorMotionRotAndPosRot"|"IndicatorMotionFaTiaoQiu2","IndicatorPackage_JianTou_Yuan")=>Some(8.),
@@ -219,7 +244,7 @@ fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,pack
     }
     if shape==9. {
         let(rect,params)=native_rect_config(r,comp,skill,checks)?;
-        if rect!=1||!valid_native_range(shape,params){return Err("Unverified shape-nine native range configuration".into());}
+        if (rect!=1 && grock_configuration_contract(r,comp,skill,motion_name,package_name,checks)?!=Some(3))||!valid_native_range(shape,params){return Err("Unverified shape-nine native range configuration".into());}
     }
     native_range_contract_for_shape(r,comp,motion,package,skill,shape,checks).map(Some)
 }
@@ -257,7 +282,7 @@ fn candidate_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,p
     if motion_name!="IndicatorMotionRotAndPosRot"||package_name!="IndicatorPackage_JianTou_OtherPart" {return Ok(None);}
     if !(1..=10_000_000).contains(&skill){return Err("Invalid candidate range identity".into());}
     let(rect,params)=native_rect_config(r,comp,skill,checks)?;
-    if rect!=1||!valid_native_range(9.,params){return Err("Unverified candidate range configuration".into());}
+    if (rect!=1 && grock_configuration_contract(r,comp,skill,motion_name,package_name,checks)?!=Some(3))||!valid_native_range(9.,params){return Err("Unverified candidate range configuration".into());}
     native_range_contract_for_shape(r,comp,motion,package,skill,9.,checks).map(Some)
 }
 fn native_rect_config<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,checks:&mut Checks)->Result<(i32,[f64;2])> {
@@ -676,7 +701,9 @@ impl MotionPlan {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
-        if !base_tap&&!shadow_direction&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        // Read-only Grock discovery, not a production direction admission.
+        let block_audit=skill==4430 && mc.name=="IndicatorMotion_Block" && pc.name=="IndicatorPackage_JianTou_PosYuan";
+        if !base_tap&&!shadow_direction&&!block_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
             if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
@@ -689,7 +716,7 @@ impl MotionPlan {
         }
         let mut values=serde_json::Map::new();
         for name in ["m_vDragResult","m_vDragTouchPos","m_vDragDir","m_vActiveDir"] {
-            let at=if base_tap{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
+            let at=if base_tap||block_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
             if at<motion || at+12>motion+4096 {return Err("Audit vector outside motion".into());}
             let raw=capture(r,&mut checks,at,12)?;
             values.insert(name.into(),serde_json::json!(source::vec3(&raw)?));
@@ -701,7 +728,7 @@ impl MotionPlan {
             }
         }
         for name in ["m_fDragRatio","m_dragged","m_bVaildDraged"] {
-            let at=if base_tap{typed_field(r,motion,name,if name=="m_fDragRatio"{12}else{2})?}else{r.field(motion,name)?};
+            let at=if base_tap||block_audit{typed_field(r,motion,name,if name=="m_fDragRatio"{12}else{2})?}else{r.field(motion,name)?};
             let raw=capture(r,&mut checks,at,if name=="m_fDragRatio" {4}else{1})?;
             let value=if name=="m_fDragRatio" {
                 let v=f32_at(&raw,0);if !v.is_finite() || v<0. || v>=1e6{return Err("Invalid audit ratio".into());}serde_json::json!(v)
@@ -837,7 +864,7 @@ impl MotionPlan {
             kind
         }
         else if base_tap {1}
-        else if shadow_direction || camera_direction {2}
+        else if shadow_direction || camera_direction || grock_configuration_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?==Some(2) {2}
         else if fixed_part_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)? {2}
         else if mc.name=="IndicatorMotionPos" && pc.name=="IndicatorPackage_TwoPartAndPos_Direction" {
@@ -907,7 +934,7 @@ impl MotionPlan {
         let range_contract=native_range_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
-        let configured_direction=shadow_direction || camera_direction || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
+        let configured_direction=shadow_direction || camera_direction || grock_configuration_contract(r,comp,skill,&name,&package_class.name,&mut checks)?==Some(2) || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
         let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,configured_direction);
         let expected = match skill {
@@ -1852,6 +1879,22 @@ mod tests {
             r.memory.0.borrow_mut()[1060..1064].copy_from_slice(&rect.to_le_bytes());
             r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&shape.to_le_bytes());
             assert!(additional_direction_contract(&mut r,128,12710,m,package,&mut Vec::new()).unwrap());
+        }
+    }
+    #[test]
+    fn grock_rework_layouts_match_captured_configuration_without_broadening_other_skills() {
+        let rows:Vec<serde_json::Value>=serde_json::from_str(include_str!("../tests/fixtures/grock-44-native-configurations.json")).unwrap();
+        for row in rows {
+            let skill=row["skill"].as_i64().unwrap()as i32;let rect=row["rect"].as_i64().unwrap()as i32;let base=row["base"].as_i64().unwrap()as i32;
+            let m=row["motion"].as_str().unwrap();let p=row["package"].as_str().unwrap();let values=row["params"].as_array().unwrap().iter().map(|v|v.as_f64().unwrap()).collect::<Vec<_>>();
+            assert_eq!(grock_observed_template(skill,m,p,rect,base,&values),Some(row["behavior"].as_u64().unwrap()as u8));
+            for other in [2510,2520,2530,8430,1830,4220] {assert_eq!(grock_observed_template(other,m,p,rect,base,&values),None);}
+            for i in 0..values.len() {let mut bad=values.clone();bad[i]=f64::NAN;assert_eq!(grock_observed_template(skill,m,p,rect,base,&bad),None);}
+            let mut r=base_tap_fixture();
+            {let mut b=r.memory.0.borrow_mut();b[1056..1060].copy_from_slice(&skill.to_le_bytes());b[1060..1064].copy_from_slice(&rect.to_le_bytes());b[1072..1076].copy_from_slice(&base.to_le_bytes());b[1560..1568].copy_from_slice(&(values.len()as u64).to_le_bytes());for(i,v)in values.iter().enumerate(){b[1568+i*4..1572+i*4].copy_from_slice(&(*v as f32).to_le_bytes());}}
+            let mut checks=Vec::new();assert_eq!(grock_configuration_contract(&mut r,128,skill,m,p,&mut checks).unwrap(),Some(row["behavior"].as_u64().unwrap()as u8));
+            if skill==4420 {assert!(native_range_contract(&mut r,128,256,384,skill,m,p,&mut Vec::new()).unwrap().is_some());}
+            let at=1568+(values.len()-1)*4;r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&99f32.to_le_bytes());assert!(check(&r,&checks).is_err());assert!(grock_configuration_contract(&mut r,128,skill,m,p,&mut Vec::new()).is_err());
         }
     }
     #[test]
