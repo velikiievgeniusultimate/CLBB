@@ -313,6 +313,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Grock's observed second cast destroys his existing wall. The
         // native Base/Base registry is not an aiming action.
         || (hero==44 && slot=="skill:1" && base==4420 && active==4426)
+        // Odette's current freely moving song exposes an ordinary stop
+        // button through the same slot, without an aiming registry entry.
+        || (hero==46 && slot=="skill:2" && base==4630 && active==4681)
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -2373,6 +2376,15 @@ mod tests {
         for(hero,slot,base,active)in [(56,"skill:0",5610,5610),(56,"skill:1",5620,5620),
             (56,"skill:0",5610,5611),(56,"skill:1",5620,5621),(56,"skill:0",5620,5623),
             (56,"skill:1",5610,5612),(55,"skill:0",5610,5612),(56,"skill:2",5620,5623)] {
+            assert!(!verified_button_only_form(hero,slot,base,active));
+        }
+    }
+    #[test]
+    fn odette_song_stop_is_plain_only_after_her_owned_ultimate_changes_form() {
+        assert!(verified_button_only_form(46,"skill:2",4630,4681));
+        for(hero,slot,base,active)in [(46,"skill:2",4630,4630),(46,"skill:2",4630,4680),
+            (46,"skill:1",4630,4681),(46,"skill:0",4630,4681),(46,"skill:2",4530,4681),
+            (46,"skill:2",4681,4681),(55,"skill:2",4630,4681),(9,"skill:2",4630,4681)] {
             assert!(!verified_button_only_form(hero,slot,base,active));
         }
     }
