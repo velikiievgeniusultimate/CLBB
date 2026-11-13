@@ -95,6 +95,13 @@ Rust-инструмент только читает память выбранн�
 после отмены и результат после отпускания, а не только итоговый счётчик.
 Для повторной кнопки подтвердите текущий вариант, его доступность,
 удержание и результат. Сопоставляйте GUID призванного существа до/после действия.
+Проверяйте также смену варианта во время одного удержания. У Хелкарта W
+может пройти 5120 → 5121 → 5122 → 5123 → 5124 при накоплении клинков:
+контакт и направление должны сохраниться, а отмена — сохранить накопленные
+клинки. Для изолированной проверки отмены сначала подтвердите завершение
+предыдущего применения по счётчику, КД или смене формы. Освободившийся
+виртуальный палец сам по себе не доказывает, что игра уже применила навык;
+иначе эффект предыдущего применения можно ошибочно приписать новой отмене.
 `cast_locked: false` не означает отсутствия КД: отдельно проверяйте
 `VirtualButton.m_CdCoolDown`. `ready: true` также может сопровождаться КД.
 
@@ -137,6 +144,10 @@ Zhask's summons are observed in `m_ShowMonsters` as `ShowSummons`; include that
 container and track fresh GUIDs. A world-tracking test must not resend an old
 cursor coordinate after UP. Compare the actual outcome with the last coherent
 native target before release, respecting the indicator's visual plane.
+Exercise form changes within one held input, such as Helcurt's accumulating
+knives. Touch/direction must survive and cancellation must retain the resource.
+For an isolated cancellation measurement, establish the previous cast's actual
+application before attributing a later effect to the next input.
 
 ## Отказы диагностического аудита
 
