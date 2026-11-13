@@ -318,10 +318,9 @@ impl Controller {
             "owned_ui_hover_and_exact_native_touch",
         );
     }
-    fn target_receipt(&self, s: &SelectionInput) -> Option<(Point, u64, i64)> {
-        if !s.input_ready.get()
+    fn target_receipt(&self, s: &SelectionInput, empty_press: bool) -> Option<(Point, u64, i64)> {
+        if (!empty_press && (!s.input_ready.get() || !s.has_drag.get()))
             || !s.panel_visible.get()
-            || !s.has_drag.get()
             || !s.contact_present.get()
             || s.contact_owner_id == 0
             || !integer(s.native_contact_id, i32::MIN, i32::MAX)
@@ -378,7 +377,14 @@ impl Controller {
             );
             return;
         }
-        let Some((point, sequence, _)) = self.target_receipt(s) else {
+        // A coherent native zero GUID is an explicit empty recipient, not a
+        // delayed join for a nonzero target. After physical UP even a press
+        // that never crossed the drag deadzone must enter owned cancellation.
+        // This exception never authorizes a target cast or a cancel ACK.
+        let empty_recipient = target_guid(s.target_guid)==Some(0) && !s.target_valid.get();
+        let empty_press = self.pendingRelease_ && empty_recipient
+            && s.input_ready.is_bool() && s.has_drag.is_bool() && !s.has_drag.get();
+        let Some((point, sequence, _)) = self.target_receipt(s, empty_press) else {
             self.trace(
                 host,
                 "selection_feedback_rejected",
@@ -399,7 +405,7 @@ impl Controller {
             && s.target_self_id != 0
             && !s.target_cancel_hit.get();
         self.selection_.target_invalid =
-            (s.target_valid.is_bool() && !s.target_valid.get()) || s.target_cancel_hit.get();
+            empty_recipient || (s.target_valid.is_bool() && !s.target_valid.get()) || s.target_cancel_hit.get();
         if valid {
             self.selection_.target_guid = target_guid(s.target_guid).unwrap();
             self.selection_.target_owner = s.target_owner_id;
@@ -633,7 +639,7 @@ impl Controller {
             && s.contact_owner_id == self.selection_.contact_owner
             && s.target_cancel_hit.get()
             && s.native_cancel.get()
-            && self.target_receipt(s).is_some_and(|(point, _, time)| {
+            && self.target_receipt(s, false).is_some_and(|(point, _, time)| {
                 time >= self.skillCancelSentNs_
                     && distance(
                         point,

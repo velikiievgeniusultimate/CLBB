@@ -792,3 +792,52 @@ fn cancelling_at_the_already_delivered_point_sends_a_new_causal_move_for_native_
     assert!(traced(&h, "owned_target_cancel_flag_and_exact_native_touch"));
     assert_eq!(h.abort_all_calls, 0);
 }
+
+#[test]
+fn empty_target_up_cancels_without_leaving_a_contact_or_blocking_other_skills() {
+    for dragged in [true,false] {
+        let (mut c,mut h,id)=started(true);let movement=c.movementTouch_;
+        let point=h.active[&id];let mut empty=point_receipt(75,point,None);
+        empty.selection_input.target_guid=n(0.);
+        if !dragged {empty.selection_input.input_ready=flag(false);empty.selection_input.has_drag=flag(false);}
+        send(&mut c,&mut h,empty);
+        assert!(!c.skillCancelPending_,"holding without a recipient must remain usable");
+        key(&mut c,&mut h,80,69,false);let goal=h.active[&id];
+        let mut receipt=point_receipt(90,goal,None);receipt.selection_input.target_guid=n(0.);
+        if !dragged {receipt.selection_input.input_ready=flag(false);receipt.selection_input.has_drag=flag(false);}
+        send(&mut c,&mut h,receipt);
+        assert!(c.skillCancelPending_,"zero native GUID must cancel after UP, dragged={dragged}");
+        assert!(!ended(&h,id),"never send a neutral target UP before native cancellation");
+        assert_eq!(h.active[&id],Point::new(0.88,0.27));
+        let cancel=h.active[&id];send(&mut c,&mut h,cancel_receipt(100,cancel));
+        assert!(ended(&h,id));assert!(h.active.contains_key(&movement));
+        assert_eq!(h.abort_all_calls,0);assert_eq!(c.skillTouch_,-1);
+        key(&mut c,&mut h,110,81,true);assert!(c.skillTouch_>=0,"next skill must be admitted");
+        assert_ne!(c.skillTouch_,movement);
+    }
+}
+#[test]
+fn fast_valid_target_up_waits_for_current_point_before_deciding_empty() {
+    let(mut c,mut h,id)=started(false);let previous=h.active[&id];
+    pointer(&mut c,&mut h,75,Point::new(0.4,0.65));
+    key(&mut c,&mut h,80,69,false);let goal=h.active[&id];assert_ne!(previous,goal);
+    let mut old=point_receipt(90,previous,None);old.selection_input.target_guid=n(0.);
+    send(&mut c,&mut h,old);assert!(!c.skillCancelPending_);assert!(!ended(&h,id));
+    send(&mut c,&mut h,point_receipt(95,goal,Some(13016)));
+    assert!(ended(&h,id));assert!(!c.skillCancelPending_);
+}
+
+#[test]
+fn empty_target_up_before_first_owned_snapshot_is_eventually_cancelled() {
+    let(mut c,mut h)=setup(false,Point::new(0.73,0.36));
+    key(&mut c,&mut h,60,69,true);let id=c.skillTouch_;
+    key(&mut c,&mut h,61,69,false);assert!(!ended(&h,id));
+    send(&mut c,&mut h,held(70));
+    let point=h.active[&id];let mut empty=point_receipt(80,point,None);
+    empty.selection_input.target_guid=n(0.);
+    send(&mut c,&mut h,empty);
+    assert!(c.skillCancelPending_);
+    assert!(!ended(&h,id));
+    let cancel=h.active[&id];send(&mut c,&mut h,cancel_receipt(90,cancel));
+    assert!(ended(&h,id));assert_eq!(c.skillTouch_,-1);
+}
