@@ -296,6 +296,10 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // its HookLine indicator does not take a second aiming direction.
         || (hero==26 && slot=="skill:2" && base==2630 && active==2632)
         || (hero==25 && slot=="skill:2" && base==2530 && matches!(active,2530|2531))
+        // Angela can stop the attachment channel through its ordinary native
+        // cancel form; it has no indicator registry entry. Selection5530 and
+        // the later aimed detach5535 retain their own existing behavior.
+        || (hero==55 && slot=="skill:2" && base==5530 && active==5534)
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -1395,7 +1399,7 @@ impl<M: Memory> Source<M> {
                 control_types.insert(entry.slot.owned(), 2);
                 continue;
             }
-            if !choice_family && verified_button_only_form(hero,entry.slot.as_str(),entry.skill_id.int(),id) {
+            if verified_button_only_form(hero,entry.slot.as_str(),entry.skill_id.int(),id) {
                 // Explicitly verified recasts/ultimates are button presses,
                 // even when their original ability has directional geometry.
                 control_types.insert(entry.slot.owned(), 1);
@@ -2270,6 +2274,22 @@ mod tests {
         assert_eq!(published.get("skill:2"),Some(&4),"a known future ID still needs independently verified native geometry");
         published.insert("skill:2".into(),choice_control_type(Some(false),Some(1)));
         assert_eq!(published.get("skill:2"),Some(&1));
+    }
+    #[test]
+    fn angela_cancel_is_only_the_owned_channel_form_after_target_selection() {
+        assert!(verified_button_only_form(55,"skill:2",5530,5534));
+        for(hero,slot,base,active)in [(55,"skill:2",5530,5530),(55,"skill:2",5530,5535),(55,"skill:1",5530,5534),(31,"skill:2",5530,5534),(55,"skill:2",5534,5534)] {
+            assert!(!verified_button_only_form(hero,slot,base,active));
+        }
+        let mut ui=s::Ui::default();ui.ready=flag(true);ui.hero_id=number(55.);ui.button_count=1;
+        ui.buttons[0]=s::Button{slot:text("skill:2"),active:flag(true),skill_id:number(5530.),..Default::default()};
+        let mut state=s::VariantState::default();state.ready=flag(true);state.hero_id=number(55.);state.count=1;
+        state.buttons[0]=s::Variant{slot:text("skill:2"),base_skill_id:number(5530.),active_skill_id:number(5534.),..Default::default()};
+        assert_eq!(choice_selector_phase(&ui,&state,"skill:2"),Some(false));
+        assert_eq!(choice_control_type(Some(false),Some(1)),1);
+        state.buttons[0].active_skill_id=number(5530.);
+        assert_eq!(choice_selector_phase(&ui,&state,"skill:2"),Some(true));
+        assert_eq!(choice_control_type(Some(true),Some(1)),4);
     }
     #[test]
     fn badang_wall_removal_is_only_the_owned_cancel_form_not_the_dash() {
