@@ -7155,7 +7155,7 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..a4422bd
+index 0000000..b3f53d4
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
 @@ -0,0 +1,1419 @@
@@ -7233,15 +7233,15 @@ index 0000000..a4422bd
 +    return read ? (read() & (1u << 16)) != 0 : 1;
 +}
 +float clbb_master_gain(void) {
-+    ClbbGain gain = atomic_load_explicit(&master_gain, memory_order_relaxed);
++    ClbbGain gain = atomic_load_explicit(&master_gain, memory_order_acquire);
 +    return gain ? gain() : 1.f;
 +}
 +float clbb_game_gain(void) {
-+    ClbbGain gain = atomic_load_explicit(&game_gain, memory_order_relaxed);
++    ClbbGain gain = atomic_load_explicit(&game_gain, memory_order_acquire);
 +    return gain ? gain() : clbb_master_gain();
 +}
 +float clbb_voice_gain(void) {
-+    ClbbGain gain = atomic_load_explicit(&voice_gain, memory_order_relaxed);
++    ClbbGain gain = atomic_load_explicit(&voice_gain, memory_order_acquire);
 +    return gain ? gain() : clbb_master_gain();
 +}
 +typedef struct {

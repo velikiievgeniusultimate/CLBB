@@ -7,7 +7,7 @@ selected immutable runtime or persisted bindings are replaced. Busy/recording
 sessions are rejected. Use --rollback to stage the preceding mapper again.
 """
 from __future__ import annotations
-import argparse,hashlib,json,os,shutil,socket,subprocess,tempfile,time
+import argparse,hashlib,json,os,socket,subprocess,tempfile,time
 from pathlib import Path
 import sys
 ROOT=Path(__file__).resolve().parents[1]
@@ -61,7 +61,8 @@ def main():
                 data.extend(part)
                 if len(data)>1048576:raise RuntimeError('Live control response exceeds bound')
         identity();return data.decode()
-    before=json.loads(command('read diagnostics.reload'))
+    try:before=json.loads(command('read diagnostics.reload'))
+    except json.JSONDecodeError:raise RuntimeError('Current host lacks live reloading; install the new host once')from None
     if not isinstance(before,dict) or before.get('supported')is not True:raise RuntimeError('Install the live-reload host once; current game has no compatible loader')
     if args.status:print(json.dumps(before,ensure_ascii=False));return
     record={'pid':pid,'birth':expected,'before':before,'started_ns':time.monotonic_ns()}
@@ -91,4 +92,7 @@ def main():
     history=ROOT/'logs/live-mapper';history.mkdir(parents=True,exist_ok=True)
     path=history/f'reload-{record["finished_ns"]}.json';path.write_text(json.dumps(record,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps({'pid_unchanged':pid,'generation':record['after']['generation'],'sha256':expected_sha,'report':str(path)},ensure_ascii=False))
-if __name__=='__main__':main()
+if __name__=='__main__':
+    try:main()
+    except(Exception,KeyboardInterrupt)as error:
+        print('CLBB live mapper: '+str(error),file=sys.stderr);raise SystemExit(1)
