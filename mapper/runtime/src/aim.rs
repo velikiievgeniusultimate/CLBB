@@ -132,6 +132,12 @@ fn hilda_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,params:&[
     skill==3510 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
         && rect==0 && params==[3.,0.]
 }
+// Hylos Q arms a self speed buff and an enhanced next basic attack. The
+// trailing values belong to this observed configuration, not an aiming range.
+fn hylos_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,params:&[f64])->bool {
+    skill==4910 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
+        && rect==0 && base==1 && params==[3.,0.,30006.,0.5]
+}
 fn movement_driven_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
     motion=="IndicatorMotionRot" && package=="IndicatorPackageEasy_JianTou_DrivenByJoystick"
         && rect==11 && params.len()>=2 && params[0]==27.
@@ -422,7 +428,18 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
         let at=typed_field(r,config,"m_BaseType",8)?;
         if i32_at(&capture(r,checks,at,4)?,0)!=1 {return Err("Hilda self-tap base type changed".into());}
     }
-    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina && !hilda {
+    let hylos=if skill==4910 {
+        let array=owner(r,config,"m_ShowRectPara",checks)?;
+        let header=capture(r,checks,array,32)?;
+        if u64_at(&header,24)!=4 {false} else {
+            let at=typed_field(r,config,"m_BaseType",8)?;
+            let base=i32_at(&capture(r,checks,at,4)?,0);
+            let raw=capture(r,checks,array+32,16)?;
+            let full=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+            hylos_self_tap_template(skill,motion_name,package_name,rect,base,&full)
+        }
+    } else {false};
+    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina && !hilda && !hylos {
         return Err("Unverified nonzero base-tap configuration".into());
     }
     for object in [motion,package] {
@@ -1726,6 +1743,27 @@ mod tests {
         assert!(!karina_self_tap_template(810,"IndicatorMotionPos",p,0,&[3.,0.]));
         assert!(!karina_self_tap_template(810,m,"IndicatorPackageEasy",0,&[3.,0.]));
         assert!(!zero_extent_base_tap_template(m,p,0,&[3.,0.]));
+    }
+    #[test]
+    fn hylos_buff_is_not_general_rect_zero_aim_or_other_heroes() {
+        let m="IndicatorMotionBase";let p="IndicatorPackageEasy_Yuan";
+        let params=[3.,0.,30006.,0.5];
+        assert!(hylos_self_tap_template(4910,m,p,0,1,&params));
+        for skill in [810,3510,4920,4930,4911] {
+            assert!(!hylos_self_tap_template(skill,m,p,0,1,&params));
+        }
+        for rect in [-1,1,11] {assert!(!hylos_self_tap_template(4910,m,p,rect,1,&params));}
+        for base in [0,11,688] {assert!(!hylos_self_tap_template(4910,m,p,0,base,&params));}
+        for i in 0..params.len() {
+            let mut changed=params;changed[i]+=1.;
+            assert!(!hylos_self_tap_template(4910,m,p,0,1,&changed));
+            changed[i]=f64::NAN;
+            assert!(!hylos_self_tap_template(4910,m,p,0,1,&changed));
+        }
+        assert!(!hylos_self_tap_template(4910,m,p,0,1,&params[..2]));
+        assert!(!hylos_self_tap_template(4910,"IndicatorMotionPos",p,0,1,&params));
+        assert!(!hylos_self_tap_template(4910,m,"IndicatorPackageEasy",0,1,&params));
+        assert!(!zero_extent_base_tap_template(m,p,0,&params));
     }
     #[test]
     fn hilda_self_tap_stays_scoped_to_verified_button() {
