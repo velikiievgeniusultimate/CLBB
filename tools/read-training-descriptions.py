@@ -8,12 +8,19 @@ a=argparse.ArgumentParser();a.add_argument('--hero',type=int,required=True);a.ad
 assert args.hero not in {h['id']for h in json.loads(args.frozen_manifest.read_text())['heroes']}
 def audit(name,filter):
  p=args.output/(name+'.json');subprocess.run([str(ROOT/'mapper/runtime/target/debug/training-ui-audit'),str(r.pid),str(p),filter],check=True,stdout=subprocess.DEVNULL,cwd=ROOT);d=json.loads(p.read_text());assert d['topology_unchanged'] and not d['truncated'];r.identity();assert int(r.rpc('read hero.id'))==args.hero;return d
-initial=audit('panel-before','playerinfo');by={o['path']:o for o in initial['objects']};icons=[]
-for i in range(1,5):
- path=f'UIPlayerInfo.m_UIFrameInfo.m_sprite_SkillIcon{i:02}';o=by.get(path);g=o.get('widget')if o else None
- if g and g['visible']and g['onscreen'] and all(0<x<1 for x in g['center_uv']):icons.append((path,g['center_uv']))
-assert len(icons)==4,'Only observed three-skill+passive panel supported by this helper'
-result={'hero':args.hero,'pid':r.pid,'birth':r.birth,'scope':'Actual localized visible in-game full-description UILabel text, not CData localization keys or guessed names; no skill classification authorization','descriptions':[]}
+initial=audit('panel-before','playerinfo');by={o['path']:o for o in initial['objects']}
+def visible_icon(path):
+ o=by.get(path);g=o.get('widget')if o else None
+ return (path,g['center_uv'])if g and g['visible']and g['onscreen']and all(0<x<1 for x in g['center_uv'])else None
+normal=[visible_icon(f'UIPlayerInfo.m_UIFrameInfo.m_sprite_SkillIcon{i:02}')for i in range(1,4)]
+four=[visible_icon(f'UIPlayerInfo.m_UIFrameInfo.m_sprite_4SkillInfo{i:02}')for i in [1,2,3,0]]
+passive=visible_icon('UIPlayerInfo.m_UIFrameInfo.m_sprite_SkillIcon04')
+assert passive,'Observed passive icon absent'
+if all(normal)and not any(four):icons=normal+[passive];layout='three-skills-and-passive'
+elif all(four)and not any(normal):icons=four+[passive];layout='four-skills-and-passive'
+else:raise AssertionError('Unknown or overlapping native description layout')
+assert len({tuple(point)for _,point in icons})==len(icons),'Native description icons overlap'
+result={'hero':args.hero,'pid':r.pid,'birth':r.birth,'layout':layout,'scope':'Actual localized visible in-game full-description UILabel text, not CData localization keys or guessed names; no skill classification authorization','descriptions':[]}
 for i,(path,point)in enumerate(icons):
  r.tap(point);d=audit(f'selected-{i}','playerinfo');rows={o['path']:o for o in d['objects']};texts={}
  for field in ['m_Label_SkillInfoNameFull','m_Label_SkillInfoTipFull_Imageable','m_Label_SkillInfoCDFull','m_Label_SkillInfoMCFull','m_Label_HeroAttrName']:

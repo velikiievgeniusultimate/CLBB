@@ -10,8 +10,8 @@
 
 ## Описания из интерфейса
 
-Откройте панель описаний стрелкой справа и включите «Полный». Для стандартной
-панели с тремя навыками и пассивкой:
+Откройте панель описаний стрелкой справа и включите «Полный». Для наблюдаемых
+панелей с тремя или четырьмя навыками и пассивкой:
 
 ```sh
 sudo -n python3 tools/read-training-descriptions.py --hero HERO_ID --frozen-manifest MANIFEST.json --output NEW_DIRECTORY
@@ -109,7 +109,7 @@ hero ready for user review. Successful scripts or inferred templates alone are
 insufficient. User confirmation remains separate.
 
 `read-training-descriptions.py` reads localized UI labels with screenshots and
-checks panel closure; it supports the observed three-skill panel only.
+checks panel closure; it supports the observed three- and four-skill panels.
 `training-actors-audit` provides bounded read-only snapshots/JSONL watches of
 owned live players and summons, with identity, type and coherence checks.
 Use fresh positions after displacement. Application counters alone do not prove
