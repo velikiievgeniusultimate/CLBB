@@ -303,6 +303,10 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Akai stops Heavy Spin through the same owned ultimate slot.
         // The stop form has no aiming registry, unlike other active forms.
         || (hero==9 && slot=="skill:2" && base==930 && active==938)
+        // Gusion's marked-target pursuit and dagger recall are plain recasts.
+        // Availability and the hit requirement come from the native variant.
+        || (hero==56 && ((slot=="skill:0" && base==5610 && active==5612)
+            || (slot=="skill:1" && base==5620 && active==5623)))
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -2277,6 +2281,16 @@ mod tests {
         assert_eq!(published.get("skill:2"),Some(&4),"a known future ID still needs independently verified native geometry");
         published.insert("skill:2".into(),choice_control_type(Some(false),Some(1)));
         assert_eq!(published.get("skill:2"),Some(&1));
+    }
+    #[test]
+    fn gusion_recasts_are_plain_only_after_the_native_form_switch() {
+        assert!(verified_button_only_form(56,"skill:0",5610,5612));
+        assert!(verified_button_only_form(56,"skill:1",5620,5623));
+        for(hero,slot,base,active)in [(56,"skill:0",5610,5610),(56,"skill:1",5620,5620),
+            (56,"skill:0",5610,5611),(56,"skill:1",5620,5621),(56,"skill:0",5620,5623),
+            (56,"skill:1",5610,5612),(55,"skill:0",5610,5612),(56,"skill:2",5620,5623)] {
+            assert!(!verified_button_only_form(hero,slot,base,active));
+        }
     }
     #[test]
     fn akai_spin_cancel_is_only_the_owned_stop_form() {
