@@ -21,12 +21,19 @@ fn schema(r: &mut Reflection<ProcessMemory>, object: u64) -> Result<(String, BTr
     Ok((name, fields))
 }
 fn managed_string(r: &mut Reflection<ProcessMemory>, string: u64) -> Result<String> {
-    if r.class(r.pointer(string)?)?.name != "String" { return Err("not a managed string".into()); }
+    let class=r.pointer(string)?;
+    if r.class(class)?.name != "String" { return Err("not a managed string".into()); }
     let count = r.integer(string + 16)?;
-    if !(0..=512).contains(&count) { return Err("UI text exceeds audit bound".into()); }
+    // Expanded current skill descriptions can exceed512 UTF-16 code units.
+    // Keep reads bounded and reject reuse/mutation instead of emitting partial text.
+    if !(0..=4096).contains(&count) { return Err("UI text exceeds audit bound".into()); }
     let raw = r.read(string + 20, count as usize * 2)?;
-    String::from_utf16(&raw.chunks_exact(2).map(|v|u16::from_le_bytes(v.try_into().unwrap())).collect::<Vec<_>>())
-        .map_err(|_|"invalid UI UTF-16".into())
+    let value=String::from_utf16(&raw.chunks_exact(2).map(|v|u16::from_le_bytes(v.try_into().unwrap())).collect::<Vec<_>>())
+        .map_err(|_|"invalid UI UTF-16".to_string())?;
+    if r.pointer(string)?!=class || r.integer(string+16)?!=count || r.read(string+20,raw.len())?!=raw {
+        return Err("UI text changed during audit".into());
+    }
+    Ok(value)
 }
 fn camera_matrices(r: &mut Reflection<ProcessMemory>, camera:u64) -> Option<([f64;16],[f64;16])> {
     if r.class(r.pointer(camera).ok()?).ok()?.name != "Camera" { return None; }
