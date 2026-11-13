@@ -233,6 +233,7 @@ impl Family {
 pub struct OptionalUi {
     ui: u64,
     show: u64,
+    local_hero_address: u64,
     roots: Checks,
     active_frames_field: u64,
     frames: Vec<u64>,
@@ -242,6 +243,9 @@ pub struct OptionalUi {
     attacks: Family,
 }
 impl OptionalUi {
+    pub(crate) fn upgrade_inventory_verified<M:Memory>(&self,r:&Reflection<M>)->bool {
+        self.upgrades.valid(r) && current(r,&self.roots)
+    }
     pub(crate) fn active_frames(&self) -> &[u64] {&self.frames}
     pub(crate) fn active_frame_checks(&self) -> &Checks {&self.frame_membership}
 
@@ -250,6 +254,7 @@ impl OptionalUi {
         ui_key_skill: u64,
         active_frames: &[u64],
         local_show: u64,
+        local_hero_address: u64,
     ) -> Result<Self> {
         let mut roots = Vec::new();
         owner(r, &mut roots, ui_key_skill)?;
@@ -278,6 +283,7 @@ impl OptionalUi {
         let mut result = Self {
             ui: ui_key_skill,
             show: local_show,
+            local_hero_address,
             roots,
             active_frames_field,
             frames: active_frames.to_vec(),
@@ -402,6 +408,22 @@ impl OptionalUi {
                 }
                 let at = r.field(button, "m_iIndex")?;
                 let index = i32_at(&capture(r, &mut family.checks, at, 4)?, 0);
+                if class.name=="KeySkillLockDeadHero" {
+                    let hero=i32_at(&capture(r,&mut family.checks,self.local_hero_address,4)?,0);
+                    let data=link(r,&mut family.checks,button,"m_SkillData")?;
+                    owner(r,&mut family.checks,data)?;
+                    let base_at=r.field(data,"m_InitSkillID")?;
+                    let base=i32_at(&capture(r,&mut family.checks,base_at,4)?,0);
+                    if crate::source::additional_hero_skill_index(hero,&class.name,index,base).is_some() {
+                        let max_at=r.field(button,"m_iMaxSkillLevel")?;
+                        let maximum=i32_at(&capture(r,&mut family.checks,max_at,4)?,0);
+                        let add=link(r,&mut family.checks,button,"m_SkillAddBtn")?;
+                        // This owned selector is a usable hero control, but
+                        // native max0/addNULL prove it is not a learnable skill.
+                        // Rebinding either field invalidates this exclusion.
+                        if maximum==0 && add==0 {continue;}
+                    }
+                }
                 if !(0..4).contains(&index) {
                     continue;
                 }

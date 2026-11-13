@@ -319,7 +319,7 @@ fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
 // skill slot. Rafaela's resurrection selector reports index0 just like Q.
 // Only this observed hero/class/base tuple gets a distinct fourth binding;
 // unknown duplicate indices remain an error rather than silently replacing Q.
-fn additional_hero_skill_index(hero:i32,class:&str,native_index:i32,base:i32)->Option<i32> {
+pub(crate) fn additional_hero_skill_index(hero:i32,class:&str,native_index:i32,base:i32)->Option<i32> {
     (hero==14 && class=="KeySkillLockDeadHero" && native_index==0 && base==1469).then_some(3)
 }
 
@@ -587,7 +587,7 @@ impl UiPlan {
         ];
         let cancel_flag = r.field(object, "bCancelSkill").ok();
         let cancel_id = r.field(object, "m_iPressSkillID").ok();
-        let optional = crate::optional_ui::OptionalUi::prepare(r, object, &objects, local_show)?;
+        let optional = crate::optional_ui::OptionalUi::prepare(r, object, &objects, local_show, local_hero_address)?;
         let linked=crate::control_audit::CurvePlan::discover(r,object,&buttons).ok();
         Ok(Self {
             linked, linked_retry:0,portrait:None,portrait_retry:0,last_choice_slot:String::new(),
@@ -1173,6 +1173,41 @@ impl<M: Memory> Source<M> {
         check(&self.reflection,&plan.ui.checks)?;
         let result=crate::control_audit::observe(&mut self.reflection,plan.ui.object,&plan.ui.buttons)?;
         check(&self.reflection,&plan.ui.checks)?;Ok(result)
+    }
+    /// Developer evidence: attempts/cast counters do not prove that a skill
+    /// has even been learned. Read actual owned UI skill levels independently.
+    pub fn audit_skill_levels(&mut self)->Result<serde_json::Value> {
+        fn integer_field<M:Memory>(r:&mut Reflection<M>,checks:&mut Checks,object:u64,name:&str)->Result<i32> {
+            let mut class=r.class(r.pointer(object)?)?;
+            checks.push((object,class.address.to_le_bytes().to_vec()));
+            for _ in 0..20 {
+                if let Some(field)=class.fields.get(name) {
+                    if field.is_static || field.kind!=8 || field.offset>1_048_576 {return Err("Skill level field type changed".into());}
+                    return Ok(i32_at(&capture(r,checks,object+field.offset,4)?,0));
+                }
+                if class.parent==0 {break;}class=r.class(class.parent)?;
+            }
+            Err(format!("Missing native skill level field {name}"))
+        }
+        let plan=self.plan.as_ref().ok_or("No current skill level plan")?;
+        let r=&mut self.reflection;let mut checks=Vec::new();
+        check(r,&plan.match_checks)?;check(r,&plan.ui.checks)?;
+        let mut rows=Vec::new();
+        for button in plan.ui.buttons.iter().filter(|b|b.kind=="skill") {
+            let data=link(r,button.object,"m_SkillData",&mut checks)?;
+            if data==0 || data!=button.data {return Err("Native skill level owner changed".into());}
+            let base=integer_field(r,&mut checks,data,"m_InitSkillID")?;
+            let level=integer_field(r,&mut checks,data,"skillLvl")?;
+            let maximum=integer_field(r,&mut checks,button.object,"m_iMaxSkillLevel")?;
+            if !(1..=10_000_000).contains(&base) || !(0..=64).contains(&level) || !(0..=64).contains(&maximum) {
+                return Err("Native skill level outside audit bounds".into());
+            }
+            rows.push(serde_json::json!({"slot":button.slot,"base_skill":base,"level":level,"maximum":maximum,
+                "source":"ShowSkillData.skillLvl","button":button.object,"data":data}));
+        }
+        check(r,&checks)?;check(r,&plan.ui.checks)?;check(r,&plan.match_checks)?;
+        Ok(serde_json::json!({"coherent":true,"skills":rows,
+            "upgrade_inventory_verified":plan.ui.optional.upgrade_inventory_verified(r)}))
     }
     fn prepare(&mut self) -> Result<Plan> {
         let r = &mut self.reflection;

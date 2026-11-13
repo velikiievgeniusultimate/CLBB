@@ -17,6 +17,32 @@ setup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(setup)
 
 
+class NativeLearningEvidenceTests(unittest.TestCase):
+    def receipt(self):
+        return {'hero':14,'pid':123,'birth':456,'same_match_at_end':True,
+                'skill_levels':{'Ok':{'coherent':True,'upgrade_inventory_verified':True,'skills':[
+                    {'slot':'skill:0','level':6,'maximum':6},
+                    {'slot':'skill:1','level':6,'maximum':6},
+                    {'slot':'skill:2','level':3,'maximum':6},
+                    {'slot':'skill:3','level':1,'maximum':0}]}},'buttons':[]}
+
+    def test_native_levels_allow_non_learnable_auxiliary_button(self):
+        self.assertEqual(len(setup.validate_skill_learning(self.receipt(),14,123,'456')),4)
+
+    def test_empty_upgrade_inventory_does_not_hide_unlearned_native_skill(self):
+        value=self.receipt();value['skill_levels']['Ok']['skills'][0]['level']=0
+        with self.assertRaisesRegex(setup.ObservationError,'still level0'):
+            setup.validate_skill_learning(value,14,123,456)
+
+    def test_native_visible_upgrade_or_missing_or_foreign_levels_are_rejected(self):
+        changes=[{'skill_levels':{}},{'hero':25},{'same_match_at_end':False},
+                 {'buttons':[{'kind':'upgrade','active':True}]}]
+        for change in changes:
+            value=self.receipt();value.update(change)
+            with self.subTest(change=change),self.assertRaises(setup.ObservationError):
+                setup.validate_skill_learning(value,14,123,456)
+
+
 def controls(now=1_000_000_000, available=True):
     return {'ready': True, 'hero': 97, 'epoch': 'owned:test:97',
             'sample_start_ns': now - 1_000_000, 'sample_end_ns': now,
@@ -57,6 +83,10 @@ class FakeSession:
 
     def expected_hero(self):
         pass
+
+    def verify_learning(self):
+        self.learning_verified = True
+        return {'path':'offline-owned-level-fixture','skills':[{'slot':'skill:0','level':1,'maximum':6}]}
 
     def controls(self, stage):
         return controls(time.monotonic_ns(), self.upgrades)
@@ -202,6 +232,8 @@ class TrainingSetupTests(unittest.TestCase):
             data = json.loads(output.read_text())
             self.assertEqual(code, 0)
             self.assertTrue(data['learning']['available_upgrades_exhausted'])
+            self.assertTrue(data['learning']['native_skill_levels_verified'])
+            self.assertTrue(FakeSession.instances[0].learning_verified)
             self.assertFalse(any(command.startswith('key ') for command, _ in FakeSession.instances[0].calls))
             self.assertEqual(data['status'], 'observation_only')
             self.assertNotIn('max_level', data)

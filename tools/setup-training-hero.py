@@ -143,6 +143,31 @@ def upgrade_plan(data):
     return sorted(result, key=lambda row: row['index'])
 
 
+def validate_skill_learning(audit, hero, pid, birth):
+    if (audit.get('hero') != hero or audit.get('pid') != pid or str(audit.get('birth')) != str(birth)
+            or audit.get('same_match_at_end') is not True):
+        raise ObservationError('foreign_learning_receipt', 'Native skill-level audit belongs to another/unconfirmed match')
+    receipt = audit.get('skill_levels', {}).get('Ok', {})
+    rows = receipt.get('skills')
+    if receipt.get('coherent') is not True or not isinstance(rows, list) or not rows:
+        raise ObservationError('unknown_skill_levels', 'Rebuild native audit tools: actual owned skillLvl values are required')
+    if receipt.get('upgrade_inventory_verified') is not True:
+        raise ObservationError('unknown_upgrade_inventory', 'Missing/ambiguous upgrade discovery is not an empty learned-skill inventory')
+    slots = set()
+    for row in rows:
+        slot, level, maximum = row.get('slot'), row.get('level'), row.get('maximum')
+        if not isinstance(slot, str) or slot in slots or not slot.startswith('skill:'):
+            raise ObservationError('ambiguous_skill_levels', 'Native skill slots must be unique')
+        slots.add(slot)
+        if type(level) is not int or type(maximum) is not int or not 0 <= level <= 64 or not 0 <= maximum <= 64:
+            raise ObservationError('unknown_skill_levels', 'Native skill level types/bounds changed')
+        if maximum > 0 and level == 0:
+            raise ObservationError('skill_not_learned', f'{slot} is still level0; empty upgrade capabilities do not prove readiness')
+    if any(row.get('kind') == 'upgrade' and row.get('active') is True for row in audit.get('buttons', [])):
+        raise ObservationError('native_upgrades_remaining', 'Game-owned upgrade buttons remain visible despite mapped learning result')
+    return rows
+
+
 def widget(data, suffix, require_visible=False):
     rows = [row for row in data.get('objects', []) if row.get('path', '').endswith(suffix)]
     if len(rows) != 1 or not isinstance(rows[0].get('widget'), dict):
@@ -267,6 +292,30 @@ class Setup(Probe):
         if widget(data, MAX_LEVEL)['visible']:
             raise ObservationError('gm_did_not_close', 'GM remains visible after the supplied close point')
 
+    def verify_learning(self):
+        self.identity()
+        self.expected_hero()
+        size = [self.read('display.width'), self.read('display.height')]
+        if any(type(v) is not int or not 32 <= v <= 16384 for v in size):
+            raise ObservationError('unknown_resolution', 'Native learning audit needs current logical display size')
+        for attempt in range(3):
+            self.serial += 1
+            path = self.directory / f'{self.serial:03d}-native-skill-levels.json'
+            subprocess.run([str(ROOT / 'mapper/runtime/target/debug/hero-contract-audit'), str(self.pid), str(path), *map(str, size)],
+                           cwd=ROOT, capture_output=True, check=True, timeout=30)
+            self.identity()
+            self.expected_hero()
+            audit = json.loads(path.read_text())
+            if (attempt < 2 and audit.get('same_match_at_end') is False
+                    and audit.get('hero') == self.hero and audit.get('pid') == self.pid
+                    and str(audit.get('birth')) == str(self.birth)):
+                # No input/contact is held here. Discard the ENTIRE observation
+                # and let a separate owned reader build a fresh plan. Never
+                # accept partial levels from a failed final ownership bracket.
+                self.report.setdefault('discarded_learning_audits', []).append(str(path))
+                continue
+            return {'path': str(path), 'skills': validate_skill_learning(audit, self.hero, self.pid, self.birth)}
+
 
 def learn(session, rounds, hold_ms):
     reserved = {probe_module.key_code(session.command('read ' + key)) for key in
@@ -361,6 +410,9 @@ def run(args, report):
             except Exception as error:
                 errors.append(str(error))
         report['cleanup_errors'] = errors
+    if began and not report.get('cleanup_errors') and report.get('cleanup_contacts_empty') is True:
+        report['learning']['native_receipt'] = session.verify_learning()
+        report['learning']['native_skill_levels_verified'] = True
 
 
 def bounded(low, high):

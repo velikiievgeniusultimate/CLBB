@@ -495,6 +495,7 @@ fn main() -> Result<()> {
     for b in frame.ui.buttons.iter().take(frame.ui.button_count.min(32)as usize) {if b.skill_id.int()>0 {skills.insert(b.skill_id.int());}}
     for v in frame.skill_state.buttons.iter().take(frame.skill_state.count.min(32)as usize) {if v.active_skill_id.int()>0 {skills.insert(v.active_skill_id.int());}}
     if frame.skill_id.int()>0 {skills.insert(frame.skill_id.int());}
+    let skill_levels=source.audit_skill_levels();
     if skills.len()>64 {return Err("Skill inventory exceeds audit bounds".into());}
     let mut contracts=serde_json::Map::new();
     for skill in skills {
@@ -533,7 +534,7 @@ fn main() -> Result<()> {
         "start_ns":start_ns,"end_ns":now_ns(),"hero":hero,"epoch":frame.token.as_str(),"resolution":size,
         "sample_ns":frame.time_ns.value,"active_skill":frame.skill_id.int(),"active_slot":frame.ui.active_slot.as_str(),
         "movement":{"ready":frame.ui.movement.ready.value,"press":frame.ui.movement.press_uv.values.map(|v|v.value),"center":frame.ui.movement.center_uv.values.map(|v|v.value),"radius":frame.ui.movement.radius_uv.values.map(|v|v.value)},"read_ms":frame.sample_duration_ms.value,"types":sample.control_types,"buttons":buttons,"variants":variants,
-        "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"hero_level":hero_level,"sample_rejections":errors,
+        "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"hero_level":hero_level,"skill_levels":skill_levels,"sample_rejections":errors,
         "same_match_at_end":same_match,"final_sample_error":final_sample.err(),"final_sample_attempts":final_sample_attempts,
         "scope":"read-only owned gameplay controls/configuration; no memory writes, input or production template authorization",
     });
