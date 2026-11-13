@@ -547,7 +547,7 @@ pub fn parse_resolution(value: &str) -> Option<(u32, u32)> {
         && u64::from(w) * u64::from(h) <= 32 * 1024 * 1024)
         .then_some((w, h))
 }
-pub fn plain_spell_id(id:i32)->bool {matches!(id,20030|20080|20190)}
+pub fn plain_spell_id(id:i32)->bool {matches!(id,20030|20040|20080|20190)}
 fn plain_spell_slot(slot:&str)->bool {slot.strip_prefix("extra:2:").and_then(|s|s.parse::<i32>().ok()).is_some_and(plain_spell_id)}
 pub fn hold_duration_skill(hero: i32, slot: &str) -> bool {
     let base=variant_base(slot).unwrap_or(slot);
@@ -1012,6 +1012,20 @@ mod field_inheritance_tests {
         assert_eq!(s.integer("hero.bindings.extra:2:20030.cast_mode",77),1);
         assert_eq!(s.binding(77,"extra:2").cast_mode,3);
         assert_eq!(s.integer("hero.bindings.extra:2:20080.cast_mode",77),0);
+    }
+    #[test]
+    fn sprint_uses_plain_release_default_and_independent_inherited_modes() {
+        let mut s=Settings::default();
+        s.set("common.bindings.extra:2.cast_mode","3",0).unwrap();
+        assert_eq!(s.integer("hero.bindings.extra:2:20040.cast_mode",43),0);
+        s.set("common.bindings.extra:2:20040.cast_mode","1",0).unwrap();
+        for hero in [25,43,55] { assert_eq!(s.integer("hero.bindings.extra:2:20040.cast_mode",hero),1); }
+        s.set("hero.bindings.extra:2:20040.cast_mode","0",43).unwrap();
+        assert_eq!(s.integer("hero.bindings.extra:2:20040.cast_mode",43),0);
+        assert_eq!(s.integer("hero.bindings.extra:2:20040.cast_mode",55),1);
+        assert_eq!(s.binding(43,"extra:2").cast_mode,3);
+        assert_eq!(s.integer("hero.bindings.extra:2:20030.cast_mode",43),0);
+        assert!(s.set("hero.bindings.extra:2:20040.cast_mode","3",43).is_err());
     }
     #[test]
     fn vengeance_plain_mode_is_separate_from_aimed_spells_and_other_plain_spells() {

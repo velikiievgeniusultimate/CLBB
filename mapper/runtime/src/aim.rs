@@ -711,7 +711,7 @@ impl MotionPlan {
         // Verified shared self-use buttons have no aiming indicator. Their
         // base pair is not a missing Range plan: validate config identity and
         // reciprocal native owners before publishing Tap, on every hero.
-        if matches!(skill,20010|20030|20080|20190) && mc.name == "IndicatorMotionBase" && pc.name == "IndicatorPackageBase" {
+        if matches!(skill,20010|20030|20040|20080|20190) && mc.name == "IndicatorMotionBase" && pc.name == "IndicatorPackageBase" {
             let config = owner(r, comp, "m_Config", &mut checks)?;
             let config_class = r.pointer(config)?;
             checks.push((config, config_class.to_le_bytes().to_vec()));
@@ -1921,8 +1921,8 @@ mod tests {
         r
     }
     #[test]
-    fn inspire_and_regen_are_owner_checked_taps_without_an_aim_plan() {
-        for skill in [20010i32,20030,20190] {
+    fn self_use_spells_are_owner_checked_taps_without_an_aim_plan() {
+        for skill in [20010i32,20030,20040,20190] {
             let mut r=purify_fixture();
             {let mut b=r.memory.0.borrow_mut();for at in [552,2576] {b[at..at+4].copy_from_slice(&skill.to_le_bytes());}}
             assert_eq!(MotionPlan::discover_behavior(&mut r,128,skill).unwrap().1,1);
