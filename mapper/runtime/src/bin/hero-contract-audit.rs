@@ -382,11 +382,29 @@ fn config_values<M: Memory>(r: &mut Reflection<M>, indicator: u64, skill: i32) -
     let motion=ptr(r,&mut checks,comp,"m_MontionBase")?;
     let package=ptr(r,&mut checks,comp,"m_PackageBase")?;
     if ptr(r,&mut checks,motion,"m_OwnComp")?!=comp
-        ||ptr(r,&mut checks,motion,"m_OwnPackage")?!=package
         ||ptr(r,&mut checks,package,"m_OwnComp")?!=comp {
         return Err("Skill registry ownership changed".into());
     }
     let config=ptr(r,&mut checks,comp,"m_Config")?;
+    match r.field(motion,"m_OwnPackage") {
+        Ok(_)=>if ptr(r,&mut checks,motion,"m_OwnPackage")?!=package {
+            return Err("Skill registry package ownership changed".into());
+        },
+        // Read-only discovery must not require a production Tap verdict to
+        // inspect a new Base layout's configuration. This class genuinely
+        // has no package backlink; require both comp backlinks and the same
+        // typed config on all three objects instead. No input is authorized.
+        Err(error) if error=="Missing reflected field m_OwnPackage"
+            && r.class(r.pointer(motion)?)?.name=="IndicatorMotionBase" => {
+            for object in [comp,motion,package] {
+                let(at,_,_)=typed_instance_field(r,&mut checks,object,"m_Config",&[17],None)?;
+                if u64_at(&capture(r,&mut checks,at,8)?,0)!=config {
+                    return Err("Base diagnostic config owners differ".into());
+                }
+            }
+        },
+        Err(error)=>return Err(error),
+    }
     let class=u64_at(&capture(r,&mut checks,config,8)?,0);
     let metadata=r.class(class)?;
     if metadata.name!="CData_Skill_Element" { return Err("Unknown configuration class".into()); }
