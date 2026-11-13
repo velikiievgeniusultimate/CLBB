@@ -165,6 +165,8 @@ def run(args, report):
         command.append("--movement")
     if args.cancel:
         command.append("--cancel")
+    if getattr(args, "target_uv", None) is not None:
+        command.extend(["--target-uv", *map(str, args.target_uv)])
     report["commands"] = {"watch": watch_command, "probe": command}
     report["watch_duration_ms"] = duration
     watch = None
@@ -231,6 +233,7 @@ def main(argv=None):
     parser.add_argument("--settle-ms", type=hero_probe.bounded_int(0, 250), default=30)
     parser.add_argument("--movement", action="store_true")
     parser.add_argument("--cancel", action="store_true")
+    parser.add_argument("--target-uv", nargs=2, type=hero_probe.normalized_coordinate)
     parser.add_argument("--output-dir", type=Path, required=True, help="Must be a new directory; existing evidence is never overwritten")
     args = parser.parse_args(argv)
     args.output_dir = args.output_dir.resolve()
@@ -242,6 +245,8 @@ def main(argv=None):
               "start_ns": time.monotonic_ns(), "request": {"hero": args.hero, "key": args.key, "skill": args.skill,
                   "hold_ms": args.hold_ms, "movement": args.movement, "cancel": args.cancel, "settle_ms": args.settle_ms},
               "limits": "Successful subprocess exits do not prove skill accuracy, application or cancellation. Inspect aligned local Actor receipts and explicit mechanical checks."}
+    if args.target_uv is not None:
+        report["request"]["target_uv"] = args.target_uv
     with (args.output_dir / "summary.json").open("x", encoding="utf-8") as output:
         try:
             run(args, report)

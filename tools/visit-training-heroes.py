@@ -62,8 +62,10 @@ def validate_idle_state(state, expected_hero=None):
     if state.get("delivery", {}).get("raw_gesture_active") is not False:
         raise BatchAbort("Raw game gesture is active or unknown; refusing the next phase")
     inputs = state.get("input", {})
-    if inputs.get("hero") != hero or inputs.get("ready") not in (1, True) or inputs.get("enabled") not in (1, True):
-        raise BatchAbort("Current mapped profile is not ready/enabled for this hero")
+    # `end` intentionally suspends the mapper. Idle inspection must not require
+    # focus or an active input lease; the probe verifies enabled after `begin`.
+    if inputs.get("hero") != hero or inputs.get("ready") not in (1, True) or inputs.get("enabled") not in (0, 1, False, True):
+        raise BatchAbort("Current mapped profile is not ready or its enabled state is unknown")
     if type(inputs.get("touch")) is not int or inputs["touch"] >= 0 or inputs.get("pending_release") not in (0, False):
         raise BatchAbort("A skill contact/release remains active or unknown")
     if state.get("gestures", {}).get("active") != []:
@@ -266,22 +268,25 @@ class Coordinator:
                                        expected_executable=self.anchor.executable)
         self.hero_report["audit_paths"].append(str(path))
         return result
-    def probe(self, hero, plan, directory):
+    def probe(self, hero, plan, directory, cancel=False):
         current = self.anchor.preflight(hero)
         reason = probe_plan_status(plan, current, self.anchor.reader.read("diagnostics.cast_lock"))
         if reason:
             raise BatchAbort(f"Probe contract became unconfirmed before child start: {reason}")
-        output = directory / (str(plan["slot"]).replace(":", "-") + "-probe")
+        output = directory / (str(plan["slot"]).replace(":", "-") + ("-cancel-probe" if cancel else "-probe"))
         original = probe_tool.selected_runtime
         probe_tool.selected_runtime = self.anchor.selected_runtime
         try:
             with (directory / (output.name + ".stdout.txt")).open("x") as stdout, (directory / (output.name + ".stderr.txt")).open("x") as stderr, contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                code = probe_tool.main(["--hero", str(hero), "--key", str(plan["key"]), "--skill", str(plan["skill"]),
-                    "--hold-ms", str(plan["hold_ms"]), "--movement", "--settle-ms", "30", "--output-dir", str(output)])
+                argv = ["--hero", str(hero), "--key", str(plan["key"]), "--skill", str(plan["skill"]),
+                    "--hold-ms", str(plan["hold_ms"]), "--movement", "--settle-ms", "30", "--output-dir", str(output)]
+                if cancel:
+                    argv.append("--cancel")
+                code = probe_tool.main(argv)
         finally:
             probe_tool.selected_runtime = original
         summary = json.loads((output / "summary.json").read_text())
-        evidence = {"slot": plan["slot"], "skill": plan["skill"], "path": str(output / "summary.json"),
+        evidence = {"slot": plan["slot"], "skill": plan["skill"], "cancel_requested": cancel, "path": str(output / "summary.json"),
                     "mechanical_checks": summary.get("mechanical_checks"), "actor_counter_evidence": summary.get("actor_counter_evidence"),
                     "watch_integrity_checks": summary.get("watch_integrity_checks"), "probe_error": summary.get("probe_error"), "error": summary.get("error")}
         self.hero_report["probes"].append(evidence)
@@ -367,6 +372,16 @@ class Coordinator:
                                 continue
                         self.phase(hero, f"probe-{plan['slot']}", lambda plan=plan: self.probe(hero, plan, directory), hero, hero)
                     self.phase(hero, "return-center", lambda: self.return_center(hero, directory), hero, hero)
+                    if getattr(self.args, "cancel_probes", False):
+                        # Re-read after casts: a recast/form may have replaced
+                        # the original button. Never replay a stale skill ID.
+                        audit = self.phase(hero, "cancel-contract", lambda: self.audit(hero, directory, "cancel-contract"), hero, hero)
+                        for plan in plan_probes(audit, self.anchor.preflight(hero)["controls"]):
+                            reason = plan["skip_reason"] or probe_plan_status(plan, self.anchor.preflight(hero), self.anchor.reader.read("diagnostics.cast_lock"))
+                            if reason:
+                                self.hero_report["skipped"].append({**plan, "cancel_requested": True, "skip_reason": reason})
+                                continue
+                            self.phase(hero, f"cancel-{plan['slot']}", lambda plan=plan: self.probe(hero, plan, directory, cancel=True), hero, hero)
                     brief["workflow_finished"] = True
                     self.hero_report["workflow_finished"] = True
                 except BaseException as error:
@@ -384,6 +399,7 @@ def main(argv=None):
     parser.add_argument("--heroes", type=parse_heroes, required=True)
     parser.add_argument("--output-dir", type=Path, required=True, help="Must be a new directory; failed batches are never auto-resumed")
     parser.add_argument("--basic-probes", action="store_true", help="Additionally run serial QWER probes for observed known templates")
+    parser.add_argument("--cancel-probes", action="store_true", help="After basic visits, separately inspect held-skill cancellation; counters still require review")
     parser.add_argument("--gm-close-point", type=float, nargs=2, default=(.974, .1), metavar=("U", "V"))
     args = parser.parse_args(argv)
     if any(not math.isfinite(value) or not 0 <= value <= 1 for value in args.gm_close_point):

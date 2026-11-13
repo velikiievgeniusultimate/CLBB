@@ -123,10 +123,13 @@ class TrainingBatchTests(unittest.TestCase):
 
     def test_preflight_requires_fresh_owned_hero_and_empty_mapped_and_raw_contacts(self):
         self.assertEqual(batch.validate_idle_state(snapshot(), expected_hero=130), 130)
+        suspended = snapshot()
+        suspended["input"]["enabled"] = 0
+        self.assertEqual(batch.validate_idle_state(suspended, expected_hero=130), 130)
         for update in ({"hero": 25}, {"contacts": {"active": [1]}}, {"contacts": {}},
                        {"delivery": {"raw_gesture_active": True}}, {"delivery": {}},
                        {"input": {"hero": 130, "ready": 0, "enabled": 1, "touch": -1, "pending_release": 0}},
-                       {"input": {"hero": 130, "ready": 1, "enabled": 0, "touch": -1, "pending_release": 0}},
+                       {"input": {"hero": 130, "ready": 1, "touch": -1, "pending_release": 0}},
                        {"input": {"hero": 25, "ready": 1, "enabled": 1, "touch": -1, "pending_release": 0}},
                        {"input": {"hero": 130, "ready": 1, "enabled": 1, "touch": 1, "pending_release": 0}},
                        {"input": {"hero": 130, "ready": 1, "enabled": 1, "touch": -1, "pending_release": 1}},

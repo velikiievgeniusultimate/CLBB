@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import socket
@@ -57,6 +58,13 @@ def bounded_int(low: int, high: int):
             raise argparse.ArgumentTypeError(f"Expected {low}..{high}")
         return number
     return parse
+
+
+def normalized_coordinate(value):
+    number = float(value)
+    if not math.isfinite(number) or not 0 <= number <= 1:
+        raise argparse.ArgumentTypeError("Expected a finite game-surface coordinate in 0..1")
+    return number
 
 
 def release_state(snapshot: dict, movement: bool) -> dict:
@@ -307,9 +315,10 @@ def held_snapshot(probe, stage, goal, deadline):
 
 def hold_waypoints(probe, report, down_at: float, hold_ms: int, settle_ms: int):
     deadline = down_at + hold_ms / 1000.
-    interval = hold_ms / 1000. / len(WAYPOINTS)
+    points = report.get("waypoints", WAYPOINTS)
+    interval = hold_ms / 1000. / len(points)
     report["hold_deadline_ns"] = round(deadline * 1e9)
-    for index, pointer in enumerate(WAYPOINTS):
+    for index, pointer in enumerate(points):
         probe.wait_until(down_at + interval * index)
         if deadline - time.monotonic() <= 1e-9:
             break
@@ -339,8 +348,8 @@ def run(args, report: dict):
     if initial["data"]["contacts"].get("active") != []:
         raise RuntimeError("Initial contacts are not empty; refusing to release somebody else's gesture")
     inputs = initial["data"]["input"]
-    if not inputs.get("ready") or not inputs.get("enabled"):
-        raise RuntimeError("Mapper/game profile is not ready and enabled")
+    if not inputs.get("ready") or inputs.get("enabled") not in (0, 1, False, True):
+        raise RuntimeError("Mapper/game profile is not ready or its enabled state is unknown")
     keys = {args.key}
     cancel_key = key_code(probe.command("read hero.cancel_key")) if args.cancel else None
     if cancel_key is not None:
@@ -368,7 +377,10 @@ def run(args, report: dict):
         # Mark before sending: a lost reply must still lead to cleanup.
         began = True
         probe.command("begin")
-        probe.send_pointer(WAYPOINTS[0])
+        leased = probe.read("diagnostics.input")
+        if leased.get("hero") != args.hero or not leased.get("ready") or not leased.get("enabled"):
+            raise RuntimeError("Input lease did not enable the expected hero profile")
+        probe.send_pointer(report.get("waypoints", WAYPOINTS)[0])
         if args.movement:
             movement_attempted = True
             probe.command("mouse 2 1")
@@ -440,6 +452,7 @@ def main(argv=None) -> int:
     parser.add_argument("--settle-ms", type=bounded_int(0, 250), default=0, help="Diagnostic follow-up sample delay, capped by waypoint/hold budgets; does not change mapper latency")
     parser.add_argument("--movement", action="store_true", help="Hold the existing RMB movement bind concurrently")
     parser.add_argument("--cancel", action="store_true", help="Press the existing hero cancel bind before physical key UP")
+    parser.add_argument("--target-uv", nargs=2, type=normalized_coordinate, help="Hold at one coordinator-observed target instead of the default six-point sweep")
     parser.add_argument("--output", type=Path, required=True, help="A new JSON file; never overwrites an earlier probe")
     args = parser.parse_args(argv)
     report = {"format": "clbb-hero-control-probe", "version": 1, "start_ns": time.monotonic_ns(),
@@ -448,6 +461,9 @@ def main(argv=None) -> int:
               "commands": [], "samples": [], "status": "observation_only",
               "release_mode": "explicit_cancel" if args.cancel else "physical_up",
               "limits": "Telemetry probe only; hit accuracy, native cast success and cancellation require gameplay/result evidence."}
+    if args.target_uv is not None:
+        report["request"]["target_uv"] = args.target_uv
+        report["waypoints"] = [args.target_uv] * len(WAYPOINTS)
     try:
         # Reserve the report before any game input, and refuse overwrites.
         with args.output.open("x", encoding="utf-8") as output:

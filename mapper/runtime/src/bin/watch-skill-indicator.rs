@@ -142,6 +142,19 @@ fn main()->Result<(),String> {
                         "valid_drag":frame.frame.logical.valid_drag.get(),"first_drag":frame.frame.logical.first_drag.get(),
                         "native_source":frame.frame.logical.source.as_str(),"aim_world":frame.aim,"types":frame.control_types,
                         "control_holds":frame.control_holds,"cast_receipt":cast_receipt,
+                        // Observe short recast/form windows after physical UP
+                        // from this same coherent sample, without extra reads
+                        // or a change to gameplay/controller behavior.
+                        "variant_state":{"ready":frame.frame.skill_state.ready.get(),
+                            "hero":frame.frame.skill_state.hero_id.int(),"epoch":frame.frame.skill_state.token.as_str(),
+                            "start_ns":frame.frame.skill_state.sample_start_ns.value,"end_ns":frame.frame.skill_state.sample_end_ns.value,
+                            "buttons":frame.frame.skill_state.buttons.iter().take(frame.frame.skill_state.count.min(32) as usize).map(|b|json!({
+                                "slot":b.slot.as_str(),"base":b.base_skill_id.int(),"active":b.active_skill_id.int(),
+                                "locked":b.cast_locked.is_bool().then(||b.cast_locked.get()),
+                                "state_forbidden":b.state_forbidden.is_bool().then(||b.state_forbidden.get())})).collect::<Vec<_>>()},
+                        "ui_buttons":frame.frame.ui.buttons.iter().take(frame.frame.ui.button_count.min(32) as usize).map(|b|json!({
+                            "slot":b.slot.as_str(),"kind":b.kind.as_str(),"skill":b.skill_id.int(),"available":b.active.get(),
+                            "press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>(),
                         "cancel_state":frame.frame.cancel_state.encode(),
                         "cancel_uv":frame.frame.ui.cancel_uv.values.map(|v|v.value),"cancel_uv_valid":frame.frame.ui.cancel_uv.valid(),
                         "world_range":{"value":frame.frame.logical.world_range.value,"kind":frame.frame.logical.world_range.kind},

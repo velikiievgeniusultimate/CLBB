@@ -118,6 +118,14 @@ fn zero_extent_base_tap_template(motion:&str,package:&str,rect:i32,params:&[f64]
     motion=="IndicatorMotionBase"&&package=="IndicatorPackageEasy_Yuan"
         &&rect==11&&params.len()>=2&&params[0]==3.&&params[1]==0.
 }
+// Karina Q: native UI cast/cancel receipts prove a self-use button. Its
+// zero-extent circle uses RectType0 rather than the existing RectType11 family.
+// Keep this qualification separate so unknown/new zero-looking layouts do not
+// silently broaden the existing shared template.
+fn karina_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,params:&[f64])->bool {
+    skill==810 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
+        && rect==0 && params==[3.,0.]
+}
 fn movement_driven_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
     motion=="IndicatorMotionRot" && package=="IndicatorPackageEasy_JianTou_DrivenByJoystick"
         && rect==11 && params.len()>=2 && params[0]==27.
@@ -321,7 +329,12 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
     // Single[] identity checked by native_rect_config.
     typed_field(r,config,"m_ShowRectPara",29)?;
     let(rect,params)=native_rect_config(r,comp,skill,checks)?;
-    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) {
+    let karina=karina_self_tap_template(skill,motion_name,package_name,rect,&params);
+    if karina {
+        let at=typed_field(r,config,"m_BaseType",8)?;
+        if i32_at(&capture(r,checks,at,4)?,0)!=11 {return Err("Karina self-tap base type changed".into());}
+    }
+    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina {
         return Err("Unverified nonzero base-tap configuration".into());
     }
     for object in [motion,package] {
@@ -1578,6 +1591,21 @@ mod tests {
         assert!(!zero_extent_template("Unknown",p,11,&[11.,0.]));
         assert!(!zero_extent_template(m,"Unknown",11,&[11.,0.]));
         assert!(!zero_extent_template(m,p,2,&[11.,0.]));
+    }
+    #[test]
+    fn karina_self_tap_does_not_broaden_existing_base_tap_rules() {
+        let m="IndicatorMotionBase";let p="IndicatorPackageEasy_Yuan";
+        assert!(karina_self_tap_template(810,m,p,0,&[3.,0.]));
+        for skill in [110,310,420,20010,4030,811,8100] {
+            assert!(!karina_self_tap_template(skill,m,p,0,&[3.,0.]));
+        }
+        for rect in [-1,1,11] {assert!(!karina_self_tap_template(810,m,p,rect,&[3.,0.]));}
+        for params in [&[3.,1.][..],&[3.,f64::NAN][..],&[27.,0.][..],&[3.][..]] {
+            assert!(!karina_self_tap_template(810,m,p,0,params));
+        }
+        assert!(!karina_self_tap_template(810,"IndicatorMotionPos",p,0,&[3.,0.]));
+        assert!(!karina_self_tap_template(810,m,"IndicatorPackageEasy",0,&[3.,0.]));
+        assert!(!zero_extent_base_tap_template(m,p,0,&[3.,0.]));
     }
     #[test]
     fn zero_extent_base_tap_requires_exact_class_pair_rect_and_zero_range() {
