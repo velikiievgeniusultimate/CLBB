@@ -176,6 +176,16 @@ fn harley_cards_direction_template(skill:i32,motion:&str,package:&str,rect:i32,p
         && rect==1 && params.len()==22 && params[..8]==[7.,6.5,70421.,6.5,0.4f32 as f64,0.,0.,3.]
         && params[8..20].iter().all(|v|*v==0.) && params[20..]==[3.,20.]
 }
+// Two through five Helcurt knives: the count/spread changes the visual fan,
+// while the measured Rot drag result remains a unit direction.
+fn helcurt_knives_direction_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,params:&[f64])->bool {
+    let spread=match skill {5121=>1.5,5122=>1.,5123=>0.8f32 as f64,5124=>0.6f32 as f64,_=>return false};
+    motion=="IndicatorMotionRot" && package=="IndicatorPackage_Focus_Multi_JianTou"
+        && rect==11 && base==1 && params.len()==23
+        && params[..10]==[10.,5.,100513.,6.5,0.2f32 as f64,0.,0.,0.,0.,-1.5]
+        && params[10..20].iter().all(|v|*v==0.)
+        && params[20..]==[(skill-5119)as f64,spread,3.8f32 as f64]
+}
 
 // Captured Grock rework layouts. Keep the generic shape-nine Rect1 family
 // unchanged; only these current skill/config tuples qualify new geometry.
@@ -373,7 +383,7 @@ fn shadow_return_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,pac
 }
 fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,motion:&str,package:&str,checks:&mut Checks)->Result<bool> {
     if motion!="IndicatorMotionRot" || !matches!(package,"IndicatorPackage_TwoPartAndPos_Direction"
-        |"IndicatorPackage_Multi_JianTou"|"IndicatorPackage_TwoPart_Direction") {
+        |"IndicatorPackage_Multi_JianTou"|"IndicatorPackage_TwoPart_Direction"|"IndicatorPackage_Focus_Multi_JianTou") {
         return Ok(false);
     }
     if !(1..=10_000_000).contains(&skill) {return Err("Invalid additional direction identity".into());}
@@ -394,9 +404,20 @@ fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
             harley_cards_direction_template(skill,motion,package,rect,&full)
         }
     } else {false};
+    let helcurt=if matches!(skill,5121..=5124) && package=="IndicatorPackage_Focus_Multi_JianTou" {
+        let array=owner(r,config,"m_ShowRectPara",checks)?;
+        let header=capture(r,checks,array,32)?;
+        if u64_at(&header,24)!=23 {false} else {
+            let at=typed_field(r,config,"m_BaseType",8)?;
+            let base=i32_at(&capture(r,checks,at,4)?,0);
+            let raw=capture(r,checks,array+32,23*4)?;
+            let full=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+            helcurt_knives_direction_template(skill,motion,package,rect,base,&full)
+        }
+    } else {false};
     if !additional_direction_template(motion,package,rect,&params)
         && !layla_ultimate_direction_template(skill,motion,package,rect,&params)
-        && !harley {
+        && !harley && !helcurt {
         return Err("Unverified additional direction configuration".into());
     }
     Ok(true)
@@ -1764,6 +1785,34 @@ mod tests {
         assert!(!hylos_self_tap_template(4910,"IndicatorMotionPos",p,0,1,&params));
         assert!(!hylos_self_tap_template(4910,m,"IndicatorPackageEasy",0,1,&params));
         assert!(!zero_extent_base_tap_template(m,p,0,&params));
+    }
+    #[test]
+    fn helcurt_knife_fan_requires_each_observed_form_and_complete_configuration() {
+        let fixtures:serde_json::Value=serde_json::from_str(include_str!("../tests/fixtures/helcurt-51-knife-configurations.json")).unwrap();
+        let rows=fixtures.as_array().unwrap();assert_eq!(rows.len(),4);
+        for row in rows {
+            let skill=row["skill"].as_i64().unwrap()as i32;
+            let m=row["motion"].as_str().unwrap();let p=row["package"].as_str().unwrap();
+            let rect=row["rect"].as_i64().unwrap()as i32;let base=row["base"].as_i64().unwrap()as i32;
+            let params=row["params"].as_array().unwrap().iter().map(|v|v.as_f64().unwrap()).collect::<Vec<_>>();
+            assert!(helcurt_knives_direction_template(skill,m,p,rect,base,&params));
+            for other in [5120,5125,4210,4430,skill+1] {
+                assert!(!helcurt_knives_direction_template(other,m,p,rect,base,&params));
+            }
+            assert!(!helcurt_knives_direction_template(skill,m,p,0,base,&params));
+            assert!(!helcurt_knives_direction_template(skill,m,p,rect,2,&params));
+            assert!(!helcurt_knives_direction_template(skill,"IndicatorMotionPos",p,rect,base,&params));
+            assert!(!helcurt_knives_direction_template(skill,m,"IndicatorPackage_Multi_JianTou",rect,base,&params));
+            assert!(!helcurt_knives_direction_template(skill,m,p,rect,base,&params[..22]));
+            for index in 0..params.len() {
+                let mut changed=params.clone();changed[index]+=1.;
+                assert!(!helcurt_knives_direction_template(skill,m,p,rect,base,&changed));
+                changed[index]=f64::NAN;
+                assert!(!helcurt_knives_direction_template(skill,m,p,rect,base,&changed));
+            }
+            assert_eq!(native_template(m,p),None);
+            assert!(!additional_direction_template(m,p,rect,&params));
+        }
     }
     #[test]
     fn hilda_self_tap_stays_scoped_to_verified_button() {
