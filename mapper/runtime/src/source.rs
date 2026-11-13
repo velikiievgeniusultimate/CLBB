@@ -315,6 +315,13 @@ fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     }
     if ancestry.iter().any(|name| name == "SkillButton") { "skill" } else { "extra" }
 }
+// Native auxiliary hero controls need not use the ordinal of their visual
+// skill slot. Rafaela's resurrection selector reports index0 just like Q.
+// Only this observed hero/class/base tuple gets a distinct fourth binding;
+// unknown duplicate indices remain an error rather than silently replacing Q.
+fn additional_hero_skill_index(hero:i32,class:&str,native_index:i32,base:i32)->Option<i32> {
+    (hero==14 && class=="KeySkillLockDeadHero" && native_index==0 && base==1469).then_some(3)
+}
 
 /// A specialized choice button may become an ordinary native follow-up form.
 /// Unknown current form is not permission to fall back to the base Tap class.
@@ -350,6 +357,18 @@ fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
 
 #[cfg(test)]
 mod control_kind_tests {
+    #[test]
+    fn rafaela_auxiliary_native_zero_index_gets_only_its_own_fourth_slot() {
+        use super::additional_hero_skill_index;
+        assert_eq!(additional_hero_skill_index(14,"KeySkillLockDeadHero",0,1469),Some(3));
+        for hero in [1,8,9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            assert_eq!(additional_hero_skill_index(hero,"KeySkillLockDeadHero",0,1469),None);
+        }
+        for (class,index,base) in [("SkillButton",0,1469),("KeySkillLockDeadHero",1,1469),
+                                  ("KeySkillLockDeadHero",0,1410),("KeySkillLockDeadHero",0,0)] {
+            assert_eq!(additional_hero_skill_index(14,class,index,base),None);
+        }
+    }
     #[test]
     fn held_native_form_does_not_inherit_idle_discovery_backoff() {
         use super::{behavior_retry_due,behavior_retry_delay};
@@ -388,7 +407,7 @@ mod control_kind_tests {
 }
 
 impl UiPlan {
-    fn new<M: Memory>(r: &mut Reflection<M>, local_show: u64) -> Result<Self> {
+    fn new<M: Memory>(r: &mut Reflection<M>, local_show: u64, local_hero_address:u64) -> Result<Self> {
         r.discover(&["UIKeySkill"])?;
         let target = r.named["UIKeySkill"];
         let mut base = r.class(target)?;
@@ -460,6 +479,20 @@ impl UiPlan {
             // remain additional controls even when they inherit SkillButton.
             let kind = if button == attack { "attack" }
                 else if skill_button_class(r, &class)? { "skill" } else { "extra" };
+            let owner = link(r, button, "m_Self", &mut checks)?;
+            let data = link(r, button, "m_SkillData", &mut checks)?;
+            let skill = if data != 0 { r.field(data, "m_InitSkillID")? } else { 0 };
+            let native_index=index;
+            let mut index=index;
+            if kind=="skill" && class.name=="KeySkillLockDeadHero" && skill!=0 {
+                let hero=r.integer(local_hero_address)?;
+                let base=r.integer(skill)?;
+                if let Some(ordinal)=additional_hero_skill_index(hero,&class.name,native_index,base) {
+                    checks.push((local_hero_address,hero.to_le_bytes().to_vec()));
+                    checks.push((skill,base.to_le_bytes().to_vec()));
+                    index=ordinal;
+                }
+            }
             let slot = if kind == "attack" {
                 "attack".into()
             } else {
@@ -468,13 +501,6 @@ impl UiPlan {
             if !slots.insert(slot.clone()) {
                 return Err("Ambiguous control slot".into());
             }
-            let owner = link(r, button, "m_Self", &mut checks)?;
-            let data = link(r, button, "m_SkillData", &mut checks)?;
-            let skill = if data != 0 {
-                r.field(data, "m_InitSkillID")?
-            } else {
-                0
-            };
             let variant = if data != 0 {
                 r.field(data, "m_TranID").ok()
             } else {
@@ -500,7 +526,7 @@ impl UiPlan {
             let choice=if choice_family {crate::control_audit::ChoicePlan::discover(r,object,button,data,local_show).ok()}else{None};
             let target_family=kind=="skill"&&crate::target_selection::TargetPlan::is_family(r,&class)?;
             checks.push((button, class.address.to_le_bytes().to_vec()));
-            checks.push((at, index.to_le_bytes().to_vec()));
+            checks.push((at, native_index.to_le_bytes().to_vec()));
             buttons.push(ButtonPlan {
                 object: button,
                 slot,
@@ -1197,7 +1223,7 @@ impl<M: Memory> Source<M> {
         checks.push((indicator_address, indicator.to_le_bytes().to_vec()));
         let skill = r.field(indicator, "m_iCurSkillID")?;
         let clock = r.field(manager, "m_uiFrameTime")?;
-        let ui = UiPlan::new(r, show)?;
+        let ui = UiPlan::new(r, show, hero)?;
         let mut motions = std::collections::HashMap::new();
         for id in [2510, 2511, 2520, 20020, 20150, 8410] {
             if let Ok(m) = crate::aim::MotionPlan::discover(r, indicator, id) {
