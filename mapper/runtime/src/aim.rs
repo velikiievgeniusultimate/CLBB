@@ -352,6 +352,31 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
     }
     Ok(true)
 }
+// Observed shared Heal: positional-looking native class, but zero extent and
+// self application. Its raw release/cancel receipts do not authorize any aim.
+fn heal_self_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
+    motion_name:&str,package_name:&str,checks:&mut Checks)->Result<bool> {
+    if skill!=20050 || motion_name!="IndicatorMotionPos" || package_name!="IndicatorPackageEasy_Yuan" {return Ok(false);}
+    let mut config=0;
+    for object in [comp,motion,package] {
+        let at=typed_field(r,object,"m_Config",17)?;
+        let linked=u64_at(&capture(r,checks,at,8)?,0);
+        if linked==0 || (config!=0 && linked!=config) {return Err("Heal config owners differ".into());}
+        config=linked;
+    }
+    typed_field(r,config,"m_ShowRectPara",29)?;
+    let(rect,params)=native_rect_config(r,comp,skill,checks)?;
+    let base_at=typed_field(r,config,"m_BaseType",8)?;
+    if rect!=11 || params!=[3.,0.] || i32_at(&capture(r,checks,base_at,4)?,0)!=383 {
+        return Err("Unverified Heal self-use configuration".into());
+    }
+    for(object,field,expected)in[(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
+        let at=typed_field(r,object,field,18)?;
+        if u64_at(&capture(r,checks,at,8)?,0)!=expected {return Err("Heal indicator owner changed".into());}
+    }
+    Ok(true)
+}
+
 impl MotionPlan {
     /// Read-only proof for the separately measured shape-nine positional family.
     /// No native motion, input, or persistent plan is modified.
@@ -749,7 +774,8 @@ impl MotionPlan {
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
-        let kind=if let Some(kind)=native_template(&mc.name,&pc.name) {
+        let healing=heal_self_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
+        let kind=if healing {1} else if let Some(kind)=native_template(&mc.name,&pc.name) {
             if kind==3 {native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Unverified native range family")?;}
             kind
         }
@@ -1942,7 +1968,8 @@ mod tests {
         }
         Reflection::new(MutableMemory(RefCell::new(bytes))).unwrap()
     }
-    fn base_tap_registry_fixture()->Reflection<MutableMemory> {
+    fn base_tap_registry_fixture()->Reflection<MutableMemory> {self_tap_registry_fixture(false)}
+    fn self_tap_registry_fixture(heal:bool)->Reflection<MutableMemory> {
         fn put64(b:&mut[u8],at:usize,v:u64){b[at..at+8].copy_from_slice(&v.to_le_bytes());}
         fn class(b:&mut[u8],address:usize,name:&str,fields:&[(&str,u8,u32)],cursor:&mut usize){
             let name_at=*cursor;b[name_at..name_at+name.len()].copy_from_slice(name.as_bytes());*cursor+=name.len()+1;
@@ -1959,13 +1986,15 @@ mod tests {
         let r=selection_touch_fixture();let mut cursor=50000;
         {
             let mut b=r.memory.0.borrow_mut();
-            class(&mut b,10752,"IndicatorMotionBase",&[("m_OwnComp",18,16),("m_Config",17,32),("m_vDragTouchPos",17,48),
+            let mut motion_fields=vec![("m_OwnComp",18,16),("m_Config",17,32),("m_vDragTouchPos",17,48),
                 ("m_vDragResult",17,64),("m_vDragDir",17,80),("m_vActiveDir",17,96),("m_fDragRatio",12,108),
-                ("m_dragged",2,112),("m_bVaildDraged",2,113)],&mut cursor);
+                ("m_dragged",2,112),("m_bVaildDraged",2,113)];
+            if heal {motion_fields.push(("m_OwnPackage",18,24));}
+            class(&mut b,10752,if heal{"IndicatorMotionPos"}else{"IndicatorMotionBase"},&motion_fields,&mut cursor);
             class(&mut b,11264,"IndicatorPackageEasy_Yuan",&[("m_OwnComp",18,16),("m_Config",17,24)],&mut cursor);
             class(&mut b,11776,"CData_Skill_Element",&[("m_SkillID",8,16),("m_RectType",8,20),("m_ShowRectPara",29,24),("m_BaseType",8,32)],&mut cursor);
             put64(&mut b,1568,2560);put64(&mut b,2072,2560);
-            for(at,value)in [(552,4030i32),(2576,4030),(2592,1)]{b[at..at+4].copy_from_slice(&value.to_le_bytes());}
+            for(at,value)in [(552,if heal{20050i32}else{4030}),(2576,if heal{20050}else{4030}),(2592,if heal{383}else{1})]{b[at..at+4].copy_from_slice(&value.to_le_bytes());}
         }
         r
     }
@@ -1990,6 +2019,27 @@ mod tests {
             assert!(MotionPlan::discover(&mut r,128,skill).is_err());
             r.memory.0.borrow_mut()[2576..2580].copy_from_slice(&20020i32.to_le_bytes());
             assert!(MotionPlan::discover_behavior(&mut r,128,skill).is_err());
+        }
+    }
+    #[test]
+    fn heal_zero_extent_is_a_tap_only_for_exact_owned_skill_and_config() {
+        let mut r=self_tap_registry_fixture(true);
+        let (checks,kind)=MotionPlan::discover_behavior(&mut r,128,20050).unwrap();
+        assert_eq!(kind,1);assert!(check(&r,&checks).is_ok());
+        assert!(MotionPlan::discover(&mut r,128,20050).is_err(),"self-use must not authorize a zero-range aim plan");
+        r.memory.0.borrow_mut()[2592..2596].copy_from_slice(&1i32.to_le_bytes());
+        assert!(check(&r,&checks).is_err());
+        for(at,bytes)in [(1568,2048u64.to_le_bytes().to_vec()),(2072,2048u64.to_le_bytes().to_vec()),
+            (1552,2048u64.to_le_bytes().to_vec()),(1560,1024u64.to_le_bytes().to_vec()),(2064,1536u64.to_le_bytes().to_vec()),
+            (2576,20080i32.to_le_bytes().to_vec()),(2592,1i32.to_le_bytes().to_vec()),(2580,0i32.to_le_bytes().to_vec()),
+            (3104,6f32.to_le_bytes().to_vec()),(3108,1f32.to_le_bytes().to_vec()),(3108,f32::NAN.to_le_bytes().to_vec())] {
+            let mut r=self_tap_registry_fixture(true);r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(MotionPlan::discover_behavior(&mut r,128,20050).is_err(),"at {at}");
+        }
+        for skill in [20010i32,20020,20030,20040,20080,20190,1410,4030] {
+            let mut r=self_tap_registry_fixture(true);
+            for at in [552,2576] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&skill.to_le_bytes());}
+            assert!(MotionPlan::discover_behavior(&mut r,128,skill).is_err(),"does not broaden another spell {skill}");
         }
     }
     #[test]
