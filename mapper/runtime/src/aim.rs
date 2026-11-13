@@ -126,6 +126,12 @@ fn karina_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,params:&
     skill==810 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
         && rect==0 && params==[3.,0.]
 }
+// Hilda Q: in-game description is a self shield/speed buff. Raw UI
+// application increments FirstSkillUseCount; cancellation does not.
+fn hilda_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,params:&[f64])->bool {
+    skill==3510 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
+        && rect==0 && params==[3.,0.]
+}
 fn movement_driven_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
     motion=="IndicatorMotionRot" && package=="IndicatorPackageEasy_JianTou_DrivenByJoystick"
         && rect==11 && params.len()>=2 && params[0]==27.
@@ -365,7 +371,12 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
         let at=typed_field(r,config,"m_BaseType",8)?;
         if i32_at(&capture(r,checks,at,4)?,0)!=11 {return Err("Karina self-tap base type changed".into());}
     }
-    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina {
+    let hilda=hilda_self_tap_template(skill,motion_name,package_name,rect,&params);
+    if hilda {
+        let at=typed_field(r,config,"m_BaseType",8)?;
+        if i32_at(&capture(r,checks,at,4)?,0)!=1 {return Err("Hilda self-tap base type changed".into());}
+    }
+    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina && !hilda {
         return Err("Unverified nonzero base-tap configuration".into());
     }
     for object in [motion,package] {
@@ -1666,6 +1677,19 @@ mod tests {
         }
         assert!(!karina_self_tap_template(810,"IndicatorMotionPos",p,0,&[3.,0.]));
         assert!(!karina_self_tap_template(810,m,"IndicatorPackageEasy",0,&[3.,0.]));
+        assert!(!zero_extent_base_tap_template(m,p,0,&[3.,0.]));
+    }
+    #[test]
+    fn hilda_self_tap_stays_scoped_to_verified_button() {
+        let m="IndicatorMotionBase";let p="IndicatorPackageEasy_Yuan";
+        assert!(hilda_self_tap_template(3510,m,p,0,&[3.,0.]));
+        for skill in [810,3500,3511,3520,3530,20010,20050,2510,8410,13310] {
+            assert!(!hilda_self_tap_template(skill,m,p,0,&[3.,0.]));
+        }
+        assert!(!hilda_self_tap_template(3510,m,p,11,&[3.,0.]));
+        assert!(!hilda_self_tap_template(3510,m,p,0,&[3.,1.]));
+        assert!(!hilda_self_tap_template(3510,"IndicatorMotionPos",p,0,&[3.,0.]));
+        assert!(!hilda_self_tap_template(3510,m,"Unknown",0,&[3.,0.]));
         assert!(!zero_extent_base_tap_template(m,p,0,&[3.,0.]));
     }
     #[test]
