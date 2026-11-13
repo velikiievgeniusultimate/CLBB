@@ -71,6 +71,20 @@ Rust-инструмент только читает память выбранн�
 Названия и ID боевого навыка берите из текущего персонажа/интерфейса, а не
 подставляйте ID, запомненный на предыдущем герое.
 
+Окно описаний не всегда переключается вместе с реальной формой героя.
+У Дигги в яйце оно продолжало показывать обычные навыки, хотя текущие
+кнопки уже имели ID 4880/4881/4882. Сохраняйте это расхождение и проверяйте
+новые кнопки отдельно; повторившийся текст не подтверждает их механику.
+В короткой форме подготовьте наблюдатели заранее и проверяйте форму перед
+каждым нажатием: тренировочное возрождение может закончить её во время
+открытия меню или телепортации.
+
+Для усиления следующей базовой атаки проверяйте всю цепочку. У Хилоса
+применение Q меняет атаку 4900 → 4901, попадание усиленной атакой возвращает
+4900 и отбрасывает цель. Его W отдельно меняется 4920 → 4921: отмена
+повторного нажатия сохраняет круг, применение повторного нажатия выключает
+его. Одного начального применения Q/W для проверки этих кнопок недостаточно.
+
 Счётчик применения подтверждает применение, но сам по себе не доказывает
 попадание. У заряжаемого навыка счётчик может увеличиваться уже при начале
 подготовки, даже при последующей успешной отмене. Например, у Гатоткачи W
@@ -101,6 +115,13 @@ owned live players and summons, with identity, type and coherence checks.
 Use fresh positions after displacement. Application counters alone do not prove
 hits. Verify active variants, actual cooldowns, held input, cancellation and
 observable effects. Serialize gameplay input; never move the physical cursor.
+
+Description panels can retain base-form text while the actual buttons have
+changed (Diggie's egg). Record that limitation rather than treating repeated
+text as an alternate-form description. Check the current form before each
+input in short-lived states. For next-attack buffs and toggles, verify the
+entire arm/hit/reset or enable/cancel-disable/disable sequence; the initial
+cast alone does not validate the conditional controls.
 
 ## Отказы диагностического аудита
 
