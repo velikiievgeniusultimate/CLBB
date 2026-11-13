@@ -879,3 +879,22 @@ fn sticky_closed_cancel_is_not_end_proof_without_current_owned_contact_and_empty
         assert!(!ended(&h,id),"case{case}");
     }
 }
+
+#[test]
+fn empty_unaccepted_target_down_is_retired_after_up_and_two_known_absent_ticks() {
+    for native_cancel in [false,true] {
+        let(mut c,mut h)=setup(true,Point::new(0.5,0.5));let movement=c.movementTouch_;
+        key(&mut c,&mut h,60,69,true);let id=c.skillTouch_;
+        let closed=|ms,clock|{
+            let mut f=frame(ms);f.game_clock_ms=n(clock);
+            f.selection_input.native_cancel=flag(native_cancel);f.selection_input.target_guid=n(0.);f
+        };
+        send(&mut c,&mut h,closed(70,40.));send(&mut c,&mut h,closed(75,41.));
+        assert!(!ended(&h,id),"a held key cannot be retired from idle UI");
+        key(&mut c,&mut h,80,69,false);
+        send(&mut c,&mut h,closed(90,42.));assert!(!ended(&h,id));
+        send(&mut c,&mut h,closed(95,42.));assert!(!ended(&h,id));
+        send(&mut c,&mut h,closed(100,43.));assert!(ended(&h,id));
+        assert!(h.active.contains_key(&movement));assert_eq!(h.abort_all_calls,0);
+    }
+}

@@ -36,6 +36,7 @@ pub(crate) struct SelectionState {
     end_core: i32,
     accepted_point: Point,
     pub(crate) frozen_direction: Option<Point>,
+    release_ns: i64,
     pub(crate) goal_sequence: u64,
     goal_time_ns: i64,
     goal_point: Point,
@@ -430,14 +431,24 @@ impl Controller {
             );
         }
     }
-    fn cancelled_target_contact(&self,s:&SelectionInput)->bool {
+    fn closed_empty_target_contact(&self,s:&SelectionInput)->bool {
         if !self.pendingRelease_ || self.skillKeyHeld_ || self.selection_.kind!=2
             || self.selection_.revoked || self.selection_.owner!=s.owner_id
             || self.selection_.backend_owner!=s.backend_owner_id
-            || !integer(s.backend_state,3,3) || !s.native_cancel.get()
+            || !integer(s.backend_state,3,3) || !s.native_cancel.is_bool()
+            || self.selection_.release_ns<=0 || s.sample_start_ns.value<self.selection_.release_ns as f64
             || target_guid(s.target_guid)!=Some(0) || s.target_valid.get()
             || !s.panel_visible.is_bool() || s.panel_visible.get()
-            || !s.contact_present.get() || s.contact_owner_id==0
+            || !s.contact_present.is_bool()
+        {return false;}
+        // A rejected/cancelled DOWN may never have opened the owned selector.
+        // Known absence is sufficient only after physical UP, under the same
+        // owned closed/empty backend and the two-native-tick proof below.
+        if !s.contact_present.get() {
+            return s.contact_owner_id==0 && s.has_drag.is_bool() && !s.has_drag.get()
+                && s.input_ready.is_bool() && !s.input_ready.get();
+        }
+        if !s.native_cancel.get() || s.contact_owner_id==0
             || (self.selection_.contact_owner!=0 && self.selection_.contact_owner!=s.contact_owner_id)
             || !integer(s.native_contact_id,i32::MIN,i32::MAX)
             || !s.raw_touch_xyz.valid() || s.raw_touch_xyz.values[2].value.abs()>1.
@@ -472,7 +483,7 @@ impl Controller {
             f.ui.active_slot.as_str().is_empty()
                 && (self.coreSkill_ == 0 || (future && self.coreSkill_ == s.active_skill_id.int()))
         };
-        let cancelled_contact=self.cancelled_target_contact(s);
+        let closed_contact=self.closed_empty_target_contact(s);
         let empty = ((self.selection_.captured
             && !self.selection_.revoked
             && self.selection_.owner == s.owner_id
@@ -482,7 +493,7 @@ impl Controller {
             && !s.has_drag.get()
             && ui_empty
             && (same_phase || future))
-            || (cancelled_contact && (same_phase || self.selection_.active==0)))
+            || (closed_contact && (same_phase || self.selection_.active==0)))
             && clock_valid
             && self.frameCoreSampleStartNs_ >= self.castStartedNs_
             && same(s.sample_end_ns, f.time_ns);
@@ -521,7 +532,7 @@ impl Controller {
             self.trace(
                 host,
                 "selection_native_end",
-                if cancelled_contact {"owned_cancelled_contact_and_two_native_ticks"} else {"owned_panel_capture_and_two_empty_native_ticks"},
+                if closed_contact {"owned_closed_empty_selector_and_two_native_ticks"} else {"owned_panel_capture_and_two_empty_native_ticks"},
             );
             self.finish_auto_completed_selection(host);
         } else {
@@ -532,13 +543,14 @@ impl Controller {
             self.trace(
                 host,
                 "selection_native_end",
-                if cancelled_contact {"await_second_cancelled_contact_tick"} else {"await_second_empty_native_tick"},
+                if closed_contact {"await_second_closed_empty_selector_tick"} else {"await_second_empty_native_tick"},
             );
         }
         true
     }
     pub(crate) fn freeze_selection_intent(&mut self, host: &mut impl Host) {
         self.pendingRelease_ = true;
+        self.selection_.release_ns=self.now_;
         self.pendingPointer_ = self.pointer_;
         self.pendingWorldValid_ = false;
         self.pendingDirectionValid_ = false;
