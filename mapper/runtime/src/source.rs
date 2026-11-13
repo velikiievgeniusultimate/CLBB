@@ -300,6 +300,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // cancel form; it has no indicator registry entry. Selection5530 and
         // the later aimed detach5535 retain their own existing behavior.
         || (hero==55 && slot=="skill:2" && base==5530 && active==5534)
+        // Akai stops Heavy Spin through the same owned ultimate slot.
+        // The stop form has no aiming registry, unlike other active forms.
+        || (hero==9 && slot=="skill:2" && base==930 && active==938)
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -2274,6 +2277,14 @@ mod tests {
         assert_eq!(published.get("skill:2"),Some(&4),"a known future ID still needs independently verified native geometry");
         published.insert("skill:2".into(),choice_control_type(Some(false),Some(1)));
         assert_eq!(published.get("skill:2"),Some(&1));
+    }
+    #[test]
+    fn akai_spin_cancel_is_only_the_owned_stop_form() {
+        assert!(verified_button_only_form(9,"skill:2",930,938));
+        for(hero,slot,base,active)in [(9,"skill:2",930,930),(9,"skill:2",930,939),
+            (9,"skill:0",930,938),(55,"skill:2",930,938),(9,"skill:2",938,938)] {
+            assert!(!verified_button_only_form(hero,slot,base,active));
+        }
     }
     #[test]
     fn angela_cancel_is_only_the_owned_channel_form_after_target_selection() {
