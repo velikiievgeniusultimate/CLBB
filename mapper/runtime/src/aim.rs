@@ -168,6 +168,10 @@ fn verified_direction_geometry(skill:i32,motion:&str,package:&str,configured_dir
     native_template(motion,package)==Some(2)||configured_direction
         ||(skill==8430&&motion=="IndicatorMotionRot"&&package=="IndicatorPackageEasy")
 }
+fn gord_bounce_range_family(skill:i32,motion:&str,package:&str)->bool {
+    skill==2310 && motion=="IndicatorMotionPos" && package=="IndicatorPackage_BulletDirctionBomb"
+}
+
 fn point_visual_fallback(motion:&str,package:&str)->bool {
     motion=="IndicatorMotionPos"&&package=="IndicatorPackageEasy_Yuan"
 }
@@ -179,7 +183,25 @@ fn valid_native_range(shape:f64,values:[f64;2])->bool {
 /// the distance while preserving the same typed configuration/array owner.
 fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
     motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<(u64,f64)>> {
-    let Some(shape)=native_range_shape(motion_name,package_name)else{return Ok(None)};
+    let shape=if gord_bounce_range_family(skill,motion_name,package_name){22.}
+        else if let Some(shape)=native_range_shape(motion_name,package_name){shape}else{return Ok(None)};
+    if shape==22. {
+        let begin=checks.len();
+        let(rect,params)=native_rect_config(r,comp,skill,checks)?;
+        let config=owner(r,comp,"m_Config",checks)?;
+        let base_at=typed_field(r,config,"m_BaseType",8)?;
+        if rect!=1 || !valid_native_range(22.,params) || i32_at(&capture(r,checks,base_at,4)?,0)!=10 {
+            return Err("Unverified Gord bounce range configuration".into());
+        }
+        // Keep the configuration/array owner and shape fences, while the
+        // current distance remains validated by the live range reader.
+        let array=owner(r,config,"m_ShowRectPara",checks)?;
+        let mut witness_count=0;
+        for(address,bytes)in checks.iter_mut().skip(begin) {
+            if *address==array+32 && bytes.len()==8 {bytes.truncate(4);witness_count+=1;}
+        }
+        if witness_count!=1 {return Err("Gord range witness layout changed".into());}
+    }
     if shape==9. {
         let(rect,params)=native_rect_config(r,comp,skill,checks)?;
         if rect!=1||!valid_native_range(shape,params){return Err("Unverified shape-nine native range configuration".into());}
@@ -775,7 +797,10 @@ impl MotionPlan {
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let healing=heal_self_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
-        let kind=if healing {1} else if let Some(kind)=native_template(&mc.name,&pc.name) {
+        let kind=if healing {1} else if gord_bounce_range_family(skill,&mc.name,&pc.name) {
+            native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Gord range contract")?;
+            3
+        } else if let Some(kind)=native_template(&mc.name,&pc.name) {
             if kind==3 {native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Unverified native range family")?;}
             kind
         }
@@ -863,7 +888,7 @@ impl MotionPlan {
             20150 => Some(("IndicatorMotionRot", "IndicatorPackageEasy_ShanXing_Normal")),
             20020 => Some(("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal")),
             8430 => Some(("IndicatorMotionRot", "IndicatorPackageEasy")),
-            _ if attack_geometry || configured_direction || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
+            _ if attack_geometry || configured_direction || (gord_bounce_range_family(skill,&name,&package_class.name)&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
             _ => None,
         };
         if expected.is_none_or(|(motion, package)| name != motion || package_class.name != package)
@@ -900,7 +925,8 @@ impl MotionPlan {
              Some((typed_field(r,motion,"m_dragged",2)?,typed_field(r,motion,"m_bVaildDraged",2)?)))
         }else if camera_direction{(None,Some(typed_field(r,package,"<m_gMain>k__BackingField",18)?),None)}else{(None,None,None)};
         let circle_field = typed_field(r,package, "m_gYuan",18).ok().or_else(|| {
-            point_visual_fallback(&name,&package_class.name)
+            (point_visual_fallback(&name,&package_class.name) ||
+                 (gord_bounce_range_family(skill,&name,&package_class.name)&&range_contract.is_some()))
                 .then(||typed_field(r,package,"<m_gMain>k__BackingField",18).ok()).flatten()
         });
         let circle_owner = circle_field.and_then(|a| r.pointer(a).ok()).unwrap_or(0);
@@ -1696,7 +1722,7 @@ mod tests {
         }
         let mut bytes=vec![0u8;32768];let mut cursor=8192;
         class(&mut bytes,3072,"Holder",&[("m_Config",17,32),("m_OwnComp",18,40)],&mut cursor);
-        class(&mut bytes,4096,"CData_Skill_Element",&[("m_SkillID",8,32),("m_RectType",8,36),("m_ShowRectPara",29,40)],&mut cursor);
+        class(&mut bytes,4096,"CData_Skill_Element",&[("m_SkillID",8,32),("m_RectType",8,36),("m_ShowRectPara",29,40),("m_BaseType",8,48)],&mut cursor);
         class(&mut bytes,5120,"Single",&[],&mut cursor);
         class(&mut bytes,5632,"Single[]",&[],&mut cursor);put64(&mut bytes,5632+0x40,5120);
         for object in [128,256,384]{put64(&mut bytes,object,3072);put64(&mut bytes,object+32,1024);put64(&mut bytes,object+40,128);}
@@ -1899,6 +1925,34 @@ mod tests {
         for(at,value)in [(1056,12230i32),(1060,1)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
         for(at,value)in [(1568,9f32),(1572,3.)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
         r
+    }
+    #[test]
+    fn gord_bounce_range_requires_exact_skill_shape_and_owners() {
+        fn fixture()->Reflection<MutableMemory> {
+            let r=base_tap_fixture();
+            for(at,value)in[(1056,2310i32),(1060,1),(1072,10)]{r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+            for(at,value)in[(1568,22f32),(1572,6.3)]{r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+            r
+        }
+        let m="IndicatorMotionPos";let p="IndicatorPackage_BulletDirctionBomb";
+        let mut r=fixture();let mut checks=Vec::new();
+        assert_eq!(native_range_contract(&mut r,128,256,384,2310,m,p,&mut checks).unwrap(),Some((1568,22.)));
+        assert_eq!(native_range_shape(m,p),None,"does not authorize other skills by shared pair");
+        assert!(check(&r,&checks).is_ok());
+        r.memory.0.borrow_mut()[1572..1576].copy_from_slice(&7f32.to_le_bytes());
+        assert!(check(&r,&checks).is_ok(),"native range distance may update without losing exact owner/shape");
+        for(at,bytes)in[(288,1280u64.to_le_bytes().to_vec()),(416,1280u64.to_le_bytes().to_vec()),
+            (1056,999i32.to_le_bytes().to_vec()),(1060,2i32.to_le_bytes().to_vec()),(1072,1i32.to_le_bytes().to_vec()),
+            (1568,3f32.to_le_bytes().to_vec()),(1572,0f32.to_le_bytes().to_vec()),(1572,f32::NAN.to_le_bytes().to_vec())] {
+            let mut r=fixture();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(native_range_contract(&mut r,128,256,384,2310,m,p,&mut Vec::new()).is_err(),"at {at}");
+        }
+        for skill in [2510,8410,8425,1830,2311,0] {
+            let mut r=fixture();assert_eq!(native_range_contract(&mut r,128,256,384,skill,m,p,&mut Vec::new()).unwrap(),None);
+        }
+        for pair in [("IndicatorMotionRot",p),(m,"IndicatorPackageEasy")] {
+            let mut r=fixture();assert_eq!(native_range_contract(&mut r,128,256,384,2310,pair.0,pair.1,&mut Vec::new()).unwrap(),None);
+        }
     }
     #[test]
     fn candidate_range_audit_requires_exact_family_rect_and_all_typed_config_owners() {
