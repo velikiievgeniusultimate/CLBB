@@ -35,6 +35,7 @@ sudo -n python3 tools/read-training-descriptions.py --hero HERO_ID --frozen-mani
 cargo build --manifest-path mapper/runtime/Cargo.toml --locked --offline --bin training-actors-audit
 sudo -n mapper/runtime/target/debug/training-actors-audit PID NEW_OUTPUT.json
 sudo -n mapper/runtime/target/debug/training-actors-audit PID NEW_OUTPUT.jsonl --watch-ms 10000
+sudo -n mapper/runtime/target/debug/training-actors-audit PID NEW_OUTPUT.jsonl --watch-ms 10000 --monsters
 ```
 
 Rust-инструмент только читает память выбранной собственной сборки. Он проверяет
@@ -43,6 +44,15 @@ Rust-инструмент только читает память выбранн�
 `m_ShowPlayers` и `m_ShowPlayerSummons`: GUID, игровой ID, сторону, здоровье,
 отрисовываемые координаты и время наблюдения. Ошибочная/устаревшая строка не
 является целью. Это диагностические данные, не разрешение для production-ввода.
+
+Опция `--monsters` дополнительно читает `m_ShowMonsters`. В этом списке есть
+башни, невидимые маркеры и вспомогательные существа: ближайшая запись сама по
+себе не является подходящим монстром. Сверяйте класс, типизированные флаги,
+здоровье, свежую позицию и изображение. Сохраняйте GUID цели на всём интервале.
+`local_observables` содержит сырые типизированные поля локального героя.
+Название поля не доказывает его смысл: некоторые значения сбрасываются или
+убывают, а счётчики попаданий могут не учитывать тренировочные манекены.
+Не выдавайте их за накопительные счётчики без отдельной проверки.
 
 В режиме наблюдения первая строка — снимок метаданных, затем строки `actors`.
 Строка `READY` в stdout относится только к подключению наблюдателя. Полное
@@ -76,3 +86,19 @@ owned live players and summons, with identity, type and coherence checks.
 Use fresh positions after displacement. Application counters alone do not prove
 hits. Verify active variants, actual cooldowns, held input, cancellation and
 observable effects. Serialize gameplay input; never move the physical cursor.
+
+## Отказы диагностического аудита
+
+`hero-contract-audit` сохраняет различия кэшированных проверок перед конечным
+снимком. Перестройка списка UI может сменить его версию без смены героя/матча.
+Повтор разрешён только при полном и неизменном наборе match/plan-проверок,
+читаемом изменении UI, совпадающих владельцах до/после и **том же input epoch**.
+Обычный отказ `Match source ownership changed` без этого подтверждения остаётся
+окончательным. Исходные неуспешные отчёты сохраняются. Политика production
+`Source::sample` не ослаблена; `audit_plan_integrity()` только объясняет различия.
+
+The optional `--monsters` list also includes structures and invisible markers;
+validate actual entity type and rendered scene before choosing a target. Local
+raw observables are not certified cumulative counters. The contract auditor may
+retry a positively identified UI-only cached guard change, but must retain the
+same typed match owners and input epoch; production guards remain unchanged.

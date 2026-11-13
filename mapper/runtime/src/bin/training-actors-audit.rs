@@ -80,12 +80,67 @@ fn show_entity_class(r: &mut Reflection<ProcessMemory>, address: u64) -> Result<
     }
     Err("Expected ShowEntity reference element".into())
 }
+// These are observations, not inferred hit certificates. Consumers must
+// establish each counter's meaning against actual isolated training actions.
+fn local_observables(
+    r: &mut Reflection<ProcessMemory>,
+    actor: u64,
+    hero: i32,
+) -> Result<serde_json::Value, String> {
+    let start = now_ns();
+    let id_at = typed(r, actor, "m_ID", 8)?;
+    if r.integer(id_at)? != hero {
+        return Err("Local actor hero mismatch".into());
+    }
+    let mut values = serde_json::Map::new();
+    let mut checks = Vec::new();
+    for (name, kind) in [
+        ("m_iCommonAttackHeroCount", 8),
+        ("m_iNormalSkillHeroCount", 8),
+        ("m_FirstHurtHeroValue", 8),
+        ("m_SecondHurtHeroValue", 8),
+        ("m_ThirdHurtHeroValue", 8),
+        ("m_HurtHeroValue", 13),
+        ("m_HurtHeroAD", 13),
+        ("m_HurtHeroAP", 13),
+    ] {
+        let at = typed(r, actor, name, kind)?;
+        let raw = r.read(at, if kind == 8 { 4 } else { 8 })?;
+        let value = if kind == 8 {
+            json!(i32_at(&raw, 0))
+        } else {
+            let value = f64::from_le_bytes(raw[..8].try_into().unwrap());
+            if !value.is_finite() {
+                return Err("Nonfinite local diagnostic value".into());
+            }
+            json!(value)
+        };
+        checks.push((at, raw));
+        values.insert(name.into(), value);
+    }
+    if r.integer(id_at)? != hero {
+        return Err("Local hero changed during counters".into());
+    }
+    for (at, raw) in checks {
+        if raw != r.read(at, raw.len())? {
+            return Err("Local diagnostic counters changed during sample".into());
+        }
+    }
+    Ok(
+        json!({"hero":hero,"actor":actor,"start_ns":start,"end_ns":now_ns(),"coherent":true,"values":values,"scope":"Typed local raw diagnostic counters; meanings require isolated gameplay evidence"}),
+    )
+}
 fn players(
     r: &mut Reflection<ProcessMemory>,
     battle: u64,
+    include_monsters: bool,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut actors = Vec::new();
-    for container in ["m_ShowPlayers", "m_ShowPlayerSummons"] {
+    let mut containers = vec!["m_ShowPlayers", "m_ShowPlayerSummons"];
+    if include_monsters {
+        containers.push("m_ShowMonsters");
+    }
+    for container in containers {
         let list_at = typed(r, battle, container, 21)?;
         let list = r.pointer(list_at)?;
         if r.class(r.pointer(list)?)?.name != "List`1" {
@@ -122,6 +177,19 @@ fn players(
                 let camp_at = typed(r, object, "m_bSameCampType", 2)?;
                 let id = r.integer(id_at)?;
                 let guid = r.integer(guid_at)? as u32;
+                let mut flags = serde_json::Map::new();
+                for name in [
+                    "IsWildMonster",
+                    "IsPlayer",
+                    "IsTower",
+                    "<IsStake>k__BackingField",
+                    "m_bDeath",
+                    "m_bDestroy",
+                    "m_bRendererVisible",
+                ] {
+                    let at = typed(r, object, name, 2)?;
+                    flags.insert(name.into(), json!(r.boolean(at)?));
+                }
                 let hp = r.integer(hp_at)?;
                 let same_camp = r.boolean(camp_at)?;
                 if before != r.read(pos, 12)?
@@ -134,7 +202,7 @@ fn players(
                     return Err("Entity moved or changed during observation".into());
                 }
                 Ok(
-                    json!({"object":object,"class":class.name,"id":id,"guid":guid,"hp":hp,"same_camp":same_camp,"render_world":world,"coherent":true,"start_ns":actor_start,"end_ns":now_ns()}),
+                    json!({"object":object,"class":class.name,"id":id,"guid":guid,"hp":hp,"flags":flags,"same_camp":same_camp,"render_world":world,"coherent":true,"start_ns":actor_start,"end_ns":now_ns()}),
                 )
             })();
             actors.push(json!({"object":object,"container":container,"observation":result}));
@@ -147,23 +215,36 @@ fn players(
 }
 fn main() -> Result<(), String> {
     let args: Vec<_> = std::env::args().collect();
-    if args.len() != 3 && args.len() != 5 {
+    if args.len() < 3 {
         return Err(
-            "Usage: training-actors-audit PID NEW_OUTPUT.json [--watch-ms 100..10000]".into(),
+            "Usage: training-actors-audit PID NEW_OUTPUT [--watch-ms 100..10000] [--monsters]"
+                .into(),
         );
     }
-    let duration = if args.len() == 5 {
-        if args[3] != "--watch-ms" {
-            return Err("Unknown watch option".into());
+    let mut duration = None;
+    let mut include_monsters = false;
+    let mut i = 3;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--monsters" if !include_monsters => {
+                include_monsters = true;
+                i += 1;
+            }
+            "--watch-ms" if duration.is_none() => {
+                let ms: u64 = args
+                    .get(i + 1)
+                    .ok_or("Missing watch duration")?
+                    .parse()
+                    .map_err(|_| "Invalid watch duration")?;
+                if !(100..=10000).contains(&ms) {
+                    return Err("Watch duration out of range".into());
+                }
+                duration = Some(ms);
+                i += 2;
+            }
+            _ => return Err("Unknown or duplicate diagnostic option".into()),
         }
-        let ms: u64 = args[4].parse().map_err(|_| "Invalid watch duration")?;
-        if !(100..=10000).contains(&ms) {
-            return Err("Watch duration out of range".into());
-        }
-        Some(ms)
-    } else {
-        None
-    };
+    }
     let pid: u32 = args[1].parse().map_err(|_| "Invalid PID")?;
     if pid == 0 {
         return Err("PID must be positive".into());
@@ -223,7 +304,16 @@ fn main() -> Result<(), String> {
         }
         objects.push(json!({"role":role,"object":object,"class":name,"fields":fields}));
     }
-    let actors = players(&mut source.reflection, sample.match_owners[0])?;
+    let actors = players(
+        &mut source.reflection,
+        sample.match_owners[0],
+        include_monsters,
+    )?;
+    let counters = local_observables(
+        &mut source.reflection,
+        sample.match_owners[3],
+        sample.frame.hero_id.int(),
+    );
     let final_sample = coherent(&mut source)?;
     if sample.match_owners != final_sample.match_owners
         || sample.frame.hero_id.int() != final_sample.frame.hero_id.int()
@@ -233,7 +323,7 @@ fn main() -> Result<(), String> {
     if identity(pid)? != expected {
         return Err("Runtime identity changed".into());
     }
-    let value = json!({"format":"clbb-training-actors-schema","version":1,"pid":pid,"birth":expected.0,"executable":expected.1,"hero":sample.frame.hero_id.int(),"owners":sample.match_owners,"start_ns":start,"end_ns":now_ns(),"same_match":true,"objects":objects,"actors":actors,"scope":"Read-only owned live ShowPlayers and typed rendered positions; rows with coherence errors are not targets. No input or writes; not production authorization"});
+    let value = json!({"format":"clbb-training-actors-schema","version":1,"pid":pid,"birth":expected.0,"executable":expected.1,"hero":sample.frame.hero_id.int(),"owners":sample.match_owners,"start_ns":start,"end_ns":now_ns(),"same_match":true,"objects":objects,"actors":actors,"includes_monsters":include_monsters,"local_observables":counters,"scope":"Read-only owned live ShowPlayers and typed rendered positions; rows with coherence errors are not targets. No input or writes; not production authorization"});
     let raw = if duration.is_some() {
         serde_json::to_vec(&value)
     } else {
@@ -268,8 +358,17 @@ fn main() -> Result<(), String> {
                 return Err("Match identity changed during actor watch".into());
             }
             let row_start = now_ns();
-            let observed = players(&mut source.reflection, sample.match_owners[0]);
-            let event = json!({"event":"actors","hero":sample.frame.hero_id.int(),"pid":pid,"start_ns":row_start,"end_ns":now_ns(),"game_clock_ms":current.game_clock_ms,"observation":observed});
+            let observed = players(
+                &mut source.reflection,
+                sample.match_owners[0],
+                include_monsters,
+            );
+            let counters = local_observables(
+                &mut source.reflection,
+                sample.match_owners[3],
+                sample.frame.hero_id.int(),
+            );
+            let event = json!({"event":"actors","hero":sample.frame.hero_id.int(),"pid":pid,"start_ns":row_start,"end_ns":now_ns(),"game_clock_ms":current.game_clock_ms,"observation":observed,"local_observables":counters});
             snapshots += 1;
             serde_json::to_writer(&mut file, &event).map_err(|e| e.to_string())?;
             file.write_all(b"\n")

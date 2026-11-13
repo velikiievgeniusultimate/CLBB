@@ -1024,6 +1024,23 @@ impl<M: Memory> Source<M> {
             auxiliary:AuxiliaryProducer::default(),
         })
     }
+    /// Explain cached diagnostic guard differences without changing plans,
+    /// epochs, input, or the production refusal policy.
+    pub fn audit_plan_integrity(&self)->serde_json::Value {
+        let inspect=|checks:&Checks| {
+            let mut differences=Vec::new();let mut truncated=false;
+            for (index,(at,expected)) in checks.iter().enumerate() {
+                if index>=2048 {truncated=true;break;}
+                match self.reflection.read(*at,expected.len()) {
+                    Ok(actual) if actual==*expected=>{},
+                    result=>{if differences.len()>=64 {truncated=true;break;}
+                        differences.push(serde_json::json!({"index":index,"address":format!("0x{at:x}"),"length":expected.len(),"expected_prefix":expected.iter().take(16).map(|v|format!("{v:02x}")).collect::<String>(),"actual_prefix":result.as_ref().ok().map(|v|v.iter().take(16).map(|v|format!("{v:02x}")).collect::<String>()),"error":result.err()}));}
+                }
+            }
+            serde_json::json!({"count":checks.len(),"differences":differences,"truncated":truncated})
+        };
+        serde_json::json!({"scope":"Read-only cached check inventory; no input authorization or plan mutation","match":inspect(&self.match_checks),"plan":self.plan.as_ref().map(|p|inspect(&p.checks)),"ui":self.plan.as_ref().map(|p|inspect(&p.ui.checks))})
+    }
     /// Read-only inventory of the already owned match-control roots.
     /// No arbitrary object traversal or new live-control authorization.
     pub fn audit_ui_schema(&mut self)->Result<serde_json::Value> {

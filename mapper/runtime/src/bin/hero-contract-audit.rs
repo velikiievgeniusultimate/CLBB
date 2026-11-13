@@ -149,7 +149,18 @@ fn transient_final_sample_error(error: &str) -> bool {
     matches!(error, "Camera/actor/UI/native feedback changed during sample"
         | "Native camera pose does not match its matrix"
         | "Source coherence phase exceeded 100 ms"
-        | "Wall selection/visual not yet coherent")
+        | "Wall selection/visual not yet coherent"
+        | "Cached UI guard changed with stable match anchors")
+}
+
+// A diagnostic may outlive the UI list version captured by Source::prepare.
+// Qualify this case separately: real owner/read failures remain non-retryable.
+fn ui_only_cached_guard_change(value:&Value)->bool {
+    let valid_group=|name:&str|value[name]["count"].as_u64().is_some_and(|n|n>0)
+        &&value[name]["truncated"]==false&&value[name]["differences"].is_array();
+    ["match","plan"].iter().all(|name|valid_group(name)&&value[*name]["differences"].as_array().unwrap().is_empty())
+        &&valid_group("ui")&&value["ui"]["differences"].as_array().is_some_and(|rows|!rows.is_empty()
+            &&rows.iter().all(|r|r["error"].is_null()&&r["actual_prefix"].is_string()))
 }
 
 fn final_sample_with_retry<T>(mut probe: impl FnMut() -> (Result<T>, Option<String>),
@@ -535,16 +546,21 @@ fn main() -> Result<()> {
     let controls=source.audit_control_state();let ui=source.audit_ui_input();
     let charge_lifecycle=charge_lifecycle(&mut source.reflection,sample.match_owners[2]);
     let hero_level=local_hero_level(&mut source.reflection,Some((sample.match_owners,hero)));
+    let cached_integrity_before_final=source.audit_plan_integrity();
     let (final_sample, final_sample_attempts)=final_sample_with_retry(|| {
         let guard=final_match_anchor(&mut source.reflection,pid,&identity,sample.match_owners,hero);
         if let Err(error)=guard { return (Err(format!("Final audit anchor rejected: {error}")),None); }
-        let result=source.sample(now_ns(),size);
+        let ui_replan=ui_only_cached_guard_change(&source.audit_plan_integrity());
+        let mut result=source.sample(now_ns(),size);
         let source_error=result.as_ref().err().cloned();
         if let Err(error)=final_match_anchor(&mut source.reflection,pid,&identity,sample.match_owners,hero) {
             return (Err(format!("Final audit anchor rejected: {error}")),source_error);
         }
+        if ui_replan&&source_error.as_deref()==Some("Match source ownership changed") {
+            result=Err("Cached UI guard changed with stable match anchors".into());
+        }
         (result,source_error)
-    }, |value|value.match_owners==sample.match_owners&&value.indicator==sample.indicator&&value.frame.hero_id.int()==hero);
+    }, |value|value.match_owners==sample.match_owners&&value.indicator==sample.indicator&&value.frame.hero_id.int()==hero&&value.frame.token.as_str()==frame.token.as_str());
     let same_match=final_sample.is_ok();
     if process_identity(pid)?!=identity {return Err("Runtime identity changed during audit".into());}
     let output=json!({
@@ -553,7 +569,7 @@ fn main() -> Result<()> {
         "sample_ns":frame.time_ns.value,"active_skill":frame.skill_id.int(),"active_slot":frame.ui.active_slot.as_str(),
         "movement":{"ready":frame.ui.movement.ready.value,"press":frame.ui.movement.press_uv.values.map(|v|v.value),"center":frame.ui.movement.center_uv.values.map(|v|v.value),"radius":frame.ui.movement.radius_uv.values.map(|v|v.value)},"read_ms":frame.sample_duration_ms.value,"types":sample.control_types,"buttons":buttons,"variants":variants,
         "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"hero_level":hero_level,"skill_levels":skill_levels,"sample_rejections":errors,
-        "same_match_at_end":same_match,"final_sample_error":final_sample.err(),"final_sample_attempts":final_sample_attempts,
+        "cached_integrity_before_final":cached_integrity_before_final,"same_match_at_end":same_match,"final_sample_error":final_sample.err(),"final_sample_attempts":final_sample_attempts,
         "scope":"read-only owned gameplay controls/configuration; no memory writes, input or production template authorization",
     });
     write_output(&args[2], &output)?;
@@ -647,7 +663,7 @@ mod tests {
     fn final_sample_retries_only_documented_dynamic_coherence_and_preserves_rejections() {
         for transient in ["Camera/actor/UI/native feedback changed during sample",
             "Native camera pose does not match its matrix", "Source coherence phase exceeded 100 ms",
-            "Wall selection/visual not yet coherent"] {
+            "Wall selection/visual not yet coherent", "Cached UI guard changed with stable match anchors"] {
             let mut calls=0;
             let (result, attempts)=final_sample_with_retry(|| {
                 calls+=1;
@@ -666,6 +682,27 @@ mod tests {
             calls+=1; (Err(transient.into()),Some(transient.into()))
         }, |_|true);
         assert_eq!(result.unwrap_err(),transient); assert_eq!(calls,4); assert_eq!(attempts.len(),4);
+    }
+    #[test]
+    fn ui_replan_requires_complete_stable_owner_guards_and_readable_ui_difference() {
+        let good=json!({"match":{"count":6,"truncated":false,"differences":[]},"plan":{"count":9,"truncated":false,"differences":[]},"ui":{"count":44,"truncated":false,"differences":[{"error":null,"actual_prefix":"1234"}]}});
+        assert!(ui_only_cached_guard_change(&good));
+        for group in ["match","plan","ui"] {
+            let mut bad=good.clone();bad[group]["truncated"]=json!(true);assert!(!ui_only_cached_guard_change(&bad));
+        }
+        let mut bad=good.clone();bad["match"]["differences"]=json!([{"address":"0x1"}]);assert!(!ui_only_cached_guard_change(&bad));
+        let mut bad=good.clone();bad["plan"]["differences"]=json!([{"address":"0x2"}]);assert!(!ui_only_cached_guard_change(&bad));
+        let mut bad=good.clone();bad["ui"]["differences"][0]["error"]=json!("Read failed");assert!(!ui_only_cached_guard_change(&bad));
+        let mut bad=good.clone();bad["ui"]["differences"]=json!([]);assert!(!ui_only_cached_guard_change(&bad));
+        assert!(!ui_only_cached_guard_change(&Value::Null));
+    }
+    #[test]
+    fn ui_replan_cannot_accept_a_new_input_epoch() {
+        let mut calls=0;
+        let(result,attempts)=final_sample_with_retry(|| {
+            calls+=1;if calls==1{(Err("Cached UI guard changed with stable match anchors".into()),None)}else{(Ok((OWNERS,97,0x9000,2)),None)}
+        },|key|*key==(OWNERS,97,0x9000,1));
+        assert!(result.is_err());assert_eq!(calls,2);assert_eq!(attempts[1]["retryable_coherence_error"],false);
     }
     #[test]
     fn final_sample_never_retries_owner_pid_metadata_or_successful_match_mismatches() {
