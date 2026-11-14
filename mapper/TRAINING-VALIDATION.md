@@ -31,6 +31,13 @@
 количеству распознанных основных навыков. В статусе отдельно перечисляйте
 проверенные условия и оставшиеся вопросы.
 
+Условный повтор может снова сбросить свою перезарядку. У Селены второй
+рывок после превращения действительно применился, увеличил локальный счётчик
+и нанёс 818 урона по метке; ожидать после него активный КД было ошибкой
+проверяющего скрипта. Для таких повторов проверяйте применение и попадание,
+а состояние КД оценивайте согласно оставшимся условиям. Отдельное применение
+Q с усиленной атакой подтвердило сброс W без попадания самим W.
+
 ## Описания из интерфейса
 
 Откройте панель описаний стрелкой справа и включите «Полный». Для наблюдаемых
@@ -186,6 +193,12 @@ Rust-маппера можно через `tools/reload-mapper.py`; требов
 к измерению; дополнительные задержки в игровое управление из них не следуют.
 
 ## English
+
+A conditional recast can reset its cooldown again. For Selena, the final dash
+really applied (local counter and an 818-damage marked hit), so requiring an
+active cooldown afterwards was a harness error. Verify actual application and
+hits, then interpret the cooldown using the remaining condition. An isolated
+enhanced Q attack also verified W reset without a W hit.
 
 Read the installed game's expanded skill/passive descriptions first. Derive
 and reproduce target, hit, stack, form and recast conditions before calling a
