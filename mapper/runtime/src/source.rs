@@ -322,6 +322,10 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Lesley's firing channel exposes a native ordinary stop button.
         // The charge/target-selection phase5331 keeps its base range plan.
         || (hero==53 && slot=="skill:2" && base==5330 && active==5396)
+        // Chang'e exposes an ordinary cancel button during each meteor
+        // channel. Native UI repetition ends both forms before natural expiry.
+        // Normal6130 and Crescent6170 remain directional casts.
+        || (hero==61 && slot=="skill:2" && base==6130 && matches!(active,6146|6196))
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -2393,6 +2397,20 @@ mod tests {
             (52,"skill:3",5230,5256),(51,"skill:3",5250,5256),
             (52,"skill:3",5250,5257),(52,"extra:3",5250,5256),
         ] {assert!(!verified_button_only_form(hero,slot,base,active));}
+    }
+    #[test]
+    fn change_meteor_cancel_is_not_her_normal_or_crescent_aimed_cast() {
+        for active in [6146,6196] {
+            assert!(verified_button_only_form(61,"skill:2",6130,active));
+            for (hero,slot,base) in [(60,"skill:2",6130),(61,"skill:0",6130),
+                (61,"skill:1",6130),(61,"extra:2",6130),(61,"skill:2",6170),
+                (61,"skill:2",6120)] {
+                assert!(!verified_button_only_form(hero,slot,base,active));
+            }
+        }
+        for active in [6130,6170,6150,6129,6145,6195,6197] {
+            assert!(!verified_button_only_form(61,"skill:2",6130,active));
+        }
     }
     #[test]
     fn lesley_channel_stop_is_not_her_targeting_or_charge_phase() {
