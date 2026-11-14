@@ -322,6 +322,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Claude swaps with his existing hologram through an ordinary native
         // button. The original placement remains a range skill.
         || (hero==65 && slot=="skill:1" && base==6520 && active==6521)
+        // Leomord can interrupt the preparation started by his initial Q
+        // through an ordinary repeat, retaining the original aimed direction.
+        || (hero==67 && slot=="skill:0" && base==6710 && active==6711)
         // Lesley's firing channel exposes a native ordinary stop button.
         // The charge/target-selection phase5331 keeps its base range plan.
         || (hero==53 && slot=="skill:2" && base==5330 && active==5396)
@@ -2469,6 +2472,19 @@ mod tests {
         ] { assert!(!verified_button_only_form(hero,slot,base,active)); }
         for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
             assert!(!verified_button_only_form(hero,"skill:1",6520,6521));
+        }
+    }
+    #[test]
+    fn leomord_early_strike_is_not_a_mounted_or_disabled_ultimate_form() {
+        assert!(verified_button_only_form(67,"skill:0",6710,6711));
+        for (slot,base,active) in [
+            ("skill:0",6710,6710),("skill:0",6710,6750),
+            ("skill:1",6710,6711),("skill:2",6710,6711),
+            ("extra:0",6710,6711),("skill:0",6720,6711),
+            ("skill:2",6730,206738),("skill:2",6730,6738),
+        ] { assert!(!verified_button_only_form(67,slot,base,active)); }
+        for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            assert!(!verified_button_only_form(hero,"skill:0",6710,6711));
         }
     }
     #[test]
