@@ -369,6 +369,28 @@ fn aldous_repeat_requires_its_exact_owned_staged_native_phase_before_down() {
     }
 }
 #[test]
+fn locked_aldous_q_never_starts_a_finger_or_replays_after_enhancement_ends() {
+    let make=|ms,hero,active,locked|{
+        let mut f=frame(ms);f.hero_id=n(hero as f64);f.ui.hero_id=f.hero_id;f.skill_state.hero_id=f.hero_id;
+        f.ui.buttons[1].skill_id=n(6410.);f.skill_state.buttons[1].base_skill_id=n(6410.);
+        f.skill_state.buttons[1].active_skill_id=n(active as f64);f.skill_state.buttons[1].cast_locked=flag(locked);f
+    };
+    let mut c=Controller::new();let mut h=Ledger::default();c.apply_input(&mut h,Input::Enabled(true),T);
+    send(&mut c,&mut h,make(0,64,6417,true));key(&mut c,&mut h,1,81,true);
+    assert!(h.active.is_empty());assert!(c.queuedSkills_.is_empty());assert!(c.cooldownIgnoredKeys_.contains(&81));
+    send(&mut c,&mut h,make(20,64,6410,false));assert!(h.active.is_empty(),"unlock never replays ignored DOWN");
+    key(&mut c,&mut h,21,81,false);key(&mut c,&mut h,22,81,true);assert_eq!(h.active.len(),1);
+    let mut c=Controller::new();let mut h=Ledger::default();c.apply_input(&mut h,Input::Enabled(true),T);
+    let mut unknown=make(0,64,6417,true);unknown.skill_state.buttons[1].cast_locked=Default::default();
+    send(&mut c,&mut h,unknown);key(&mut c,&mut h,1,81,true);assert!(h.active.is_empty());
+    assert!(c.cooldownIgnoredKeys_.contains(&81),"missing readiness is not permission to press a locked display");
+    for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+        let mut c=Controller::new();let mut h=Ledger::default();c.apply_input(&mut h,Input::Enabled(true),T);
+        send(&mut c,&mut h,make(0,hero,6417,true));key(&mut c,&mut h,1,81,true);
+        assert!(!c.cooldownIgnoredKeys_.contains(&81),"frozen hero{hero} unchanged");
+    }
+}
+#[test]
 fn aldous_owned_portrait_press_without_drag_still_requires_exact_target_and_point() {
     fn aldous(mut f:snapshot::Frame)->snapshot::Frame {
         f.hero_id=n(64.);f.ui.hero_id=f.hero_id;f.skill_state.hero_id=f.hero_id;
