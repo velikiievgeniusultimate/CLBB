@@ -798,6 +798,16 @@ impl Controller {
             return;
         };
         let s = &f.cancel_state;
+        // Applying Crescent during an existing meteor channel can replace
+        // stop6196 with normal6170 while Q remains channel-locked. The native
+        // stop contract is revoked: even a direct cross gesture produces no
+        // cancel flag. Its UP at the cross leaves the channel intact. Do not
+        // hold the rest of the mapper hostage waiting for an impossible ACK.
+        if self.revoked_chang_e_stop(s) {
+            self.trace(host, "cancel_contact_revoked", "chang_e_midchannel_shield_replaced_stop");
+            self.finish_skill(host, true);
+            return;
+        }
         if self.skillBehavior_==SkillBehavior::Selection&&!self.selection_cancel_owner(b,f){return;}
         let start = s.sample_start_ns.get(-1.);
         let end = s.sample_end_ns.get(-1.);
@@ -827,6 +837,30 @@ impl Controller {
         }
         self.skillCancelAcknowledged_ = true;
         self.trace(host, "cancel_acknowledged", "native_cancel_flag_after_move");
+    }
+    fn revoked_chang_e_stop(&self, s: &snapshot::CancelState) -> bool {
+        if self.heroId_ != 61 || self.activeSlot_ != "skill:2"
+            || self.skillCooldownVariant_ != 6196 || self.skillBehavior_ != SkillBehavior::Tap
+            || !self.skillCancelPending_ || self.skillTouch_ < 0 || self.skillCancelSentNs_ <= 0
+            || self.skillVariantSampleStartNs_ < self.skillCancelSentNs_
+            || self.skillVariantSampleNs_ < self.skillVariantSampleStartNs_
+            || self.now_ - self.skillVariantSampleNs_ > 100_000_000
+            || self.skillVariantSampleNs_ > self.now_ + 10_000_000
+        { return false; }
+        let start=s.sample_start_ns.get(-1.);let end=s.sample_end_ns.get(-1.);
+        let owned=s.ready.get() && s.coherent.get()
+            && s.source.as_str()=="UIKeySkill.bCancelSkill" && s.token.as_str()==self.frameEpoch_
+            && s.hero_id.is_number() && s.hero_id.value==61.
+            && s.slot.as_str()=="skill:2" && s.base_skill_id.is_number() && s.base_skill_id.value==6130.
+            && s.cancelled.is_bool() && !s.cancelled.get()
+            && s.sample_start_ns.is_number() && s.sample_end_ns.is_number()
+            && start.is_finite() && end.is_finite() && start>=self.skillCancelSentNs_ as f64
+            && end>=start && end-start<=100e6 && self.now_ as f64-end<=100e6
+            && end<=self.now_ as f64+10e6;
+        owned && self.skillVariants_.iter().any(|v|v.slot=="skill:2" && v.base==6130
+            && v.active==6170 && v.cast_locked==Some(false) && v.state_forbidden==Some(false))
+            && self.skillVariants_.iter().any(|v|v.slot=="skill:0" && v.base==6110
+                && v.active==6150 && v.cast_locked==Some(true) && v.state_forbidden==Some(false))
     }
     pub(crate) fn finish_manual(&mut self, host: &mut impl Host) {
         if self.manualTouch_ >= 0 {
@@ -934,6 +968,66 @@ impl Controller {
 #[cfg(test)]
 mod transport_clock_tests {
     use super::*;
+    fn meteor_text(value:&str)->snapshot::Text {
+        let mut t=snapshot::Text::default();t.present=1;t.size=value.len() as u32;
+        t.bytes[..value.len()].copy_from_slice(value.as_bytes());t
+    }
+    fn meteor_number(value:f64)->snapshot::Number {snapshot::Number{kind:1,value}}
+    fn meteor_flag(value:bool)->snapshot::Flag {snapshot::Flag{value:value as i32}}
+    fn meteor_stop_fixture()->(Controller,snapshot::CancelState) {
+        let mut c=Controller::new();c.heroId_=61;c.activeSlot_="skill:2".into();
+        c.skillCooldownVariant_=6196;c.skillBehavior_=SkillBehavior::Tap;c.skillCancelPending_=true;
+        c.skillTouch_=1;c.skillCancelSentNs_=1_000_000_000;c.now_=1_020_000_000;
+        c.frameEpoch_="match61".into();c.skillVariantSampleStartNs_=1_010_000_000;
+        c.skillVariantSampleNs_=1_019_000_000;
+        c.skillVariants_=vec![SkillVariant{slot:"skill:2".into(),base:6130,active:6170,
+            cast_locked:Some(false),state_forbidden:Some(false),..Default::default()},
+            SkillVariant{slot:"skill:0".into(),base:6110,active:6150,cast_locked:Some(true),
+                state_forbidden:Some(false),..Default::default()}];
+        let s=snapshot::CancelState{ready:meteor_flag(true),coherent:meteor_flag(true),
+            source:meteor_text("UIKeySkill.bCancelSkill"),token:meteor_text("match61"),
+            hero_id:meteor_number(61.),slot:meteor_text("skill:2"),base_skill_id:meteor_number(6130.),
+            cancelled:meteor_flag(false),sample_start_ns:meteor_number(1_010_000_000.),
+            sample_end_ns:meteor_number(1_019_000_000.)};(c,s)
+    }
+    #[test]
+    fn revoked_meteor_stop_requires_exact_observed_channel_transition() {
+        let(c,s)=meteor_stop_fixture();assert!(c.revoked_chang_e_stop(&s));
+        for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            let(mut c,s)=meteor_stop_fixture();c.heroId_=hero;assert!(!c.revoked_chang_e_stop(&s));
+        }
+        for active in [6130,6146,6196,0] {let(mut c,s)=meteor_stop_fixture();c.skillVariants_[0].active=active;assert!(!c.revoked_chang_e_stop(&s));}
+        for lock in [None,Some(false)] {let(mut c,s)=meteor_stop_fixture();c.skillVariants_[1].cast_locked=lock;assert!(!c.revoked_chang_e_stop(&s));}
+        let(mut c,s)=meteor_stop_fixture();c.skillCooldownVariant_=6146;assert!(!c.revoked_chang_e_stop(&s));
+        let(mut c,s)=meteor_stop_fixture();c.skillBehavior_=SkillBehavior::Direction;assert!(!c.revoked_chang_e_stop(&s));
+        let(mut c,s)=meteor_stop_fixture();c.skillCancelPending_=false;assert!(!c.revoked_chang_e_stop(&s));
+    }
+    #[test]
+    fn revoked_meteor_stop_releases_at_cross_without_fabricating_native_ack() {
+        let(mut c,s)=meteor_stop_fixture();
+        c.buttons_.push(Button{slot:"skill:2".into(),skillId:6130,..Default::default()});
+        c.skillPoint_=Point::new(0.8347,0.4171);
+        let mut f=snapshot::Frame::default();f.cancel_state=s;
+        let mut host=ClockHost{now:1_020_000_000,pointer_deadline:None};
+        c.sample_skill_cancel(&mut host,&f);
+        assert_eq!(c.skillTouch_,-1);assert!(!c.skillCancelPending_);
+        assert!(!c.skillCancelAcknowledged_);assert_eq!(c.skillPoint_,Point::new(0.8347,0.4171));
+    }
+    #[test]
+    fn revoked_meteor_stop_rejects_stale_foreign_and_unknown_cancel_state() {
+        for case in 0..11 {
+            let(mut c,mut s)=meteor_stop_fixture();
+            match case {
+                0=>s.token=meteor_text("foreign"),1=>s.slot=meteor_text("skill:1"),
+                2=>s.base_skill_id=meteor_number(6120.),3=>s.cancelled.value=-1,
+                4=>s.sample_start_ns=meteor_number(999_000_000.),5=>s.sample_end_ns=meteor_number(f64::NAN),
+                6=>c.skillVariantSampleStartNs_=999_000_000,7=>c.now_+=200_000_000,
+                8=>s.coherent.value=0,9=>s.hero_id=meteor_number(61.5),_=>s.cancelled.value=1,
+            }
+            assert!(!c.revoked_chang_e_stop(&s),"case {case}");
+        }
+    }
+
     struct ClockHost {
         now: i64,
         pointer_deadline: Option<i64>,
