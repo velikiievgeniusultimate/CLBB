@@ -17,6 +17,7 @@ const Q_SOURCE_B: &str = "IndicatorMotionRotAndPosRot.m_vDragResult";
 const ATTACK_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult";
 const ATTACK_RANGE_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio";
 const RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]";
+const HANZO_GHOST_RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]*[20]";
 fn known_direction_source(hero:i32,skill:i32,source:&str)->bool {
     source=="IndicatorMotionRot.m_vDragResult" || (hero==31&&skill==3190&&source=="IndicatorMotionCameraLock.m_vDragResult") || (hero==21&&skill==2126&&source=="IndicatorMotionHookLine.m_vDragResult") || (hero==84&&skill==8410&&source=="KeySkilleCheckMesh.currentDirect")
 }
@@ -638,9 +639,15 @@ impl Controller {
             self.trace(host, "direct_metadata_rejected", "invalid_configuration_range_presence");
             return;
         }
+        let range_source = if self.logicalSource_ == ATTACK_SOURCE {
+            ATTACK_RANGE_SOURCE
+        } else if self.heroId_ == 69 && self.aimSkillId_ == 69200
+            && self.activeSlot_ == "skill:1" && self.logicalSource_ == Q_SOURCE_B {
+            HANZO_GHOST_RANGE_SOURCE
+        } else { RANGE_SOURCE };
         if native_q || witness_fields {
             if witness_fields {
-                if logical.world_range_source.as_str() != if self.logicalSource_==ATTACK_SOURCE {ATTACK_RANGE_SOURCE}else{RANGE_SOURCE}
+                if logical.world_range_source.as_str() != range_source
                     || (!native_q && !logical.world_range_source_present.get())
                     || !logical.world_range.is_number()
                     || !logical.world_range.value.is_finite()
@@ -671,7 +678,7 @@ impl Controller {
                 self.trace(host, "direct_metadata_rejected", "await_native_configuration_range");
                 return;
             }
-            self.directRangeSource_ = if self.logicalSource_==ATTACK_SOURCE {ATTACK_RANGE_SOURCE}else{RANGE_SOURCE}.into();
+            self.directRangeSource_ = range_source.into();
         } else {
             let observed = self.logicalObserved_.length();
             // A protected/first-drag sample may retain an older processed
@@ -711,7 +718,7 @@ impl Controller {
         let a = [view[0].value, -view[1].value, view[8].value, -view[9].value];
         if self.direct_.configure(
             self.pixels(self.joystickCenter_),
-            self.radius_pixels(self.joystickRadius_),
+            self.radius_pixels(self.joystickRadius_) * if range_source == HANZO_GHOST_RANGE_SOURCE { 0.85 } else { 1. },
             a,
             range,
             self.androidSize_,
@@ -1074,11 +1081,23 @@ impl Controller {
             return None;
         }
         self.desired_skill_world(host).map(|world| {
-            if self.logicalMode_ {
-                world - self.logicalOrigin_
-            } else {
-                world
+            let desired = if self.logicalMode_ { world - self.logicalOrigin_ } else { world };
+            // This exact Hanekage contract has a native inner landing circle:
+            // raw short drags and actual short-cursor trials stop at 0.45 of
+            // the configuration range, with an outer cap of 0.85. Asking for
+            // an unreachable point inside it must not stall physical release.
+            // Other heroes and unverified metadata keep their original path.
+            if self.heroId_ == 69 && self.aimSkillId_ == 69200
+                && self.activeSlot_ == "skill:1" && self.logicalSource_ == Q_SOURCE_B
+                && self.directRangeSource_ == HANZO_GHOST_RANGE_SOURCE && self.direct_.ready != 0 {
+                let minimum = self.direct_.world_range * (0.45 / 0.85);
+                let length = desired.length();
+                if length > 1e-9 && length < minimum { return desired * (minimum / length); }
+                if length <= 1e-9 && self.logicalObserved_.length() > 1e-9 {
+                    return self.logicalObserved_ * (minimum / self.logicalObserved_.length());
+                }
             }
+            desired
         })
     }
     pub(crate) fn desired_skill_world(&mut self, host: &mut impl Host) -> Option<Point> {
@@ -1440,6 +1459,47 @@ mod tests {
             assert_eq!(c.directRangeSource_, RANGE_SOURCE);
             assert!(c.directRanges_.is_empty(), "generic fixed metadata is a current witness, not a reusable fixed-range cache");
             assert!(c.directStartups_.is_empty(), "a later unknown charge policy must not reuse provisional fixed metadata");
+        }
+    }
+    #[test]
+    fn hanzo_scaled_range_witness_is_scoped_to_actual_ghost_w() {
+        for (hero, skill, slot, source, allowed) in [
+            (69,69200,"skill:1",Q_SOURCE_B,true),
+            (69,6920,"skill:1",Q_SOURCE_B,false),
+            (69,69200,"skill:0",Q_SOURCE_B,false),
+            (69,69200,"skill:1",POINT_SOURCE,false),
+            (25,69200,"skill:1",Q_SOURCE_B,false),
+            (84,69200,"skill:1",Q_SOURCE_B,false),
+        ] {
+            let (mut c,mut f,mut h)=generic_point_range_fixture(hero,skill);
+            c.activeSlot_=slot.into();c.frameActiveSlot_=slot.into();
+            f.logical.source=text(source);f.logical.joystick.slot=text(slot);
+            f.logical.world_range=n(5.525);f.logical.world_range_source=text(HANZO_GHOST_RANGE_SOURCE);
+            c.select_logical_coordinates(&mut h,&f);c.configure_direct(&mut h,&f);
+            assert_eq!(c.direct_.ready==1,allowed,"{hero}/{skill}/{slot}/{source}");
+            if allowed {
+                assert!((c.direct_.radius-c.radius_pixels(c.joystickRadius_)*0.85).abs()<1e-8);
+                assert!((c.direct_.world_range-5.525).abs()<1e-8);
+            }
+            assert!(c.directRanges_.is_empty());assert!(c.directStartups_.is_empty());
+        }
+    }
+    #[test]
+    fn hanzo_inner_circle_clamps_only_verified_ghost_w_intent() {
+        let (mut c,mut f,mut h)=generic_point_range_fixture(69,69200);
+        c.activeSlot_="skill:1".into();c.frameActiveSlot_=c.activeSlot_.clone();
+        f.logical.joystick.slot=text("skill:1");f.logical.source=text(Q_SOURCE_B);
+        f.logical.ready=flag(true);f.logical.valid_drag=flag(true);f.logical.first_drag=flag(false);
+        f.logical.offset_xz=v2(2.925,0.);f.logical.target_render_xyz=v3(12.925,0.1,20.);
+        f.logical.world_range=n(5.525);f.logical.world_range_source=text(HANZO_GHOST_RANGE_SOURCE);
+        c.select_logical_coordinates(&mut h,&f);c.configure_direct(&mut h,&f);
+        h.world=Some(Point::new(10.8,20.6));
+        let goal=c.desired_solver_world(&mut h).unwrap();
+        assert!((goal.length()-2.925).abs()<1e-8);assert!((goal.x/goal.y-4./3.).abs()<1e-8);
+        h.world=Some(Point::new(13.2,22.4));assert!((c.desired_solver_world(&mut h).unwrap().length()-4.).abs()<1e-8);
+        h.world=Some(Point::new(10.,20.));assert!((c.desired_solver_world(&mut h).unwrap().length()-2.925).abs()<1e-8);
+        for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            c.heroId_=hero;h.world=Some(Point::new(10.8,20.6));assert!((c.desired_solver_world(&mut h).unwrap().length()-1.).abs()<1e-8);
         }
     }
     #[test]

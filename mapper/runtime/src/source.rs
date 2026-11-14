@@ -325,6 +325,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Leomord can interrupt the preparation started by his initial Q
         // through an ordinary repeat, retaining the original aimed direction.
         || (hero==67 && slot=="skill:0" && base==6710 && active==6711)
+        // Hanekage returns to the separately observed body through an ordinary
+        // repeat; initial6930 remains a directional entry and has its own lock.
+        || (hero==69 && slot=="skill:2" && base==6930 && active==69300)
         // Lesley's firing channel exposes a native ordinary stop button.
         // The charge/target-selection phase5331 keeps its base range plan.
         || (hero==53 && slot=="skill:2" && base==5330 && active==5396)
@@ -2485,6 +2488,18 @@ mod tests {
         ] { assert!(!verified_button_only_form(67,slot,base,active)); }
         for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
             assert!(!verified_button_only_form(hero,"skill:0",6710,6711));
+        }
+    }
+    #[test]
+    fn hanzo_body_return_does_not_reclassify_entry_or_ghost_attacks() {
+        assert!(verified_button_only_form(69,"skill:2",6930,69300));
+        for (slot,base,active) in [("skill:2",6930,6930),("skill:2",6930,69301),
+            ("skill:0",6930,69300),("skill:1",6930,69300),("extra:2",6930,69300),
+            ("skill:2",6920,69300),("skill:0",6910,69100),("skill:1",6920,69200)] {
+            assert!(!verified_button_only_form(69,slot,base,active));
+        }
+        for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            assert!(!verified_button_only_form(hero,"skill:2",6930,69300));
         }
     }
     #[test]

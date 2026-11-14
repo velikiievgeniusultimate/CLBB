@@ -265,6 +265,42 @@ fn gord_bounce_range_family(skill:i32,motion:&str,package:&str)->bool {
     skill==2310 && motion=="IndicatorMotionPos" && package=="IndicatorPackage_BulletDirctionBomb"
 }
 
+// Raw native short/long casts independently confirm relative position aiming.
+// Keep this measured family skill-specific; the class pair alone remains unknown.
+fn hanzo_ghost_range_family(skill:i32,motion:&str,package:&str)->bool {
+    skill==69200 && motion=="IndicatorMotionRotAndPosRot" && package=="IndicatorPackage_Fixed_JianTou_Yuan"
+}
+fn hanzo_ghost_range_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,p:&[f64])->bool {
+    hanzo_ghost_range_family(skill,motion,package) && rect==2 && base==631 && p.len()==22
+        && valid_native_range(28.,[p[0],p[1]]) && p[1]<=100.
+        && p[2].is_finite() && p[2]>0. && p[2]<=10_000_000. && p[2].fract()==0.
+        && p[3].is_finite() && p[3]>0. && p[3]<=p[1]
+        && p[4..]==[1.,0.,1.,0.,0.,0.,1.,0.7f32 as f64,0.,0.,0.,0.,0.,0.,0.,0.,0.85f32 as f64,1.]
+}
+fn hanzo_ghost_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,motion:&str,package:&str,checks:&mut Checks)->Result<bool> {
+    if !hanzo_ghost_range_family(skill,motion,package){return Ok(false);}
+    let begin=checks.len();let(rect,_)=native_rect_config(r,comp,skill,checks)?;
+    let config=owner(r,comp,"m_Config",checks)?;
+    let base_at=typed_field(r,config,"m_BaseType",8)?;
+    let base=i32_at(&capture(r,checks,base_at,4)?,0);
+    let array=owner(r,config,"m_ShowRectPara",checks)?;
+    let header=capture(r,checks,array,32)?;
+    if u64_at(&header,24)!=22{return Err("Hanzo ghost range array changed".into());}
+    let raw=r.read(array+32,22*4)?;
+    let params=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+    if !hanzo_ghost_range_template(skill,motion,package,rect,base,&params){return Err("Unverified Hanzo ghost range configuration".into());}
+    // Range[1] can update independently; preserve exact ownership, shape and
+    // the remaining semantic flags, including the measured maximum scale[20].
+    let mut witnesses=0;
+    for(address,bytes)in checks.iter_mut().skip(begin) {
+        if *address==array+32 && bytes.len()==8 {bytes.truncate(4);witnesses+=1;}
+    }
+    if witnesses!=1{return Err("Hanzo ghost range witness changed".into());}
+    checks.push((array+40,raw[8..].to_vec()));
+    if r.read(array+32,22*4)?!=raw{return Err("Hanzo ghost range changed during discovery".into());}
+    Ok(true)
+}
+
 fn point_visual_fallback(motion:&str,package:&str)->bool {
     motion=="IndicatorMotionPos"&&package=="IndicatorPackageEasy_Yuan"
 }
@@ -276,7 +312,8 @@ fn valid_native_range(shape:f64,values:[f64;2])->bool {
 /// the distance while preserving the same typed configuration/array owner.
 fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
     motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<(u64,f64)>> {
-    let shape=if gord_bounce_range_family(skill,motion_name,package_name){22.}
+    let shape=if hanzo_ghost_range_contract(r,comp,skill,motion_name,package_name,checks)?{28.}
+        else if gord_bounce_range_family(skill,motion_name,package_name){22.}
         else if lesley_selector_contract(r,comp,motion,skill,motion_name,package_name,checks)?{14.}
         else if let Some(shape)=native_range_shape(motion_name,package_name){shape}else{return Ok(None)};
     if shape==22. {
@@ -974,6 +1011,9 @@ impl MotionPlan {
         let kind=if healing {1} else if lesley_selector_family(skill,&mc.name,&pc.name) {
             native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Lesley selector range contract")?;
             3
+        } else if hanzo_ghost_range_family(skill,&mc.name,&pc.name) {
+            native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Hanzo ghost range contract")?;
+            3
         } else if gord_bounce_range_family(skill,&mc.name,&pc.name) {
             native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Gord range contract")?;
             3
@@ -1065,7 +1105,7 @@ impl MotionPlan {
             20150 => Some(("IndicatorMotionRot", "IndicatorPackageEasy_ShanXing_Normal")),
             20020 => Some(("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal")),
             8430 => Some(("IndicatorMotionRot", "IndicatorPackageEasy")),
-            _ if attack_geometry || configured_direction || ((gord_bounce_range_family(skill,&name,&package_class.name)||lesley_selector_family(skill,&name,&package_class.name))&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
+            _ if attack_geometry || configured_direction || ((gord_bounce_range_family(skill,&name,&package_class.name)||lesley_selector_family(skill,&name,&package_class.name)||hanzo_ghost_range_family(skill,&name,&package_class.name))&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
             _ => None,
         };
         if expected.is_none_or(|(motion, package)| name != motion || package_class.name != package)
@@ -1428,8 +1468,13 @@ impl MotionPlan {
                     if !valid_native_range(shape,[f32_at(&values,0),distance]) {
                         return Err("Invalid native world range".into());
                     }
-                    logical.world_range = number(distance);
-                    logical.world_range_source = text("CData_Skill_Element.m_ShowRectPara[1]");
+                    let (effective,source)=if shape==28. {
+                        let scale=f32_at(&capture(r,consumed,a+20*4,4)?,0);
+                        if !scale.is_finite()||scale<=0.||scale>1.{return Err("Invalid native maximum range scale".into());}
+                        (distance*scale,"CData_Skill_Element.m_ShowRectPara[1]*[20]")
+                    }else{(distance,"CData_Skill_Element.m_ShowRectPara[1]")};
+                    logical.world_range = number(effective);
+                    logical.world_range_source = text(source);
                     logical.world_range_source_present = flag(true);
                     if r.read(a, 8)? != values {
                         return Err("Native range changed during sample".into());
@@ -2324,6 +2369,49 @@ mod tests {
         for(at,value)in [(1056,12230i32),(1060,1)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
         for(at,value)in [(1568,9f32),(1572,3.)] {r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
         r
+    }
+    fn hanzo_range_fixture()->Reflection<MutableMemory> {
+        let r=base_tap_fixture();
+        let row:serde_json::Value=serde_json::from_str(include_str!("../tests/fixtures/hanzo-69200-native-range.json")).unwrap();
+        let values=row["params"].as_array().unwrap();
+        for(at,value)in[(1056,69200i32),(1060,2),(1072,631)]{r.memory.0.borrow_mut()[at..at+4].copy_from_slice(&value.to_le_bytes());}
+        r.memory.0.borrow_mut()[1560..1568].copy_from_slice(&(values.len()as u64).to_le_bytes());
+        for(i,v)in values.iter().enumerate(){r.memory.0.borrow_mut()[1568+i*4..1572+i*4].copy_from_slice(&(v.as_f64().unwrap()as f32).to_le_bytes());}
+        r
+    }
+    #[test]
+    fn hanzo_ghost_range_keeps_native_owner_shape_and_flag_fences() {
+        let m="IndicatorMotionRotAndPosRot";let p="IndicatorPackage_Fixed_JianTou_Yuan";
+        let mut r=hanzo_range_fixture();let mut checks=Vec::new();
+        assert_eq!(native_template(m,p),None,"do not broaden the package pair for other heroes");
+        assert_eq!(native_range_contract(&mut r,128,256,384,69200,m,p,&mut checks).unwrap(),Some((1568,28.)));
+        r.memory.0.borrow_mut()[1572..1576].copy_from_slice(&7.5f32.to_le_bytes());
+        assert!(check(&r,&checks).is_ok(),"distance remains a live native scalar");
+        for(at,bytes)in[(288,1280u64.to_le_bytes().to_vec()),(416,1280u64.to_le_bytes().to_vec()),
+            (1056,69201i32.to_le_bytes().to_vec()),(1060,1i32.to_le_bytes().to_vec()),(1072,1i32.to_le_bytes().to_vec()),
+            (1560,21u64.to_le_bytes().to_vec()),(1568,3f32.to_le_bytes().to_vec()),
+            (1572,f32::NAN.to_le_bytes().to_vec()),(1648,0.9f32.to_le_bytes().to_vec())] {
+            let mut r=hanzo_range_fixture();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(native_range_contract(&mut r,128,256,384,69200,m,p,&mut Vec::new()).is_err(),"at {at}");
+        }
+        for skill in [6910,6911,6920,6930,69100,69300,2510,2511,2520,2530,8410,8425,8430,12610,12630,12650,0] {
+            let mut r=hanzo_range_fixture();assert_eq!(native_range_contract(&mut r,128,256,384,skill,m,p,&mut Vec::new()).unwrap(),None);
+        }
+    }
+    #[test]
+    fn hanzo_publishes_effective_range_without_changing_legacy_geometry() {
+        let(r,mut plan)=q_fixture();plan.skill=69200;plan.name="IndicatorMotionRotAndPosRot".into();plan.range_shape=Some(28.);plan.legacy_range=false;
+        r.memory.0.borrow_mut()[800..804].copy_from_slice(&28f32.to_le_bytes());
+        r.memory.0.borrow_mut()[804..808].copy_from_slice(&6.5f32.to_le_bytes());
+        r.memory.0.borrow_mut()[880..884].copy_from_slice(&0.85f32.to_le_bytes());
+        r.memory.0.borrow_mut()[581]=1;r.memory.0.borrow_mut()[1036]=0;
+        let mut frame=s::Frame::default();let mut reads=Vec::new();
+        plan.sample_bracketed_with_fixed_range(&r,&mut frame,&mut reads,true).unwrap();
+        assert!((frame.logical.world_range.value-5.525).abs()<1e-6);
+        assert_eq!(frame.logical.world_range_source.as_str(),"CData_Skill_Element.m_ShowRectPara[1]*[20]");
+        assert!(frame.logical.ready.get()&&frame.logical.world_range_source_present.get());
+        r.memory.0.borrow_mut()[880..884].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert!(plan.sample_bracketed_with_fixed_range(&r,&mut frame,&mut Vec::new(),true).is_err());
     }
     #[test]
     fn gord_bounce_range_requires_exact_skill_shape_and_owners() {

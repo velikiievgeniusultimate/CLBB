@@ -1141,7 +1141,7 @@ impl Runtime {
             "diagnostics.cancel"=>self.cancel_diagnostics(&view).to_string(),
             "diagnostics.native_frame"=>self.host.fresh().map(|sample| {
                 use crate::flight_schema::Encode;
-                serde_json::json!({"fresh":true,"frame":sample.frame.encode(),
+                serde_json::json!({"fresh":true,"frame":sample.frame.encode(),"projection":sample.projection,
                     "hero":sample.frame.hero_id.int(),"epoch":sample.frame.token.as_str(),
                     "game_clock_ms":sample.game_clock_ms,"plan_revision":sample.plan_revision,
                     "control_holds":sample.control_holds,"types":sample.control_types}).to_string()
@@ -1715,11 +1715,14 @@ mod tests {
         let mut events=Vec::new();let mut runtime=fixture(&mut events);
         let mut sample=template_sample(30,3,now_ns());
         sample.game_clock_ms=42;sample.frame.game_clock_ms=crate::source::number(42.);
+        sample.projection=[0.;16];sample.projection[0]=2.;sample.projection[5]=3.;sample.projection[10]=-1.;sample.projection[15]=1.;
         sample.control_holds.insert("skill:2".into(),true);
         runtime.host.sample=Some(Arc::new(sample));
         let pointer=runtime.read("diagnostics.native_frame");
         let current:serde_json::Value=serde_json::from_str(unsafe{CStr::from_ptr(pointer)}.to_str().unwrap()).unwrap();
         assert_eq!(current["fresh"],true);assert_eq!(current["hero"],30);
+        assert_eq!(current["projection"].as_array().unwrap().len(),16);
+        assert_eq!(current["projection"][0],2.);assert_eq!(current["projection"][5],3.);
         assert_eq!(current["game_clock_ms"],42);assert_eq!(current["frame"]["game_clock_ms"]["value"],42.);
         assert_eq!(current["frame"]["cancel_state"]["cancelled"]["value"],-1);
         assert_eq!(current["frame"]["ui"]["buttons"][0]["slot"]["value"],"skill:2");

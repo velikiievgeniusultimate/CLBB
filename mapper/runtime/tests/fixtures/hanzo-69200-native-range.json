@@ -1,0 +1,40 @@
+{
+  "hero": 69,
+  "skill": 69200,
+  "motion": "IndicatorMotionRotAndPosRot",
+  "package": "IndicatorPackage_Fixed_JianTou_Yuan",
+  "rect": 2,
+  "base": 631,
+  "params": [
+    28.0,
+    6.5,
+    20694.0,
+    6.0,
+    1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.699999988079071,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.8500000238418579,
+    1.0
+  ],
+  "behavior": 3,
+  "measured_effective_max_range": 5.525,
+  "effective_range_scale_index": 20,
+  "proofs": [
+    "hanzo69-ghost-W-native-stable-short/report.json",
+    "hanzo69-ghost-W-native-stable-long/report.json"
+  ],
+  "scope": "Owned native geometry and raw cast displacement; no conjecture from description wording."
+}
