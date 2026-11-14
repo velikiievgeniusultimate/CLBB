@@ -340,6 +340,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Faramis can end shadow early and pull contacted enemies through
         // the same native slot;207613 has no indicator registry entry.
         || (hero==76 && slot=="skill:0" && base==7610 && active==207613)
+        // Granger stops his current Rhapsody through an ordinary repeat.
+        // The short native7917 cooldown is retained; this only supplies type.
+        || (hero==79 && slot=="skill:0" && base==7910 && active==7917)
         // Lesley's firing channel exposes a native ordinary stop button.
         // The charge/target-selection phase5331 keeps its base range plan.
         || (hero==53 && slot=="skill:2" && base==5330 && active==5396)
@@ -397,6 +400,15 @@ fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
 
 #[cfg(test)]
 mod control_kind_tests {
+    #[test]
+    fn granger_rhapsody_stop_is_only_its_current_native_recast() {
+        use super::verified_button_only_form;
+        assert!(verified_button_only_form(79,"skill:0",7910,7917));
+        for hero in [9,26,55,56,75,76,77,78,80,125] {assert!(!verified_button_only_form(hero,"skill:0",7910,7917));}
+        for (slot,base,active) in [("skill:1",7910,7917),("skill:0",7910,7910),("skill:0",7917,7917),("skill:1",7920,7921)] {
+            assert!(!verified_button_only_form(79,slot,base,active));
+        }
+    }
     #[test]
     fn faramis_shadow_recast_is_only_its_observed_native_button() {
         use super::verified_button_only_form;
