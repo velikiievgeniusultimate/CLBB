@@ -599,7 +599,53 @@ fn heal_self_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,pac
     Ok(true)
 }
 
+// Current Kimmy flight and both actual shooting modes. The radius on the
+// self flight is its automatic shot envelope, not cursor targeting.
+fn kimmy_native_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
+    motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<u8>> {
+    let (rect,base,params,kind):(i32,i32,&[f64],u8)=match skill {
+        7110 if motion_name=="IndicatorMotionRot" && package_name=="IndicatorPackageEasy_Yuan" =>
+            (0,1,&[3.,5.,10000.,0.,1.],1),
+        7100 if motion_name=="IndicatorMotionRot" && package_name=="IndicatorPackageEasy_JianTou" =>
+            (0,455,&[2.,5.3f32 as f64,10713.,5.3f32 as f64,0.7f32 as f64],2),
+        107100 if motion_name=="IndicatorMotionRot" && package_name=="IndicatorPackageEasy_JianTou" =>
+            (11,633,&[2.,5.3f32 as f64,10713.,5.3f32 as f64,0.7f32 as f64],2),
+        207100 if motion_name=="IndicatorMotionRot" && package_name=="IndicatorPackageEasy_JianTou" =>
+            (11,633,&[2.,6.2f32 as f64,10713.,6.2f32 as f64,0.7f32 as f64],2),
+        _=>return Ok(None),
+    };
+    typed_field(r,comp,"m_Config",17)?;
+    let config=owner(r,comp,"m_Config",checks)?;
+    for object in [motion,package] {
+        typed_field(r,object,"m_Config",17)?;typed_field(r,object,"m_OwnComp",18)?;
+        if owner(r,object,"m_Config",checks)?!=config || owner(r,object,"m_OwnComp",checks)?!=comp {
+            return Err("Kimmy indicator owner changed".into());
+        }
+    }
+    typed_field(r,motion,"m_OwnPackage",18)?;typed_field(r,config,"m_ShowRectPara",29)?;
+    if owner(r,motion,"m_OwnPackage",checks)?!=package{return Err("Kimmy motion package changed".into());}
+    let(actual_rect,_)=native_rect_config(r,comp,skill,checks)?;
+    let at=typed_field(r,config,"m_BaseType",8)?;
+    let actual_base=i32_at(&capture(r,checks,at,4)?,0);
+    let array=owner(r,config,"m_ShowRectPara",checks)?;
+    let header=capture(r,checks,array,32)?;
+    if actual_rect!=rect || actual_base!=base || u64_at(&header,24)!=params.len()as u64 {
+        return Err("Kimmy native configuration changed".into());
+    }
+    let raw=capture(r,checks,array+32,params.len()*4)?;
+    let actual=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+    if actual!=params{return Err("Kimmy native preview changed".into());}
+    Ok(Some(kind))
+}
+
 impl MotionPlan {
+    pub(crate) fn discover_kimmy_attack_behavior<M:Memory>(r:&mut Reflection<M>,indicator:u64,skill:i32)->Result<(Checks,u8)> {
+        let(mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
+        if !matches!(skill,7100|107100|207100) || kimmy_native_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?!=Some(2) {
+            return Err("Unverified Kimmy shooting contract".into());
+        }
+        check(r,&checks)?;Ok((checks,2))
+    }
     /// Read-only proof for the separately measured shape-nine positional family.
     /// No native motion, input, or persistent plan is modified.
     pub fn audit_candidate_range_contract<M:Memory>(r:&mut Reflection<M>,indicator:u64,skill:i32)->Result<serde_json::Value> {
@@ -1027,7 +1073,8 @@ impl MotionPlan {
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let healing=heal_self_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
-        let kind=if healing {1} else if lesley_selector_family(skill,&mc.name,&pc.name) {
+        let kimmy_flight=skill==7110 && kimmy_native_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?==Some(1);
+        let kind=if kimmy_flight || healing {1} else if lesley_selector_family(skill,&mc.name,&pc.name) {
             native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Lesley selector range contract")?;
             3
         } else if hanzo_ghost_range_family(skill,&mc.name,&pc.name) {
@@ -2152,6 +2199,42 @@ mod tests {
         let ty=u64_at(&r.memory.0.borrow()[table+96+8..table+96+16],0)as usize;
         r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&(12u32<<16).to_le_bytes());
         assert!(zero_extent_base_tap_contract(&mut r,128,256,384,6010,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",&mut Vec::new()).is_err());
+    }
+    #[test]
+    fn kimmy_native_contracts_fence_all_shooting_modes_and_self_flight() {
+        fn fixture(skill:i32)->Reflection<MutableMemory> {
+            let r=base_tap_fixture();let mut b=r.memory.0.borrow_mut();
+            let table=u64_at(&b[3072+0x78..3072+0x80],0)as usize;let old=b[table..table+64].to_vec();
+            let table=30200usize;b[table..table+64].copy_from_slice(&old);b[3072+0x78..3072+0x80].copy_from_slice(&(table as u64).to_le_bytes());
+            let at=table+64;let name=30000usize;let ty=30100usize;
+            b[name..name+12].copy_from_slice(b"m_OwnPackage");b[name+12]=0;
+            b[at..at+8].copy_from_slice(&(name as u64).to_le_bytes());b[at+8..at+16].copy_from_slice(&(ty as u64).to_le_bytes());b[at+16..at+24].copy_from_slice(&3072u64.to_le_bytes());
+            b[ty+8..ty+12].copy_from_slice(&(18u32<<16).to_le_bytes());b[at+24..at+28].copy_from_slice(&48u32.to_le_bytes());
+            b[3072+0x104..3072+0x106].copy_from_slice(&3u16.to_le_bytes());b[304..312].copy_from_slice(&384u64.to_le_bytes());
+            b[1056..1060].copy_from_slice(&skill.to_le_bytes());
+            b[1060..1064].copy_from_slice(&(if matches!(skill,107100|207100) {11i32}else{0}).to_le_bytes());
+            b[1072..1076].copy_from_slice(&(match skill {7110=>1i32,7100=>455,_=>633}).to_le_bytes());
+            b[1560..1568].copy_from_slice(&5u64.to_le_bytes());
+            let params=if skill==7110 {[3f32,5.,10000.,0.,1.]}else if skill==207100 {[2.,6.2,10713.,6.2,0.7]}else{[2.,5.3,10713.,5.3,0.7]};
+            for(i,v)in params.iter().enumerate(){b[1568+i*4..1572+i*4].copy_from_slice(&v.to_le_bytes());}
+            drop(b);r
+        }
+        for skill in [7110,7100,107100,207100] {
+            let p=if skill==7110 {"IndicatorPackageEasy_Yuan"}else{"IndicatorPackageEasy_JianTou"};let expected=if skill==7110 {1}else{2};
+            let mut r=fixture(skill);let mut checks=Vec::new();
+            assert_eq!(kimmy_native_contract(&mut r,128,256,384,skill,"IndicatorMotionRot",p,&mut checks).unwrap(),Some(expected));
+            for(at,bytes)in [(416,1280u64.to_le_bytes().to_vec()),(424,256u64.to_le_bytes().to_vec()),(296,384u64.to_le_bytes().to_vec()),(304,128u64.to_le_bytes().to_vec()),
+                (1056,7120i32.to_le_bytes().to_vec()),(1060,2i32.to_le_bytes().to_vec()),(1072,11i32.to_le_bytes().to_vec()),
+                (1560,4u64.to_le_bytes().to_vec()),(1572,f32::NAN.to_le_bytes().to_vec()),(1584,9f32.to_le_bytes().to_vec())] {
+                let mut r=fixture(skill);r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+                assert!(kimmy_native_contract(&mut r,128,256,384,skill,"IndicatorMotionRot",p,&mut Vec::new()).is_err(),"{skill}/{at}");
+            }
+            r.memory.0.borrow_mut()[1584..1588].copy_from_slice(&9f32.to_le_bytes());assert!(check(&r,&checks).is_err());
+        }
+        let mut r=fixture(7110);
+        for id in [7120,7130,7020,2510,8425,11810,12710] {
+            assert_eq!(kimmy_native_contract(&mut r,128,256,384,id,"IndicatorMotionRot","IndicatorPackageEasy_Yuan",&mut Vec::new()).unwrap(),None);
+        }
     }
     #[test]
     fn belerick_self_buff_is_exact_and_rejects_changed_owner_or_preview() {

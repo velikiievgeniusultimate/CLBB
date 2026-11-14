@@ -117,7 +117,7 @@ impl Controller {
                 available: entry.active.get(),
                 ..Button::default()
             };
-            if b.slot.is_empty() || b.slot.len() > 64 || (!b.available && !Self::tap_only(&b)) {
+            if b.slot.is_empty() || b.slot.len() > 64 || (!b.available && !self.tap_only(&b)) {
                 continue;
             }
             let (Some(press), Some(center), Some(radius)) = (
@@ -156,7 +156,7 @@ impl Controller {
                 available: false,
                 ..Button::default()
             };
-            if !Self::tap_only(&b)
+            if !self.tap_only(&b)
                 || (b.kind != "upgrade" && b.kind != "quick_buy" && b.kind != "attack")
                 || fresh.iter().any(|other| other.slot == b.slot)
                 || fresh.len() >= 32
@@ -177,7 +177,7 @@ impl Controller {
         if self.skillTouch_ >= 0 {
             let old = self.find_button(&self.activeSlot_);
             let valid = fresh.iter().any(|b| {
-                b.slot == self.activeSlot_ && old.is_some_and(|old| old.skillId == b.skillId)
+                b.slot == self.activeSlot_ && old.is_some_and(|old| old.skillId == b.skillId || self.same_intrinsic_attack(old,b))
             });
             if !valid {
                 self.finish_skill(host, true)
@@ -185,7 +185,7 @@ impl Controller {
         }
         self.buttons_ = fresh;
         if self.activeSlot_=="attack" && self.skillTouch_>=0
-            && !self.buttons_.iter().any(|b|b.slot=="attack"&&b.aimType==3) {
+            && !self.buttons_.iter().any(|b|self.aimed_attack(b)) {
             self.contextIgnoredKeys_.insert(self.skillKey_);
             self.finish_skill(host,true);
         }

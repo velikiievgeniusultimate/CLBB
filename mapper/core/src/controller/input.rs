@@ -182,7 +182,7 @@ impl Controller {
                         return true;
                     }
                 }
-                if Self::tap_only(&b) {
+                if self.tap_only(&b) {
                     if pressed && !auto_repeat {
                         self.auxiliaryHeldKeys_.insert(key);
                         self.begin_auxiliary(host, &b)

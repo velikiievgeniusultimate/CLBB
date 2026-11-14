@@ -270,6 +270,27 @@ mod tests {
         assert_eq!(c.skillTouch_,-1);assert_eq!(c.auxiliaryTaps_.len(),1);
     }
     #[test]
+    fn kimmy_shooting_finger_survives_native_mode_switch_and_keeps_movement() {
+        fn shooting(ms:i64,id:i32)->snapshot::Frame {
+            let mut f=frame(ms,Some(false));f.hero_id=n(71.);f.ui.hero_id=f.hero_id;f.auxiliary_controls.hero_id=f.hero_id;
+            f.ui.buttons[0].skill_id=n(id as f64);f
+        }
+        let mut c=Controller::new();let mut h=TestHost{attack_key:32,attack_aim:2,..Default::default()};
+        c.apply_input(&mut h,Input::Enabled(true),T);c.apply_input(&mut h,Input::HoldThreshold(40),T);
+        send(&mut c,&mut h,shooting(0,7100));c.apply_input(&mut h,Input::Mouse{button:2,down:true,point:Point::new(0.7,0.5)},T+MS);
+        send(&mut c,&mut h,shooting(50,7100));let movement=c.movementTouch_;assert!(c.movementHeld_);
+        key(&mut c,&mut h,60,32,true);let finger=c.skillTouch_;assert!(finger>=0);assert_eq!(c.skillBehavior_,SkillBehavior::Direction);
+        for (ms,id)in[(65,107100),(68,207100),(70,7100),(75,107100)] {
+            send(&mut c,&mut h,shooting(ms,id));assert_eq!(c.skillTouch_,finger);assert!(h.active.contains_key(&finger));assert!(h.active.contains_key(&movement));
+        }
+        key(&mut c,&mut h,76,84,true);key(&mut c,&mut h,77,84,false);assert_eq!(c.skillTouch_,finger);assert!(!c.skillCancelPending_);
+        h.attack_aim=0;send(&mut c,&mut h,shooting(80,107100));assert_eq!(c.skillTouch_,-1);assert!(h.active.contains_key(&movement));
+        let b=Button{slot:"attack".into(),kind:"attack".into(),skillId:7100,aimType:2,..Default::default()};
+        for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            c.heroId_=hero;assert!(c.tap_only(&b));assert_eq!(c.classify_skill(&b),SkillBehavior::Tap);
+        }
+    }
+    #[test]
     fn aimed_attack_ignores_cancel_without_moving_contact_or_blocking_physical_up() {
         let (mut c, mut h) = setup(Some(false));
         h.attack_aim = 3;

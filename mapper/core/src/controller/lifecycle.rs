@@ -1,13 +1,23 @@
 use super::*;
 impl Controller {
-    pub(crate) fn tap_only(b: &Button) -> bool {
+    pub(crate) fn intrinsic_direction_attack(&self,b:&Button)->bool {
+        self.heroId_==71 && b.kind=="attack" && b.slot=="attack"
+            && matches!(b.skillId,7100|107100|207100) && b.aimType==2
+    }
+    pub(crate) fn aimed_attack(&self,b:&Button)->bool {
+        b.kind=="attack" && b.slot=="attack" && (b.aimType==3 || self.intrinsic_direction_attack(b))
+    }
+    pub(crate) fn same_intrinsic_attack(&self,old:&Button,new:&Button)->bool {
+        self.intrinsic_direction_attack(old) && self.intrinsic_direction_attack(new)
+    }
+    pub(crate) fn tap_only(&self,b: &Button) -> bool {
         (b.kind == "upgrade"
             && (0..4).contains(&b.index)
             && b.slot == format!("upgrade:{}", b.index))
             || (b.kind == "quick_buy" && b.slot == "shop:quick")
             || (b.kind == "attack"
                 && ["attack", "attack:minion", "attack:tower"].contains(&b.slot.as_str())
-                && !(b.slot=="attack" && b.aimType==3))
+                && !self.aimed_attack(b))
             || (b.kind == "extra" && ["extra:0", "extra:1"].contains(&b.slot.as_str()))
     }
     pub(crate) fn is_retribution(b: &Button) -> bool {

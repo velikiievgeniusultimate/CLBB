@@ -49,7 +49,35 @@ impl Settings {
             let _ = s.save();
         }
         if s.migrate_field_inheritance() { let _ = s.save(); }
+        if s.install_directional_hero_defaults() { let _ = s.save(); }
         s
+    }
+    // These explicitly requested keyboard/shooting profiles are initial
+    // personal defaults, not changes to shared bindings. Reset still restores
+    // ordinary inheritance, and later loads never overwrite user choices.
+    fn install_directional_hero_defaults(&mut self)->bool {
+        const MARK:&str="migration.directional_hero_defaults.v1";
+        if self.values.contains_key(MARK) {return false;}
+        for hero in [71,125] {
+            let mut defaults=vec![
+                ("movement.click_mode","2"),("movement.up","87"),("movement.down","83"),
+                ("movement.left","65"),("movement.right","68"),
+                ("bindings.skill:0.key","81"),("bindings.skill:2.key","82"),
+                ("bindings.attack:minion.key","88"),("bindings.attack:tower.key","67"),
+                ("bindings.extra:1.key","71"),
+            ];
+            if hero==71 {defaults.extend([("bindings.attack.key","33554434"),("bindings.skill:1.key","69"),
+                ("bindings.attack.cast_mode","0"),("bindings.attack.stop_movement","false")]);}
+            else {defaults.extend([("bindings.skill:1.key","33554434"),("bindings.skill:1.cast_mode","0"),
+                ("bindings.skill:1.stop_movement","false")]);}
+            for (field,value)in defaults {
+                let own=format!("heroes.{hero}.{field}");let flag=format!("{own}.override");
+                if !self.values.contains_key(&own)&&!self.values.contains_key(&flag) {
+                    self.values.insert(own,value.into());self.values.insert(flag,"true".into());
+                }
+            }
+        }
+        self.values.insert(MARK.into(),"1".into());true
     }
     fn migrate_field_inheritance(&mut self) -> bool {
         if self.values.contains_key("migration.field_inheritance") { return false; }
@@ -580,6 +608,37 @@ fn native_skill_slot(slot: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn requested_directional_profiles_are_personal_editable_and_idempotent() {
+        let mut s=Settings::default();s.values.insert("common.bindings.attack.key".into(),"32".into());
+        s.values.insert("movement.click_mode".into(),"0".into());let before=s.values.clone();
+        assert!(s.install_directional_hero_defaults());
+        for hero in [71,125] {
+            assert_eq!(s.integer("hero.movement.click_mode",hero),2);
+            for (field,code)in[("up",87),("down",83),("left",65),("right",68)] {
+                assert_eq!(s.integer(&format!("hero.movement.{field}"),hero),code);
+            }
+            assert_eq!(s.binding(hero,"attack:minion").key,88);assert_eq!(s.binding(hero,"attack:tower").key,67);
+            assert_eq!(s.binding(hero,"extra:1").key,71);
+        }
+        assert_eq!(s.binding(71,"attack").key,MOUSE|2);assert_eq!(s.binding(71,"skill:1").key,69);
+        assert_eq!(s.binding(125,"skill:1").key,MOUSE|2);assert_eq!(s.binding(125,"attack").key,32);
+        for (k,v)in before {assert_eq!(s.values.get(&k),Some(&v));}
+        for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            assert_eq!(s.integer("hero.movement.click_mode",hero),0);assert_eq!(s.binding(hero,"attack").key,32);
+        }
+        s.values.insert("heroes.71.bindings.attack.key.override".into(),"false".into());
+        assert_eq!(s.binding(71,"attack").key,32);assert!(!s.install_directional_hero_defaults());
+    }
+    #[test]
+    fn requested_profiles_preserve_existing_personal_values_and_explicit_inheritance() {
+        let mut s=Settings::default();s.values.insert("heroes.71.bindings.attack.key".into(),"88".into());
+        s.values.insert("heroes.71.bindings.attack.key.override".into(),"true".into());
+        s.values.insert("heroes.125.movement.click_mode.override".into(),"false".into());
+        s.install_directional_hero_defaults();assert_eq!(s.binding(71,"attack").key,88);
+        assert_eq!(s.integer("hero.movement.click_mode",125),0);
+        assert!(!s.values.contains_key("heroes.125.movement.click_mode"));
+    }
     #[test]
     fn keyboard_defaults_arrow_remapping_and_per_direction_inheritance() {
         let mut s=Settings::default();

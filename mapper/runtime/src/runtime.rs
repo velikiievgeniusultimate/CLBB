@@ -530,6 +530,9 @@ impl Host for Adapter {
         if config == "extra:2" && crate::settings::plain_spell_id(button.skillId) {
             binding.cast_mode = self.settings.integer(&format!("hero.bindings.extra:2:{}.cast_mode",button.skillId), hero);
         }
+        if hero==71 && button.kind=="attack" && button.slot=="attack" && binding.aim_type!=2 {
+            binding.key=0;
+        }
         if self.conflicts.contains_key(&binding.key) { binding.key=0; }
         binding
     }
@@ -1642,6 +1645,15 @@ mod tests {
             assert_eq!(binding.aim_type, kind);
         }
         assert!(runtime.host.settings.values.is_empty());
+    }
+    #[test]
+    fn unknown_intrinsic_shooting_cannot_fall_back_to_plain_attack() {
+        let mut events=Vec::new();let mut r=fixture(&mut events);
+        let b=Button{slot:"attack".into(),kind:"attack".into(),skillId:7100,..Default::default()};
+        for (hero,kind,enabled) in [(71,0,false),(71,1,false),(71,3,false),(71,2,true),(25,1,true),(84,3,true)] {
+            let mut sample=template_sample(hero,kind,now_ns());sample.control_types=BTreeMap::from([("attack".into(),kind)]);
+            r.host.sample=Some(Arc::new(sample));assert_eq!(r.host.binding(hero,&b,"attack").key!=0,enabled,"{hero}/{kind}");
+        }
     }
     #[test]
     fn stale_sample_cannot_install_a_new_native_cast_default() {

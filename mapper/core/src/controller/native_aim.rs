@@ -121,7 +121,7 @@ impl Controller {
         self.skillVariantSampleStartNs_ = first as i64;
     }
     pub(crate) fn classify_skill(&self, button: &Button) -> SkillBehavior {
-        if Self::tap_only(button) {
+        if self.tap_only(button) {
             return SkillBehavior::Tap;
         }
         if Self::is_retribution(button) {

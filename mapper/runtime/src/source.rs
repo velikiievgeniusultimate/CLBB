@@ -287,6 +287,9 @@ fn held_indicator_behavior_id(base:i32, future:i32, actual:i32, charge:bool, hel
     // not the future cast. Never reuse it for an idle or unverified variant.
     if charge && held_slot && base>0 && actual==base {base}else{future}
 }
+fn kimmy_attack_identity(hero:i32,base:i32,active:i32)->bool {
+    hero==71 && matches!(base,7100|107100|207100) && matches!(active,7100|107100|207100)
+}
 fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
     // Badang's successful wall dash exposes its ordinary wall-removal button
     // through the SAME owned slot/data. There is intentionally no aim registry
@@ -1447,8 +1450,31 @@ impl<M: Memory> Source<M> {
         }
         let plain_owner=plan.ui.buttons.iter().find(|b|b.slot=="attack")
             .and_then(|b|r.pointer(b.object).and_then(|c|r.class(c)).ok()).is_some_and(|c|c.name=="CommonAttack");
-        let aimed_attack=attack_mode==Some(true)&&plain_owner;
+        let aimed_attack=hero!=71 && attack_mode==Some(true)&&plain_owner;
         if let Some(mode)=attack_mode {control_types.insert("attack".into(),if mode&&plain_owner {3}else{1});}
+        if hero==71 {
+            // Her native shooting joystick is independent of the shared
+            // target-selection preference. Unknown configurations stay unknown.
+            control_types.remove("attack");
+            let attack=ui.buttons.iter().take(ui.button_count.min(32)as usize)
+                .find(|b|b.slot.as_str()=="attack" && b.kind.as_str()=="attack" && b.active.get());
+            let active=attack.and_then(|b|skill_state.buttons.iter().take(skill_state.count.min(32)as usize)
+                .find(|v|v.slot.as_str()=="attack" && v.base_skill_id.int()==b.skill_id.int())
+                .map(|v|(b.skill_id.int(),v.active_skill_id.int())));
+            if let Some((base,id))=active.filter(|(base,id)|kimmy_attack_identity(hero,*base,*id)) {
+                let _=base;
+                if plan.behaviors.get(&id).is_some_and(|(c,_)|check(r,c).is_err()) {
+                    plan.behaviors.remove(&id);plan.behavior_retry.remove(&id);
+                }
+                if !plan.behaviors.contains_key(&id) && now>=*plan.behavior_retry.get(&id).unwrap_or(&0) {
+                    if let Ok(value)=crate::aim::MotionPlan::discover_kimmy_attack_behavior(r,plan.indicator,id) {plan.behaviors.insert(id,value);}
+                    else {plan.behavior_retry.insert(id,now.saturating_add(20_000_000));}
+                }
+                if let Some((proof,2))=plan.behaviors.get(&id) {
+                    consumed.extend(proof.iter().cloned());control_types.insert("attack".into(),2);
+                }
+            }
+        }
 
         let mut selection_observations=Vec::new();
         let mut selection_variant_unknown=false;
@@ -2489,6 +2515,14 @@ mod tests {
         for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
             assert!(!verified_button_only_form(hero,"skill:0",6710,6711));
         }
+    }
+    #[test]
+    fn intrinsic_kimmy_attack_ids_never_authorize_other_heroes_or_slots() {
+        for base in [7100,107100,207100] {for active in [7100,107100,207100] {assert!(kimmy_attack_identity(71,base,active));}}
+        for hero in [9,13,21,22,25,26,31,40,43,47,55,56,70,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            assert!(!kimmy_attack_identity(hero,7100,107100));
+        }
+        for id in [0,7110,7120,7130,107101] {assert!(!kimmy_attack_identity(71,id,7100));assert!(!kimmy_attack_identity(71,7100,id));}
     }
     #[test]
     fn hanzo_body_return_does_not_reclassify_entry_or_ghost_attacks() {
