@@ -333,6 +333,10 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         || (hero==69 && slot=="skill:2" && base==6930 && active==69300)
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
+        // Kadita's observed wave dismount and wave-local breath have no
+        // registry entry. Both are native ordinary recasts on their own slots.
+        || (hero==75 && ((slot=="skill:0" && base==7510 && active==7514)
+            || (slot=="skill:1" && base==7520 && active==7522)))
         // Lesley's firing channel exposes a native ordinary stop button.
         // The charge/target-selection phase5331 keeps its base range plan.
         || (hero==53 && slot=="skill:2" && base==5330 && active==5396)
@@ -390,6 +394,18 @@ fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
 
 #[cfg(test)]
 mod control_kind_tests {
+    #[test]
+    fn kadita_wave_taps_are_exact_and_do_not_change_other_heroes() {
+        use super::verified_button_only_form;
+        for (slot,base,actual) in [("skill:0",7510,7514),("skill:1",7520,7522)] {
+            assert!(verified_button_only_form(75,slot,base,actual));
+            for h in [9,26,55,56,71,74,76,125] {assert!(!verified_button_only_form(h,slot,base,actual));}
+            assert!(!verified_button_only_form(75,slot,base,base));
+            assert!(!verified_button_only_form(75,"skill:2",base,actual));
+            assert!(!verified_button_only_form(75,slot,base+1,actual));
+        }
+        assert!(!verified_button_only_form(75,"skill:2",7530,7535));
+    }
     #[test]
     fn rafaela_auxiliary_native_zero_index_gets_only_its_own_fourth_slot() {
         use super::additional_hero_skill_index;

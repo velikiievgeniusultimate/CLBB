@@ -189,6 +189,14 @@ fn harley_cards_direction_template(skill:i32,motion:&str,package:&str,rect:i32,p
         && rect==1 && params.len()==22 && params[..8]==[7.,6.5,70421.,6.5,0.4f32 as f64,0.,0.,3.]
         && params[8..20].iter().all(|v|*v==0.) && params[20..]==[3.,20.]
 }
+// Kadita: measured owned 22-value six-wave fan. Rect11 differs from the
+// generic multi-arrow Rect0; only this exact skill/config is admitted.
+fn kadita_waves_direction_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,p:&[f64])->bool {
+    matches!((skill,base),(7530,654)|(7535,682)) && motion=="IndicatorMotionRot" && package=="IndicatorPackage_Multi_JianTou"
+        && rect==11 && p.len()==22
+        && p[..8]==[7.,5.4f32 as f64,70000.,5.4f32 as f64,0.8f32 as f64,0.,0.,3.]
+        && p[8..20].iter().all(|v|*v==0.) && p[20..]==[6.,300.]
+}
 // Two through five Helcurt knives: the count/spread changes the visual fan,
 // while the measured Rot drag result remains a unit direction.
 fn helcurt_knives_direction_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,params:&[f64])->bool {
@@ -486,6 +494,17 @@ fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
             harley_cards_direction_template(skill,motion,package,rect,&full)
         }
     } else {false};
+    let kadita=if matches!(skill,7530|7535) && package=="IndicatorPackage_Multi_JianTou" && rect==11 {
+        let array=owner(r,config,"m_ShowRectPara",checks)?;
+        let header=capture(r,checks,array,32)?;
+        if u64_at(&header,24)!=22 {false} else {
+            let at=typed_field(r,config,"m_BaseType",8)?;
+            let base=i32_at(&capture(r,checks,at,4)?,0);
+            let raw=capture(r,checks,array+32,22*4)?;
+            let full=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+            kadita_waves_direction_template(skill,motion,package,rect,base,&full)
+        }
+    } else {false};
     let helcurt=if matches!(skill,5121..=5124) && package=="IndicatorPackage_Focus_Multi_JianTou" {
         let array=owner(r,config,"m_ShowRectPara",checks)?;
         let header=capture(r,checks,array,32)?;
@@ -499,7 +518,7 @@ fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     } else {false};
     if !additional_direction_template(motion,package,rect,&params)
         && !layla_ultimate_direction_template(skill,motion,package,rect,&params)
-        && !harley && !helcurt {
+        && !harley && !helcurt && !kadita {
         return Err("Unverified additional direction configuration".into());
     }
     Ok(true)
@@ -2113,6 +2132,21 @@ mod tests {
         // Neither the broad class allowlist nor feedback-plan discovery is
         // expanded: this Tap must pass the separate owner/configuration gate.
         assert_eq!(native_template(m,p),None);
+    }
+    #[test]
+    fn kadita_waves_require_exact_owned_configuration() {
+        let p=[7.,5.4f32 as f64,70000.,5.4f32 as f64,0.8f32 as f64,0.,0.,3.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,6.,300.];
+        let m="IndicatorMotionRot";let package="IndicatorPackage_Multi_JianTou";
+        assert!(kadita_waves_direction_template(7530,m,package,11,654,&p));
+        assert!(kadita_waves_direction_template(7535,m,package,11,682,&p));
+        assert!(!kadita_waves_direction_template(7535,m,package,11,654,&p));
+        assert!(!kadita_waves_direction_template(7530,m,package,11,682,&p));
+        assert!(!additional_direction_template(m,package,11,&p));
+        for skill in [4210,5121,7531,7430,12520] {assert!(!kadita_waves_direction_template(skill,m,package,11,654,&p));}
+        for i in 0..p.len() {let mut bad=p;bad[i]+=1.;assert!(!kadita_waves_direction_template(7530,m,package,11,654,&bad));}
+        assert!(!kadita_waves_direction_template(7530,m,package,0,654,&p));
+        assert!(!kadita_waves_direction_template(7530,m,package,11,1,&p));
+        assert!(!kadita_waves_direction_template(7530,"IndicatorMotionPos",package,11,654,&p));
     }
     #[test]
     fn additional_direction_requires_measured_exact_pair_rect_and_shape() {
