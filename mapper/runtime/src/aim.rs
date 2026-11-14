@@ -144,6 +144,13 @@ fn hanabi_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32
     skill==6010 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
         && rect==1 && base==1 && params==[3.,0.,30006.,0.5]
 }
+// Belerick W arms speed and the next basic attack; native press/release
+// increments SecondSkillUseCount and cancel does not. Its small shape is an
+// enhanced-attack preview, not a target/direction/range input contract.
+fn belerick_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,params:&[f64])->bool {
+    skill==7020 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy"
+        && rect==0 && base==1 && params==[1.,1.8f32 as f64,10005.]
+}
 fn movement_driven_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
     motion=="IndicatorMotionRot" && package=="IndicatorPackageEasy_JianTou_DrivenByJoystick"
         && rect==11 && params.len()>=2 && params[0]==27.
@@ -502,7 +509,8 @@ fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
 /// contract; an unknown motion with a missing owner field remains rejected.
 fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
     motion_name:&str,package_name:&str,checks:&mut Checks)->Result<bool> {
-    if motion_name!="IndicatorMotionBase"||package_name!="IndicatorPackageEasy_Yuan"{return Ok(false);}
+    let belerick_family=skill==7020 && motion_name=="IndicatorMotionBase" && package_name=="IndicatorPackageEasy";
+    if motion_name!="IndicatorMotionBase" || (package_name!="IndicatorPackageEasy_Yuan" && !belerick_family){return Ok(false);}
     let mut config=0;
     for object in [comp,motion,package] {
         let at=typed_field(r,object,"m_Config",17)?;
@@ -546,7 +554,18 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
             hanabi_self_tap_template(skill,motion_name,package_name,rect,base,&full)
         }
     } else {false};
-    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina && !hilda && !hylos && !hanabi {
+    let belerick=if belerick_family {
+        let array=owner(r,config,"m_ShowRectPara",checks)?;
+        let header=capture(r,checks,array,32)?;
+        if u64_at(&header,24)!=3 {false} else {
+            let at=typed_field(r,config,"m_BaseType",8)?;
+            let base=i32_at(&capture(r,checks,at,4)?,0);
+            let raw=capture(r,checks,array+32,12)?;
+            let full=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+            belerick_self_tap_template(skill,motion_name,package_name,rect,base,&full)
+        }
+    } else {false};
+    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina && !hilda && !hylos && !hanabi && !belerick {
         return Err("Unverified nonzero base-tap configuration".into());
     }
     for object in [motion,package] {
@@ -2133,6 +2152,36 @@ mod tests {
         let ty=u64_at(&r.memory.0.borrow()[table+96+8..table+96+16],0)as usize;
         r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&(12u32<<16).to_le_bytes());
         assert!(zero_extent_base_tap_contract(&mut r,128,256,384,6010,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",&mut Vec::new()).is_err());
+    }
+    #[test]
+    fn belerick_self_buff_is_exact_and_rejects_changed_owner_or_preview() {
+        fn fixture()->Reflection<MutableMemory>{
+            let r=base_tap_fixture();let mut bytes=r.memory.0.borrow_mut();
+            bytes[1056..1060].copy_from_slice(&7020i32.to_le_bytes());
+            bytes[1060..1064].copy_from_slice(&0i32.to_le_bytes());
+            bytes[1072..1076].copy_from_slice(&1i32.to_le_bytes());
+            bytes[1560..1568].copy_from_slice(&3u64.to_le_bytes());
+            for(at,v)in [(1568,1f32),(1572,1.8),(1576,10005.)]{bytes[at..at+4].copy_from_slice(&v.to_le_bytes());}
+            drop(bytes);r
+        }
+        let m="IndicatorMotionBase";let p="IndicatorPackageEasy";
+        let mut r=fixture();let mut checks=Vec::new();
+        assert!(zero_extent_base_tap_contract(&mut r,128,256,384,7020,m,p,&mut checks).unwrap());
+        assert_eq!(native_template(m,p),None);
+        for skill in [7010,7030,810,4910,6010,2510,8425,12710]{
+            assert!(!zero_extent_base_tap_contract(&mut r,128,256,384,skill,m,p,&mut Vec::new()).unwrap());
+        }
+        for(at,bytes)in [(416,1280u64.to_le_bytes().to_vec()),(424,256u64.to_le_bytes().to_vec()),
+            (296,384u64.to_le_bytes().to_vec()),(1056,7030i32.to_le_bytes().to_vec()),
+            (1060,1i32.to_le_bytes().to_vec()),(1072,11i32.to_le_bytes().to_vec()),
+            (1560,4u64.to_le_bytes().to_vec()),(1568,3f32.to_le_bytes().to_vec()),
+            (1572,0f32.to_le_bytes().to_vec()),(1572,f32::NAN.to_le_bytes().to_vec()),
+            (1576,10006f32.to_le_bytes().to_vec())] {
+            let mut r=fixture();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(zero_extent_base_tap_contract(&mut r,128,256,384,7020,m,p,&mut Vec::new()).is_err());
+        }
+        r.memory.0.borrow_mut()[1576..1580].copy_from_slice(&10006f32.to_le_bytes());
+        assert!(check(&r,&checks).is_err());
     }
     #[test]
     fn base_tap_contract_verifies_all_config_owners_type_skill_and_lifetime() {
