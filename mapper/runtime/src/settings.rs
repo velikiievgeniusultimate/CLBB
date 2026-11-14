@@ -50,7 +50,23 @@ impl Settings {
         }
         if s.migrate_field_inheritance() { let _ = s.save(); }
         if s.install_directional_hero_defaults() { let _ = s.save(); }
+        if s.install_guinevere_ultimate_default() { let _ = s.save(); }
         s
+    }
+    // Her channel is cancelled by movement. Retire the previous movement
+    // intent on activation; the existing controller accepts fresh input again.
+    // Seed once, preserving both personal choices and explicit inheritance.
+    fn install_guinevere_ultimate_default(&mut self) -> bool {
+        const MARK: &str = "migration.guinevere_ultimate_stop.v1";
+        if self.values.contains_key(MARK) { return false; }
+        let key = "heroes.80.bindings.skill:2.stop_movement";
+        let flag = format!("{key}.override");
+        if !self.values.contains_key(key) && !self.values.contains_key(&flag) {
+            self.values.insert(key.into(), "true".into());
+            self.values.insert(flag, "true".into());
+        }
+        self.values.insert(MARK.into(), "1".into());
+        true
     }
     // These explicitly requested keyboard/shooting profiles are initial
     // personal defaults, not changes to shared bindings. Reset still restores
@@ -608,6 +624,34 @@ fn native_skill_slot(slot: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn guinevere_ultimate_stop_is_personal_editable_and_seeded_once() {
+        let mut s = Settings::default();
+        assert!(s.install_guinevere_ultimate_default());
+        assert!(s.binding(80, "skill:2").stop_movement);
+        assert!(s.binding(80, "skill:2:8030").stop_movement);
+        for hero in 1..=133 {
+            for slot in ["skill:0", "skill:1", "skill:2"] {
+                assert_eq!(s.binding(hero, slot).stop_movement, hero == 80 && slot == "skill:2");
+            }
+        }
+        s.set("hero.bindings.skill:2.stop_movement", "false", 80).unwrap();
+        assert!(!s.install_guinevere_ultimate_default());
+        assert!(!s.binding(80, "skill:2").stop_movement);
+    }
+    #[test]
+    fn guinevere_ultimate_default_preserves_existing_personal_choice_or_inheritance() {
+        for (key, value) in [
+            ("heroes.80.bindings.skill:2.stop_movement", "false"),
+            ("heroes.80.bindings.skill:2.stop_movement.override", "false"),
+        ] {
+            let mut s = Settings::default();
+            s.values.insert(key.into(), value.into());
+            s.install_guinevere_ultimate_default();
+            assert_eq!(s.values.get(key).map(String::as_str), Some(value));
+            assert!(!s.binding(80, "skill:2").stop_movement);
+        }
+    }
     #[test]
     fn requested_directional_profiles_are_personal_editable_and_idempotent() {
         let mut s=Settings::default();s.values.insert("common.bindings.attack.key".into(),"32".into());
