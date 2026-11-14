@@ -86,8 +86,14 @@ fn local_cast_receipt<M:Memory>(r:&mut Reflection<M>,owners:[u64;4],indicator:u6
         let (value,kind)=instance_integer(r,&mut checks,owners[3],name)?;
         energy.insert(name.into(),json!({"value":value,"type":kind}));
     }
+    let mut mp=serde_json::Map::new();
+    for name in ["<m_Mp>k__BackingField","_MpMax"] {
+        let (value,kind)=instance_integer(r,&mut checks,owners[3],name)?;
+        mp.insert(name.into(),json!({"value":value,"type":kind}));
+    }
     check(r,&checks)?;
     Ok(json!({"start_ns":start,"end_ns":now_ns(),"hero":hero,"same_match":true,"values":values,"types":types,
+        "local_mp":{"values":mp,"scope":"typed owned Actor MP family; may represent a hero-specific resource, not cast counters"},
         "local_energy":{"values":energy,"scope":"typed owned Actor energy; meaning requires isolated hero-specific evidence, not cast counters"},
         "scope":"coherent local Actor counters; separate bracket from source/native; no foreign result context"}))
 }
@@ -236,7 +242,7 @@ mod tests {
             ("ShowEntity",OWNERS[2],vec![]),
             ("Actor",OWNERS[3],vec![("m_ID",16,8,false),("m_iFirstSkillUseCount",20,counter_kind,counter_static),
                 ("m_iSecondSkillUseCount",24,8,false),("m_iThirdSkillUseCount",28,8,false),("m_iSkillUseCount",32,8,false),("m_glLastPushedSkillID",36,9,false),("m_iFourthSkillUseCount",40,8,false),
-                ("<m_EnergyPoint>k__BackingField",44,8,false),("<m_EnergyPointMax>k__BackingField",48,8,false)]),
+                ("<m_EnergyPoint>k__BackingField",44,8,false),("<m_EnergyPointMax>k__BackingField",48,8,false),("<m_Mp>k__BackingField",52,8,false),("_MpMax",56,8,false)]),
             ("SkillIndicatorComp",INDICATOR,vec![("Instance",0,18,true)]),
         ];
         for (index,(name,object,fields)) in classes.into_iter().enumerate() {
@@ -256,7 +262,7 @@ mod tests {
             named.push((name.to_owned(),class as u64));
         }
         put64(&mut bytes,OWNERS[0] as usize+16,OWNERS[2]);put64(&mut bytes,OWNERS[1] as usize+16,OWNERS[3]);
-        for (offset,value) in [(16,77u32),(20,7),(24,8),(28,9),(32,1),(36,u32::MAX),(40,10),(44,75),(48,100)] {
+        for (offset,value) in [(16,77u32),(20,7),(24,8),(28,9),(32,1),(36,u32::MAX),(40,10),(44,75),(48,100),(52,680),(56,1000)] {
             bytes[OWNERS[3] as usize+offset..OWNERS[3] as usize+offset+4].copy_from_slice(&value.to_le_bytes());
         }
         let mut reflection=Reflection::new(FixtureMemory{bytes:RefCell::new(bytes),race_owner_on_counter:Cell::new(false)}).unwrap();
@@ -277,6 +283,9 @@ mod tests {
         assert_eq!(receipt["local_energy"]["values"]["<m_EnergyPoint>k__BackingField"]["value"],75);
         assert_eq!(receipt["local_energy"]["values"]["<m_EnergyPointMax>k__BackingField"]["value"],100);
         assert!(receipt["values"].get("actor.<m_EnergyPoint>k__BackingField").is_none(),"energy changes are not cast counters");
+        assert_eq!(receipt["local_mp"]["values"]["<m_Mp>k__BackingField"]["value"],680);
+        assert_eq!(receipt["local_mp"]["values"]["_MpMax"]["value"],1000);
+        assert!(receipt["values"].get("actor.<m_Mp>k__BackingField").is_none(),"MP changes must not imply a skill cast");
         assert_eq!(receipt["values"]["actor.m_glLastPushedSkillID"].as_u64(),Some(u32::MAX as u64));
         assert_eq!(receipt["types"]["actor.m_iFirstSkillUseCount"],"i32");
         assert_eq!(receipt["types"]["actor.m_glLastPushedSkillID"],"u32");
