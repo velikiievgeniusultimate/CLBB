@@ -1433,11 +1433,12 @@ impl MotionPlan {
                     return Err("Native drag gate changed during sample".into());
                 }
             }
-            if self.attack_geometry && logical.ready.get() && ratio>=0.05 && ratio<=1.001 {
+            let lesley_selector=self.skill==5330 && self.name=="IndicatorMotionPosSelectAndRot" && self.range_shape==Some(14.);
+            if (self.attack_geometry||lesley_selector) && logical.ready.get() && ratio>=0.05 && ratio<=1.001 {
                 let range=result[0].hypot(result[2])/ratio;
-                if range.is_finite() && range>0. && range<=1e4 {
+                if range.is_finite() && range>0. && range<=if lesley_selector{100.}else{1e4} {
                     logical.world_range=number(range);
-                    logical.world_range_source=text("IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio");
+                    logical.world_range_source=text(if lesley_selector{"IndicatorMotionPosSelectAndRot.m_vDragResult/m_fDragRatio"}else{"IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio"});
                     logical.world_range_source_present=flag(true);
                 }
             }
@@ -1550,6 +1551,28 @@ mod tests {
             let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();assert!(f.logical.world_range.missing());
         }
         r.memory.0.borrow_mut()[576..580].copy_from_slice(&0.5f32.to_le_bytes());r.memory.0.borrow_mut()[581]=0;
+        let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();assert!(f.logical.world_range.missing());
+    }
+    #[test]
+    fn lesley_charge_selector_derives_live_range_without_fixed_range_permission() {
+        let(r,mut plan)=q_fixture();plan.skill=5330;plan.name="IndicatorMotionPosSelectAndRot".into();
+        plan.attack_geometry=false;plan.legacy_range=false;plan.range=None;plan.range_shape=Some(14.);
+        {let mut b=r.memory.0.borrow_mut();b[581]=1;b[1036]=0;}
+        for (x,z,ratio,expected) in [(9f32,12f32,1f32,15.),(3.,4.,0.5,10.)] {
+            {let mut b=r.memory.0.borrow_mut();b[528..532].copy_from_slice(&x.to_le_bytes());b[532..536].copy_from_slice(&0f32.to_le_bytes());b[536..540].copy_from_slice(&z.to_le_bytes());b[576..580].copy_from_slice(&ratio.to_le_bytes());}
+            let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();
+            assert!(f.logical.ready.get());assert_eq!(f.logical.world_range.value,expected);
+            assert_eq!(f.logical.world_range_source.as_str(),"IndicatorMotionPosSelectAndRot.m_vDragResult/m_fDragRatio");
+        }
+        for ratio in [0.,0.01,1.1] {
+            r.memory.0.borrow_mut()[576..580].copy_from_slice(&(ratio as f32).to_le_bytes());
+            let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();assert!(f.logical.world_range.missing());
+        }
+        r.memory.0.borrow_mut()[576..580].copy_from_slice(&0.5f32.to_le_bytes());
+        for skill in [5331,5300,28910] {
+            plan.skill=skill;let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();assert!(f.logical.world_range.missing());
+        }
+        plan.skill=5330;plan.range_shape=Some(3.);
         let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();assert!(f.logical.world_range.missing());
     }
     #[test]
