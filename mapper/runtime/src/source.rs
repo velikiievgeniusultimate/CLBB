@@ -316,6 +316,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Odette's current freely moving song exposes an ordinary stop
         // button through the same slot, without an aiming registry entry.
         || (hero==46 && slot=="skill:2" && base==4630 && active==4681)
+        // Pharsa's flight exposes an ordinary manual exit button. Native UI
+        // repetition ends flight early; this form has no indicator registry.
+        || (hero==52 && slot=="skill:3" && base==5250 && active==5256)
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -2378,6 +2381,15 @@ mod tests {
             (56,"skill:1",5610,5612),(55,"skill:0",5610,5612),(56,"skill:2",5620,5623)] {
             assert!(!verified_button_only_form(hero,slot,base,active));
         }
+    }
+    #[test]
+    fn pharsa_flight_exit_requires_her_actual_owned_fourth_slot_form() {
+        assert!(verified_button_only_form(52,"skill:3",5250,5256));
+        for (hero,slot,base,active) in [
+            (52,"skill:3",5250,5250),(52,"skill:2",5250,5256),
+            (52,"skill:3",5230,5256),(51,"skill:3",5250,5256),
+            (52,"skill:3",5250,5257),(52,"extra:3",5250,5256),
+        ] {assert!(!verified_button_only_form(hero,slot,base,active));}
     }
     #[test]
     fn odette_song_stop_is_plain_only_after_her_owned_ultimate_changes_form() {
