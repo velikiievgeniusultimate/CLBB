@@ -82,6 +82,15 @@ sudo -n python3 tools/read-training-descriptions.py --hero HERO_ID --frozen-mani
   применение раньше естественного восстановления. Неизменный счётчик сам по
   себе не доказывает возврат заряда.
 
+В проверенной установленной версии Кайи попадание начальным W по союзнику
+не заменило проверку повторного W в полёте. Повтор проверен после реального
+трёхсекундного КД: промах, союзный герой и враг. Продление полёта подтверждено
+возвратом обычных форм позже контрольного промаха; союзник не потерял ОЗ.
+Для стягивания аркана сравнивались движение Кайи и неподвижный контроль,
+с тем же GUID цели и свежими координатами. Новая кнопка для стягивания
+не появилась. Если урон двух навыков накладывается в одной записи, отделите
+применение: например, ульта в полёте отдельно нанесла 600 урона без Q и атак.
+
 Для готовности управления нужны доказательства условных кнопок и переходов.
 Точное численное соответствие всех формул урона/щита/пассивки — отдельная
 проверка: отмечайте её пределы, не подменяйте ею проверку управления.
@@ -182,6 +191,13 @@ Read the installed game's expanded skill/passive descriptions first. Derive
 and reproduce target, hit, stack, form and recast conditions before calling a
 hero ready for user review. Successful scripts or inferred templates alone are
 insufficient. User confirmation remains separate.
+
+In the observed Kaja version, an initial ground W toward an ally did not replace
+testing the flight recast. After the real flight cooldown, compare a miss,
+an allied hero and an enemy; observe application and later return to ground.
+For the lasso, compare stationary and moving caster trials against a fresh
+identified target. Separate casts when their damage overlaps: an isolated
+flight ultimate established its hit without the returning Q ring.
 
 For each conditional action, record its prerequisite, target class/GUID and
 expected effect. Test absence of the prerequisite, create it through real game
