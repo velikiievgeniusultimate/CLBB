@@ -195,6 +195,21 @@ impl ContactRegistryPlan {
     }
     /// The caller owns follow/cancel GO identity and must recheck `consumed`
     /// with its backend, GUID, geometry and attempt fences before publishing.
+    pub(crate) fn audit<M:Memory>(&self,r:&Reflection<M>,consumed:&mut Checks)->Result<serde_json::Value> {
+        self.validate(r)?;consumed.extend(self.checks.iter().cloned());
+        let objects=list_bytes(r,consumed,&self.touches,8)?;let ids=list_bytes(r,consumed,&self.ids,4)?;
+        if objects.len()/8!=ids.len()/4{return Err("Diagnostic native contact count differs".into());}
+        let mut rows=Vec::new();
+        for(o,id)in objects.chunks_exact(8).zip(ids.chunks_exact(4)) {
+            let object=u64_at(o,0);if object==0||pointer(r,consumed,object)?!=self.touch_class{return Err("Diagnostic native contact class differs".into());}
+            let pos=capture(r,consumed,object+self.pos,8)?;
+            rows.push(serde_json::json!({"native_id":i32_at(id,0),"owner":format!("{object:#x}"),
+                "pressed":format!("{:#x}",pointer(r,consumed,object+self.pressed)?),
+                "dragged":format!("{:#x}",pointer(r,consumed,object+self.dragged)?),
+                "current":format!("{:#x}",pointer(r,consumed,object+self.current)?),"raw_pos":[f32_at(&pos,0),f32_at(&pos,4)]}));
+        }
+        Ok(serde_json::json!(rows))
+    }
     pub(crate) fn sample<M: Memory>(
         &self,
         r: &Reflection<M>,
@@ -204,6 +219,16 @@ impl ContactRegistryPlan {
     ) -> Result<ContactObservation> {
         if follow_go == 0 {
             return Err("Owned target follow GameObject absent".into());
+        }
+        self.sample_owned(r,&[follow_go],cancel_go,consumed)
+    }
+    /// Some staged frontends transfer the pressed recipient to a portrait.
+    /// The caller must fence the exact backend-owned list and its GameObjects;
+    /// this only identifies a contact, never authorizes its target or position.
+    pub(crate) fn sample_owned<M:Memory>(&self,r:&Reflection<M>,owners:&[u64],cancel_go:u64,consumed:&mut Checks)->Result<ContactObservation> {
+        if owners.is_empty()||owners.len()>17||owners.contains(&0)
+            ||owners.iter().copied().collect::<BTreeSet<_>>().len()!=owners.len() {
+            return Err("Owned target contact set invalid".into());
         }
         self.validate(r)?;
         consumed.extend(self.checks.iter().cloned());
@@ -227,7 +252,7 @@ impl ContactRegistryPlan {
             }
             let pressed = pointer(r, consumed, object + self.pressed)?;
             let dragged = pointer(r, consumed, object + self.dragged)?;
-            if pressed != follow_go || dragged != follow_go {
+            if pressed!=dragged || !owners.contains(&pressed) {
                 continue;
             }
             if found.is_some() {
@@ -538,6 +563,25 @@ mod tests {
         assert_eq!(r.pointer(STATICS + 160).unwrap(), 0);
         put64(&mut r.memory.0.borrow_mut(), T0 + 64, CANCEL);
         assert!(sample(&mut r).unwrap().cancel_hit);
+    }
+    #[test]
+    fn staged_portrait_contact_requires_one_exact_owned_recipient() {
+        let mut r=fixture();let plan=ContactRegistryPlan::discover(&mut r,UI).unwrap();
+        for at in [72,80] {put64(&mut r.memory.0.borrow_mut(),T0+at,TARGET);}
+        assert!(!plan.sample(&r,FOLLOW,CANCEL,&mut Vec::new()).unwrap().present,"legacy admission is unchanged");
+        let mut consumed=Vec::new();let contact=plan.sample_owned(&r,&[FOLLOW,TARGET],CANCEL,&mut consumed).unwrap();
+        assert!(contact.present);assert_eq!(contact.contact_owner_id,T0);assert_eq!(contact.native_id,42);check(&r,&consumed).unwrap();
+        put64(&mut r.memory.0.borrow_mut(),T0+80,FOLLOW);
+        assert!(!plan.sample_owned(&r,&[FOLLOW,TARGET],CANCEL,&mut Vec::new()).unwrap().present,"split ownership is unknown");
+        for at in [72,80] {put64(&mut r.memory.0.borrow_mut(),T0+at,TARGET+1);}
+        assert!(!plan.sample_owned(&r,&[FOLLOW,TARGET],CANCEL,&mut Vec::new()).unwrap().present);
+        for owners in [vec![],vec![0],vec![FOLLOW,FOLLOW],vec![FOLLOW;18]] {
+            assert!(plan.sample_owned(&r,&owners,CANCEL,&mut Vec::new()).is_err());
+        }
+        {let mut b=r.memory.0.borrow_mut();put32(&mut b,TOUCHES+24,2);put32(&mut b,IDS+24,2);
+            put64(&mut b,TOUCH_ARRAY+40,T1);put32(&mut b,ID_ARRAY+36,901);
+            for at in [72,80]{put64(&mut b,T0+at,TARGET);}}
+        assert!(plan.sample_owned(&r,&[FOLLOW,TARGET],CANCEL,&mut Vec::new()).is_err(),"ambiguous fingers never choose an arbitrary target");
     }
     #[test]
     fn empty_or_foreign_contacts_do_not_publish_owned_raw_position() {

@@ -349,6 +349,80 @@ fn setup(with_movement: bool, p: Point) -> (Controller, Ledger) {
     pointer(&mut c, &mut h, 55, p);
     (c, h)
 }
+#[test]
+fn aldous_repeat_requires_its_exact_owned_staged_native_phase_before_down() {
+    for case in 0..11 {
+        let mut c=Controller::new();let mut h=Ledger::default();
+        c.apply_input(&mut h,Input::Enabled(true),T);
+        let mut f=frame(0);f.hero_id=n(64.);f.ui.hero_id=f.hero_id;f.skill_state.hero_id=f.hero_id;
+        f.ui.buttons[0].skill_id=n(6430.);f.skill_state.buttons[0].base_skill_id=n(6430.);
+        f.skill_state.buttons[0].active_skill_id=n(6431.);
+        let s=&mut f.selection_input;s.hero_id=f.hero_id;s.base_skill_id=n(6430.);s.active_skill_id=n(6431.);s.backend_state=n(6.);
+        match case {
+            1=>s.ready=flag(false),2=>s.coherent=flag(false),3=>s.backend_owner_id=0,
+            4=>s.token=text("foreign"),5=>s.backend_state=n(4.),6=>s.hero_id=n(55.),
+            7=>s.active_skill_id=n(6437.),8=>s.owner_id=0,9=>{f.hero_id=n(55.);f.ui.hero_id=f.hero_id;f.skill_state.hero_id=f.hero_id;},10=>s.backend_state=n(6.5),_=>{}
+        }
+        send(&mut c,&mut h,f);let world_before=h.world_reads;key(&mut c,&mut h,1,69,true);
+        assert_eq!(!h.active.is_empty(),case==0,"phase case {case}");
+        assert_eq!(h.world_reads,world_before,"target selection must not use world aim");
+    }
+}
+#[test]
+fn aldous_owned_portrait_press_without_drag_still_requires_exact_target_and_point() {
+    fn aldous(mut f:snapshot::Frame)->snapshot::Frame {
+        f.hero_id=n(64.);f.ui.hero_id=f.hero_id;f.skill_state.hero_id=f.hero_id;
+        f.ui.buttons[0].skill_id=n(6430.);f.skill_state.buttons[0].base_skill_id=n(6430.);
+        f.skill_state.buttons[0].active_skill_id=n(6431.);
+        f.selection_input.hero_id=f.hero_id;f.selection_input.base_skill_id=n(6430.);
+        f.selection_input.active_skill_id=n(6431.);f.selection_input.backend_state=n(6.);f
+    }
+    for case in 0..7 {
+        let mut c=Controller::new();let mut h=Ledger::default();c.apply_input(&mut h,Input::Enabled(true),T);
+        send(&mut c,&mut h,aldous(frame(0)));pointer(&mut c,&mut h,1,Point::new(0.73,0.36));
+        key(&mut c,&mut h,2,69,true);let id=c.skillTouch_;assert!(id>=0);
+        send(&mut c,&mut h,aldous(held(10)));let p=h.active[&id];
+        let mut f=aldous(point_receipt(20,p,Some(13010)));f.selection_input.has_drag=flag(false);
+        match case {1=>f.selection_input.input_ready=flag(false),2=>f.selection_input.target_valid=flag(false),
+            3=>f.selection_input.target_self_id=0,4=>f.selection_input.raw_touch_xyz.values[0]=n(5.),
+            5=>f.selection_input.backend_owner_id=BACKEND+1,6=>f.selection_input.backend_state=n(6.5),_=>{}}
+        send(&mut c,&mut h,f);assert_eq!(c.selection_.accepted,case==0,"press case {case}");
+        if case==0 {
+            key(&mut c,&mut h,21,69,false);
+            if c.skillTouch_>=0 {let mut f=aldous(point_receipt(30,h.active[&id],Some(13010)));f.selection_input.has_drag=flag(false);send(&mut c,&mut h,f);tick(&mut c,&mut h,31);}
+            assert!(ended(&h,id));assert!(h.active.is_empty());
+        }else{assert!(!ended(&h,id),"unverified press never commits an UP");}
+    }
+}
+#[test]
+fn aldous_expired_window_retires_after_up_and_two_owned_native_ticks() {
+    fn aldous(mut f:snapshot::Frame,active:i32)->snapshot::Frame {
+        f.hero_id=n(64.);f.ui.hero_id=f.hero_id;f.skill_state.hero_id=f.hero_id;
+        f.ui.buttons[0].skill_id=n(6430.);f.skill_state.buttons[0].base_skill_id=n(6430.);
+        f.skill_state.buttons[0].active_skill_id=n(active as f64);f.selection_input.hero_id=f.hero_id;
+        f.selection_input.base_skill_id=n(6430.);f.selection_input.active_skill_id=n(active as f64);f.selection_input.backend_state=n(6.);f
+    }
+    for case in 0..9 {
+        let mut c=Controller::new();let mut h=Ledger::default();c.apply_input(&mut h,Input::Enabled(true),T);
+        c.apply_input(&mut h,Input::HoldThreshold(40),T);send(&mut c,&mut h,aldous(frame(0),6431));
+        c.apply_input(&mut h,Input::Mouse {button:2,down:true,point:Point::new(0.6,0.5)},T+MS);
+        send(&mut c,&mut h,aldous(frame(50),6431));let movement=c.movementTouch_;assert!(movement>=0);
+        key(&mut c,&mut h,60,69,true);let id=c.skillTouch_;send(&mut c,&mut h,aldous(held(70),6431));let point=h.active[&id];
+        key(&mut c,&mut h,80,69,false);
+        let closed=|ms,clock|{
+            let mut f=aldous(point_receipt(ms,point,None),6437);f.ui.active_slot=text("");
+            let s=&mut f.selection_input;s.panel_visible=flag(false);s.input_ready=flag(false);
+            s.backend_state=n(8.);s.native_cancel=flag(true);s.target_guid=n(0.);f.game_clock_ms=n(clock);
+            match case {1=>s.native_cancel=flag(false),2=>s.backend_state=n(0.),3=>s.owner_id=OWNER+1,
+                4=>s.coherent=flag(false),5=>s.raw_touch_xyz.values[0]=n(3.),6=>s.target_guid=n(13010.),
+                7=>{s.active_skill_id=n(6432.);f.skill_state.buttons[0].active_skill_id=n(6432.);},8=>s.backend_state=n(8.5),_=>{}}f
+        };
+        send(&mut c,&mut h,closed(90,40.));assert!(!ended(&h,id));
+        send(&mut c,&mut h,closed(100,40.));assert!(!ended(&h,id));
+        send(&mut c,&mut h,closed(110,41.));assert_eq!(ended(&h,id),case==0,"expiry case {case}");
+        assert!(h.active.contains_key(&movement));assert_eq!(h.abort_all_calls,0);
+    }
+}
 fn started(with_movement: bool) -> (Controller, Ledger, i32) {
     let (mut c, mut h) = setup(with_movement, Point::new(0.73, 0.36));
     key(&mut c, &mut h, 60, 69, true);

@@ -279,7 +279,7 @@ fn main() -> Result<(), String> {
                 let control_start=now_ns();
                 let control_state=source.audit_control_state().map(|values|json!({"start_ns":control_start,"end_ns":now_ns(),"values":values}));
                 let ui_start=now_ns();
-                let ui_input=source.audit_ui_input().map(|values|json!({"start_ns":ui_start,"end_ns":now_ns(),"values":values}));
+                let ui_input=source.audit_ui_input_detailed().map(|values|json!({"start_ns":ui_start,"end_ns":now_ns(),"values":values}));
                 let ui_buttons:Vec<_>=f.ui.buttons.iter().take(f.ui.button_count.min(32) as usize).map(|b|json!({"slot":b.slot.as_str(),"skill":b.skill_id.int(),"press":b.press_uv.values.map(|v|v.value),"active":b.active.get()})).collect();
                 let native_values=if f.skill_id.int()>0 {
                     let start=now_ns();

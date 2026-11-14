@@ -86,7 +86,14 @@ impl Controller {
     pub(crate) fn selection_phase_known(&self, b: &Button) -> bool {
         b.kind == "skill"
             && (1..=MAX_SKILL_ID).contains(&b.skillId)
-            && self.active_variant(b) == b.skillId
+            && (self.active_variant(b) == b.skillId || {
+                let s=&self.selectionInput_;
+                self.heroId_==64&&b.slot=="skill:2"&&b.skillId==6430&&self.active_variant(b)==6431
+                    &&s.ready.get()&&s.coherent.get()&&selection_kind(s)==Some(2)
+                    &&s.hero_id.int()==64&&s.slot.as_str()==b.slot&&s.base_skill_id.int()==6430
+                    &&s.active_skill_id.int()==6431&&integer(s.backend_state,6,6)
+                    &&s.token.as_str()==self.frameEpoch_&&s.owner_id!=0&&s.backend_owner_id!=0
+            })
     }
     fn selection_scope(&self, b: &Button, s: &SelectionInput, minimum: i64) -> bool {
         let (start, end) = (s.sample_start_ns.get(-1.), s.sample_end_ns.get(-1.));
@@ -195,6 +202,9 @@ impl Controller {
         }
         let b = self.find_button(&self.activeSlot_).unwrap();
         if self.selection_.active != 0 && self.selection_.active != s.active_skill_id.int() {
+            if self.aldous_expired_selector(&b,s) {
+                reject!("staged_selector_closed_await_native_ticks");
+            }
             if s.active_skill_id.int() != b.skillId && matches!(b.aimType, 1..=3) {
                 // A verified follow-up form can publish before the previous
                 // pressed slot clears. It authorizes no further selection
@@ -320,7 +330,16 @@ impl Controller {
         );
     }
     fn target_receipt(&self, s: &SelectionInput, empty_press: bool) -> Option<(Point, u64, i64)> {
-        if (!empty_press && (!s.input_ready.get() || !s.has_drag.get()))
+        // Aldous can transfer the native pressed GO onto an owned portrait
+        // before NGUI starts a drag. Preserve that observed false drag flag;
+        // accept only a ready, authorized portrait (or its actual cross ACK)
+        // at the exact causal point, under the already checked scope below.
+        let staged_press=self.heroId_==64&&self.activeSlot_=="skill:2"&&self.selection_.active==6431
+            &&s.base_skill_id.int()==6430&&s.active_skill_id.int()==6431&&integer(s.backend_state,6,6)
+            &&s.input_ready.get()&&s.has_drag.is_bool()&&!s.has_drag.get()
+            &&((s.target_valid.get()&&target_guid(s.target_guid).is_some_and(|v|v>0)&&s.target_owner_id!=0&&s.target_self_id!=0)
+                ||(s.target_cancel_hit.get()&&s.native_cancel.get()));
+        if (!empty_press && !staged_press && (!s.input_ready.get() || !s.has_drag.get()))
             || !s.panel_visible.get()
             || !s.contact_present.get()
             || s.contact_owner_id == 0
@@ -431,11 +450,21 @@ impl Controller {
             );
         }
     }
+    fn aldous_expired_selector(&self,b:&Button,s:&SelectionInput)->bool {
+        self.heroId_==64&&b.slot=="skill:2"&&b.skillId==6430&&self.selection_.kind==2
+            &&self.selection_.active==6431&&matches!(s.active_skill_id.int(),6430|6437)
+            &&s.base_skill_id.int()==6430&&integer(s.backend_state,8,8)&&s.native_cancel.get()
+            &&s.panel_visible.is_bool()&&!s.panel_visible.get()
+            &&s.input_ready.is_bool()&&!s.input_ready.get()&&target_guid(s.target_guid)==Some(0)
+            &&self.selection_.owner!=0&&self.selection_.owner==s.owner_id
+            &&self.selection_.backend_owner!=0&&self.selection_.backend_owner==s.backend_owner_id
+    }
     fn closed_empty_target_contact(&self,s:&SelectionInput)->bool {
+        let expired=self.find_button(&self.activeSlot_).is_some_and(|b|self.aldous_expired_selector(b,s));
         if !self.pendingRelease_ || self.skillKeyHeld_ || self.selection_.kind!=2
             || self.selection_.revoked || self.selection_.owner!=s.owner_id
             || self.selection_.backend_owner!=s.backend_owner_id
-            || !integer(s.backend_state,3,3) || !s.native_cancel.is_bool()
+            || (!integer(s.backend_state,3,3)&&!expired) || !s.native_cancel.is_bool()
             || self.selection_.release_ns<=0 || s.sample_start_ns.value<self.selection_.release_ns as f64
             || target_guid(s.target_guid)!=Some(0) || s.target_valid.get()
             || !s.panel_visible.is_bool() || s.panel_visible.get()
@@ -467,6 +496,7 @@ impl Controller {
     fn observe_selection_end(&mut self, host: &mut impl Host, f: &Frame) -> bool {
         let s = &f.selection_input;
         let b = self.find_button(&self.activeSlot_).unwrap();
+        let expired=self.aldous_expired_selector(b,s)&&self.selection_scope(b,s,self.castStartedNs_);
         let future = s.active_skill_id.int() != b.skillId && matches!(b.aimType, 1..=3);
         let same_phase = s.active_skill_id.int() == self.selection_.active;
         let clock = f.game_clock_ms;
@@ -493,7 +523,7 @@ impl Controller {
             && !s.has_drag.get()
             && ui_empty
             && (same_phase || future))
-            || (closed_contact && (same_phase || self.selection_.active==0)))
+            || (closed_contact && (same_phase || self.selection_.active==0||expired)))
             && clock_valid
             && self.frameCoreSampleStartNs_ >= self.castStartedNs_
             && same(s.sample_end_ns, f.time_ns);

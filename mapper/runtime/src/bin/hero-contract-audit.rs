@@ -543,7 +543,7 @@ fn main() -> Result<()> {
             "end_ns":now_ns(),
         }));
     }
-    let controls=source.audit_control_state();let ui=source.audit_ui_input();
+    let controls=source.audit_control_state();let ui=source.audit_ui_input_detailed();
     let charge_lifecycle=charge_lifecycle(&mut source.reflection,sample.match_owners[2]);
     let hero_level=local_hero_level(&mut source.reflection,Some((sample.match_owners,hero)));
     let cached_integrity_before_final=source.audit_plan_integrity();

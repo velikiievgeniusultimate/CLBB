@@ -130,7 +130,7 @@ fn main()->Result<(),String> {
             // This read remains available when only motion values are unsupported.
             // It validates the original match links before reading any counters.
             let cast_receipt=local_cast_receipt(&mut source.reflection,owners,indicator,hero);
-            let ui_audit=source.audit_ui_input();
+            let ui_audit=source.audit_ui_input_detailed();
             if cast_receipt.is_ok(){cast_receipt_ok+=1;}
             match result {
                 Ok(frame)=>{

@@ -13,7 +13,7 @@ use std::collections::HashMap;
 pub(crate) const SOURCE: &str = "UILockHeroSkill.UICamera.activeTouches";
 /// Developer-only backend observation, including frontend modes not yet
 /// admitted by TargetPlan. No geometry or input authorization is produced.
-pub(crate) fn audit_backend<M:Memory>(r:&mut Reflection<M>,ui:u64)->Result<serde_json::Value> {
+pub(crate) fn audit_backend<M:Memory>(r:&mut Reflection<M>,ui:u64,owned_camera:u64,details:bool)->Result<serde_json::Value> {
     let start=std::time::Instant::now();let mut checks=Vec::new();
     let(name,uf)=fields(r,&mut checks,ui)?;
     if name!="UIKeySkill"{return Err("target_audit_ui_type".into());}
@@ -31,10 +31,43 @@ pub(crate) fn audit_backend<M:Memory>(r:&mut Reflection<M>,ui:u64)->Result<serde
     for name in ["m_bCancelSkill","m_bSelectUnselectableTarget"] {
         values.insert(name.into(),serde_json::json!(boolean(r,&mut checks,address(backend,&bf,name,&[2])?.0)?));
     }
+    if !details {
+        check(r,&checks)?;
+        return Ok(serde_json::json!({"backend":format!("{backend:#x}"),"values":values,
+            "read_ms":start.elapsed().as_secs_f64()*1000.,"scope":"independent read-only backend scalars; detailed topology requires the developer observer"}));
+    }
+    let follow=ptr(r,&mut checks,address(backend,&bf,"m_followGo",&[18])?.0)?;
+    let cancel=ptr(r,&mut checks,address(backend,&bf,"m_skillCancel",&[18])?.0)?;
+    let registry=target_contacts::discover_ui_camera_class(r,owned_camera)
+        .and_then(|class|ContactRegistryPlan::discover(r,class))
+        .and_then(|plan|plan.audit(r,&mut checks));
+    let contact=target_contacts::discover_ui_camera_class(r,owned_camera)
+        .and_then(|class|ContactRegistryPlan::discover(r,class))
+        .and_then(|plan|plan.sample(r,follow,cancel,&mut checks))
+        .map(|v|serde_json::json!({"present":v.present,"native_id":v.native_id,
+            "owner":format!("{:#x}",v.contact_owner_id),"current_go":format!("{:#x}",v.current_go),
+            "raw_pos":v.raw_pos,"press_started":v.press_started,"drag_started":v.drag_started,"cancel_hit":v.cancel_hit}));
+    let cancel_uv=crate::target_cancel_geometry::CachedCancelWidgetPlan::discover(r,cancel)
+        .and_then(|plan|plan.sample(r,&mut checks));
+    let list=ptr(r,&mut checks,address(backend,&bf,"lNearHeroIcon",&[21])?.0)?;
+    let icons=(||->Result<serde_json::Value>{
+        let mut plan=IconListPlan::new(r,list)?;plan.topology(r,&mut checks)?;let mut rows=Vec::new();
+        for icon in &mut plan.icons {
+            let observed=icon.sample(r,&mut checks,icon.self_go.object)?;
+            let uv=crate::target_cancel_geometry::CachedCancelWidgetPlan::discover(r,observed.self_id)
+                .and_then(|plan|plan.sample(r,&mut checks));
+            rows.push(serde_json::json!({"owner":format!("{:#x}",observed.owner),"self":format!("{:#x}",observed.self_id),
+                "guid":observed.guid,"player_matches":observed.player_matches,"forbid":observed.forbid,
+                "cancel":observed.cancel,"collider":observed.collider,"widget_uv":uv}));
+        }
+        Ok(serde_json::json!(rows))
+    })();
     let mut schema:Vec<_>=bf.iter().map(|(name,f)|serde_json::json!({"name":name,"kind":f.kind,"static":f.is_static})).collect();
     schema.sort_by_key(|v|v["name"].as_str().unwrap_or("").to_owned());
     check(r,&checks)?;
     Ok(serde_json::json!({"backend":format!("{backend:#x}"),"values":values,"schema":schema,
+        "contact":contact,"cancel_uv":cancel_uv,"icons":icons,"registry":registry,
+        "follow_go":format!("{follow:#x}"),"cancel_go":format!("{cancel:#x}"),
         "read_ms":start.elapsed().as_secs_f64()*1000.,"scope":"independent read-only UI backend bracket; no frontend qualification or input authorization"}))
 }
 pub(crate) fn fields<M: Memory>(
@@ -373,6 +406,8 @@ impl IconListPlan {
 #[derive(Clone)]
 pub(crate) struct TargetPlan {
     checks: Checks,
+    staged_aldous: bool,
+    initial_go: Option<GameObjectPlan>,
     data: u64,
     backend: u64,
     base: u64,
@@ -465,16 +500,26 @@ impl TargetPlan {
             address(comp, &cf, "m_pOwner", &[18])?.0,
             show,
         )?;
-        // Exact observed frontend mode, independent of hero or numeric skill ID.
-        if int(
+        let use_type=int(
             r,
             &mut checks,
             address(button, &bf, "m_SkillUseType", &[8, 17])?.0,
-        )? != 1
-            || int(r, &mut checks, address(button, &bf, "m_iBit", &[8, 9])?.0)? != 64
-        {
+        )?;
+        let bits=int(r,&mut checks,address(button,&bf,"m_iBit",&[8,9])?.0)?;
+        let staged_aldous=use_type==1&&bits==0
+            &&int(r,&mut checks,address(data,&df,"m_InitSkillID",&[8])?.0)?==6430
+            &&int(r,&mut checks,address(show,&sf,"m_ID",&[8])?.0)?==64
+            &&int(r,&mut checks,address(button,&bf,"m_iIndex",&[8])?.0)?==2;
+        if use_type!=1 || (bits!=64&&!staged_aldous) {
             return Err("target_frontend_mode_unqualified".into());
         }
+        let initial_go=if staged_aldous {
+            // VirtualButton is a managed controller, not a Unity component.
+            // Its typed m_Self link owns the actual pressed GameObject.
+            let object=ptr(r,&mut checks,address(button,&bf,"m_Self",&[18])?.0)?;
+            let go=GameObjectPlan::new(r,object)?;
+            Some(go)
+        }else{None};
         let logic = ptr(r, &mut checks, address(ui, &uf, "m_LogicExtra", &[18])?.0)?;
         let (name, lf) = fields(r, &mut checks, logic)?;
         if name != "KeySkillLogicExtra" {
@@ -495,6 +540,8 @@ impl TargetPlan {
         check(r, &checks)?;
         Ok(Self {
             checks,
+            staged_aldous,
+            initial_go,
             data,
             backend,
             base: address(data, &df, "m_InitSkillID", &[8])?.0,
@@ -524,6 +571,9 @@ impl TargetPlan {
     }
     pub(crate) fn validate<M: Memory>(&self, r: &Reflection<M>) -> Result<()> {
         check(r, &self.checks)
+    }
+    pub(crate) fn reveal_phase(&self,hero:i32,slot:&str,base:i32,active:i32)->bool {
+        self.staged_aldous&&hero==64&&slot=="skill:2"&&base==6430&&active==6430
     }
     /// Cancellation uses the rendered widget owned by this backend. A raw
     /// GameObject anchor or another skill's camera is never a fallback point.
@@ -588,6 +638,12 @@ impl TargetPlan {
         // contact; only this owned backend/contact authorizes Target feedback.
         let use_skill = int(r, consumed, self.use_skill)?;
         let state = int(r, consumed, self.state)?;
+        let reveal=self.reveal_phase(frame.hero_id.int(),slot,base,active);
+        let staged_selector=self.staged_aldous&&frame.hero_id.int()==64&&slot=="skill:2"&&base==6430&&active==6431;
+        let attempt_active=use_skill==base&&if self.staged_aldous {
+            (reveal&&state==7)||(staged_selector&&state==6)
+        }else{active==base&&state==4};
+        let closed=use_skill==base&&if self.staged_aldous {matches!(state,0|8)}else{state==3};
         let native_cancel = optional(r, consumed, |r, c| boolean(r, c, self.native_cancel));
         let unselectable = optional(r, consumed, |r, c| boolean(r, c, self.unselectable));
         let selected_guid = optional(r, consumed, |r, c| guid(r, c, self.target_guid));
@@ -611,9 +667,9 @@ impl TargetPlan {
             backend_owner_id: self.backend,
             sample_start_ns: number(now as f64),
             sample_end_ns: number(now as f64),
-            panel_visible: if use_skill == base && state == 4 {
+            panel_visible: if attempt_active {
                 flag(true)
-            } else if use_skill == base && state == 3 {
+            } else if closed {
                 flag(false)
             } else {
                 Default::default()
@@ -627,8 +683,7 @@ impl TargetPlan {
         // The observed ConstantShow mode has state4 during the panel capture,
         // state3 idle/end; unknown and native blocked7/8 are not false absence.
         // This qualification belongs only to the exact UILock frontend mode.
-        let native_scope = active == base && use_skill == base;
-        let attempt_active = native_scope && state == 4;
+        let native_scope = use_skill==base&&(if self.staged_aldous {reveal||staged_selector}else{active==base});
         if !attempt_active {
             packet.input_ready = flag(false);
             self.was_held = false;
@@ -640,9 +695,14 @@ impl TargetPlan {
             self.cancel_attempts = 0;
         }
         self.was_held = attempt_active;
-        let follow = optional(r, consumed, |r, c| ptr(r, c, self.follow)).unwrap_or(0);
+        let follow = if reveal || (self.staged_aldous&&closed) {
+            if let Some(go)=&self.initial_go {go.sample(r,consumed)?;go.object}else{0}
+        }else{optional(r, consumed, |r, c| ptr(r, c, self.follow)).unwrap_or(0)};
         let cancel = optional(r, consumed, |r, c| ptr(r, c, self.cancel_go)).unwrap_or(0);
         if follow == 0 {
+            if self.staged_aldous&&closed {
+                packet.contact_present=flag(false);packet.has_drag=flag(false);packet.input_ready=flag(false);
+            }
             return Ok(packet);
         }
         let owner_checkpoint = consumed.len();
@@ -719,7 +779,20 @@ impl TargetPlan {
             return Ok(packet);
         };
         let contact_checkpoint = consumed.len();
-        let contact = match registry.sample(r, follow, cancel, consumed) {
+        let contact_result=if self.staged_aldous&&((staged_selector&&attempt_active)||closed) {
+            let list=ptr(r,consumed,self.icon_list)?;
+            if self.icons.as_ref().is_none_or(|(object,plan)|*object!=list||plan.topology(r,&mut Vec::new()).is_err()) {
+                self.icons=Some((list,IconListPlan::new(r,list)?));
+            }
+            let icons=&self.icons.as_ref().unwrap().1;icons.topology(r,consumed)?;
+            let mut owners=vec![follow];
+            for icon in &icons.icons {
+                icon.self_go.sample(r,consumed)?;
+                if !owners.contains(&icon.self_go.object){owners.push(icon.self_go.object);}
+            }
+            registry.sample_owned(r,&owners,cancel,consumed)
+        }else{registry.sample(r,follow,cancel,consumed)};
+        let contact = match contact_result {
             Ok(value) => value,
             Err(_) => {
                 consumed.truncate(contact_checkpoint);
@@ -741,7 +814,7 @@ impl TargetPlan {
         packet.native_contact_id = number(contact.native_id as f64);
         packet.contact_owner_id = contact.contact_owner_id;
         packet.raw_touch_xyz = v3([contact.raw_pos[0], contact.raw_pos[1], 0.]);
-        packet.input_ready = flag(native_scope && contact.press_started && contact.drag_started);
+        packet.input_ready = flag((if self.staged_aldous{attempt_active}else{native_scope}) && contact.press_started && (contact.drag_started||staged_selector));
         packet.target_cancel_hit = if !attempt_active {
             flag(false)
         } else if cancel != 0 {
@@ -871,6 +944,8 @@ mod tests {
         write(&r, 88, &[1]); // global-held and sticky backend cancel
         let plan = TargetPlan {
             checks: Vec::new(),
+            staged_aldous:false,
+            initial_go:None,
             data: 2000,
             backend: 3000,
             base: 8,

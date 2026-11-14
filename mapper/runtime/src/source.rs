@@ -1141,6 +1141,13 @@ impl<M: Memory> Source<M> {
     }
     /// Independent typed observation of shared UI drag/transition state.
     pub fn audit_ui_input(&mut self)->Result<serde_json::Value> {
+        self.audit_ui_input_mode(false)
+    }
+    /// Detailed developer observer; never used by the production recorder loop.
+    pub fn audit_ui_input_detailed(&mut self)->Result<serde_json::Value> {
+        self.audit_ui_input_mode(true)
+    }
+    fn audit_ui_input_mode(&mut self,details:bool)->Result<serde_json::Value> {
         let plan=self.plan.as_ref().ok_or("No current control plan")?;
         let r=&mut self.reflection;check(r,&plan.ui.checks)?;
         let object=plan.ui.object;let class=r.class(r.pointer(object)?)?;
@@ -1161,7 +1168,13 @@ impl<M: Memory> Source<M> {
                 values.insert("transition_button_class".into(),serde_json::json!(c.name));
             }
         }
-        values.insert("target_backend_audit".into(),serde_json::json!(crate::target_selection::audit_backend(r,object)));
+        values.insert("target_backend_audit".into(),serde_json::json!(crate::target_selection::audit_backend(r,object,plan.ui.camera_object,details)));
+        if details {
+            let frontends:Vec<_>=plan.ui.buttons.iter().filter(|b|b.target_family).map(|b|serde_json::json!({
+            "slot":b.slot,"discovery":crate::target_selection::TargetPlan::discover(r,object,b.object,b.data,plan.match_owners[2],plan.ui.camera_object).map(|_|"validated")
+            })).collect();
+            values.insert("target_frontend_audit".into(),serde_json::json!(frontends));
+        }
         check(r,&checks)?;check(r,&plan.ui.checks)?;Ok(serde_json::json!(values))
     }
     /// Read-only local visual anchors, independently bracketed for diagnostics.
@@ -1743,7 +1756,12 @@ impl<M: Memory> Source<M> {
                             let matching=frame.skill_state.buttons.iter().take(frame.skill_state.count.min(32)as usize)
                                 .find(|v|v.slot.as_str()==button.slot)
                                 .is_some_and(|v|v.base_skill_id.int()==value.base_skill_id.int()&&v.active_skill_id.int()==value.active_skill_id.int());
-                            if matching{target=value;}else{consumed.truncate(checkpoint);}
+                            if matching {
+                                if plan.reveal_phase(hero,&button.slot,value.base_skill_id.int(),value.active_skill_id.int()) {
+                                    control_types.insert(button.slot.clone(),1);
+                                }
+                                target=value;
+                            }else{consumed.truncate(checkpoint);}
                         }
                         Err(_)=>{consumed.truncate(checkpoint);target.reason=text("target_optional_read_unknown");}
                     }
@@ -1764,6 +1782,7 @@ impl<M: Memory> Source<M> {
             })
         }else{None};
         attach_target_cancel(&mut frame,target_cancel);
+        attach_aldous_reveal_cancel(&mut frame,&control_types);
         if let Some(error)=target_cancel_error {
             let reason=format!("{};cancel_geometry_unknown:{error}",frame.selection_input.reason.as_str());
             frame.selection_input.reason=if reason.len()<=256{text(&reason)}else{text("target_cancel_geometry_unknown")};
@@ -2077,10 +2096,56 @@ fn attach_target_cancel(frame:&mut s::Frame,point:Option<[f64;2]>) {
         selection.target_cancel_ready=flag(true);selection.target_cancel_uv=v2(point);
     }
 }
+/// The first Aldous press reveals targets; it is not itself a target choice.
+/// Its native indicator ID/current slot remain empty. Join the actual pressed
+/// button contact and its own backend cross, never borrow another finger's
+/// global cancel flag or a previous skill's geometry.
+fn attach_aldous_reveal_cancel(frame:&mut s::Frame,types:&std::collections::BTreeMap<String,u8>) {
+    let v=&frame.selection_input;
+    if frame.hero_id.int()!=64||types.get("skill:2")!=Some(&1)||v.hero_id.int()!=64
+        ||v.kind.int()!=2||!v.ready.get()||!v.coherent.get()||v.token.as_str()!=frame.token.as_str()
+        ||v.slot.as_str()!="skill:2"||v.base_skill_id.int()!=6430||v.active_skill_id.int()!=6430
+        ||v.backend_state.int()!=7||v.owner_id==0||v.backend_owner_id==0||v.contact_owner_id==0
+        ||!v.panel_visible.get()||!v.contact_present.get()||!v.target_cancel_ready.get()||!v.target_cancel_uv.valid()
+        ||(!frame.ui.active_slot.as_str().is_empty()&&frame.ui.active_slot.as_str()!="skill:2")
+        ||!frame.cancel_state.ready.get()||!frame.cancel_state.coherent.get()
+        ||frame.cancel_state.hero_id.int()!=64||frame.cancel_state.token.as_str()!=frame.token.as_str()
+        ||frame.cancel_state.source.as_str()!="UIKeySkill.bCancelSkill" {return;}
+    frame.ui.cancel_uv=v.target_cancel_uv;
+    frame.cancel_state.slot=v.slot;frame.cancel_state.base_skill_id=v.base_skill_id;
+    frame.cancel_state.cancelled=flag(frame.cancel_state.cancelled.get()&&v.native_cancel.get()&&v.target_cancel_hit.get());
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    #[test]
+    fn aldous_reveal_cancel_requires_own_pressed_contact_and_both_native_flags() {
+        let fixture=||{
+            let mut f=s::Frame::default();f.hero_id=number(64.);f.token=text("match");
+            f.selection_input=s::SelectionInput {kind:number(2.),ready:flag(true),coherent:flag(true),
+                token:f.token,hero_id:f.hero_id,slot:text("skill:2"),base_skill_id:number(6430.),active_skill_id:number(6430.),
+                backend_state:number(7.),owner_id:1,backend_owner_id:2,contact_owner_id:3,contact_present:flag(true),
+                panel_visible:flag(true),target_cancel_ready:flag(true),target_cancel_uv:v2([0.8,0.3]),
+                native_cancel:flag(true),target_cancel_hit:flag(true),..Default::default()};
+            f.cancel_state=s::CancelState {ready:flag(true),coherent:flag(true),hero_id:f.hero_id,token:f.token,
+                source:text("UIKeySkill.bCancelSkill"),cancelled:flag(true),..Default::default()};f
+        };
+        let types=[("skill:2".into(),1)].into_iter().collect();let mut f=fixture();
+        attach_aldous_reveal_cancel(&mut f,&types);assert!(f.cancel_state.cancelled.get());assert_eq!(f.cancel_state.slot.as_str(),"skill:2");
+        assert_eq!(f.ui.cancel_uv.values[0].value,0.8);
+        for case in 0..8 {
+            let mut f=fixture();match case {0=>f.selection_input.target_cancel_hit=flag(false),1=>f.selection_input.native_cancel=flag(false),
+                2=>f.selection_input.contact_owner_id=0,3=>f.selection_input.token=text("foreign"),4=>f.ui.active_slot=text("skill:0"),
+                5=>f.selection_input.active_skill_id=number(6431.),6=>f.selection_input.coherent=flag(false),_=>f.cancel_state.cancelled=flag(false)}
+            attach_aldous_reveal_cancel(&mut f,&types);
+            assert!(!f.cancel_state.cancelled.get()||f.cancel_state.slot.as_str().is_empty(),"no foreign ACK case {case}");
+        }
+        for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            let mut f=fixture();f.hero_id=number(hero as f64);attach_aldous_reveal_cancel(&mut f,&types);
+            assert!(f.cancel_state.slot.as_str().is_empty());assert!(!f.ui.cancel_uv.valid());
+        }
+    }
     struct MutableMemory(RefCell<Vec<u8>>);
     impl Memory for MutableMemory {
         fn regions(&self) -> Result<Vec<crate::platform::Region>> {
