@@ -11,6 +11,32 @@ use clbb_moba_core::controller::snapshot as s;
 use std::collections::HashMap;
 
 pub(crate) const SOURCE: &str = "UILockHeroSkill.UICamera.activeTouches";
+/// Developer-only backend observation, including frontend modes not yet
+/// admitted by TargetPlan. No geometry or input authorization is produced.
+pub(crate) fn audit_backend<M:Memory>(r:&mut Reflection<M>,ui:u64)->Result<serde_json::Value> {
+    let start=std::time::Instant::now();let mut checks=Vec::new();
+    let(name,uf)=fields(r,&mut checks,ui)?;
+    if name!="UIKeySkill"{return Err("target_audit_ui_type".into());}
+    let logic=ptr(r,&mut checks,address(ui,&uf,"m_LogicExtra",&[18])?.0)?;
+    let(name,lf)=fields(r,&mut checks,logic)?;
+    if name!="KeySkillLogicExtra"{return Err("target_audit_logic_type".into());}
+    let backend=ptr(r,&mut checks,address(logic,&lf,"m_UiLockHeroSkill",&[18])?.0)?;
+    let(name,bf)=fields(r,&mut checks,backend)?;
+    if name!="UILockHeroSkill"{return Err("target_audit_backend_type".into());}
+    let mut values=serde_json::Map::new();
+    for name in ["<iUseSkillId>k__BackingField","m_eState"] {
+        values.insert(name.into(),serde_json::json!(int(r,&mut checks,address(backend,&bf,name,&[8,17])?.0)?));
+    }
+    values.insert("iSkillTargetGuid".into(),serde_json::json!(guid(r,&mut checks,address(backend,&bf,"iSkillTargetGuid",&[8,9])?)?));
+    for name in ["m_bCancelSkill","m_bSelectUnselectableTarget"] {
+        values.insert(name.into(),serde_json::json!(boolean(r,&mut checks,address(backend,&bf,name,&[2])?.0)?));
+    }
+    let mut schema:Vec<_>=bf.iter().map(|(name,f)|serde_json::json!({"name":name,"kind":f.kind,"static":f.is_static})).collect();
+    schema.sort_by_key(|v|v["name"].as_str().unwrap_or("").to_owned());
+    check(r,&checks)?;
+    Ok(serde_json::json!({"backend":format!("{backend:#x}"),"values":values,"schema":schema,
+        "read_ms":start.elapsed().as_secs_f64()*1000.,"scope":"independent read-only UI backend bracket; no frontend qualification or input authorization"}))
+}
 pub(crate) fn fields<M: Memory>(
     r: &mut Reflection<M>,
     checks: &mut Checks,

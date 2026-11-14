@@ -747,8 +747,22 @@ impl MotionPlan {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
+        // UILock inherits Base's lack of a package backlink. This is only
+        // diagnostic identity, never a production aim/behavior admission.
+        let ui_lock=mc.name=="IndicatorMotionUILock"&&pc.name=="IndicatorPackageEasy";
+        let mut ui_lock_configs=serde_json::Map::new();
+        if ui_lock {
+            // Unlike a positional plan, these inherited configuration links
+            // are mutable while idle. Report them without claiming they
+            // constitute one usable geometry/feedback contract.
+            for (name,object) in [("comp",comp),("motion",motion),("package",package)] {
+                let at=typed_field(r,object,"m_Config",17)?;
+                let linked=u64_at(&capture(r,&mut checks,at,8)?,0);
+                ui_lock_configs.insert(name.into(),serde_json::json!(format!("{linked:#x}")));
+            }
+        }
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
-            if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
+            if (base_tap||shadow_direction||ui_lock)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
                     Err(error)if error=="Missing reflected field m_OwnPackage"=>continue,
                     Err(error)=>return Err(error),
@@ -779,7 +793,8 @@ impl MotionPlan {
             }
         }
         check(r,&checks)?;
-        Ok(serde_json::json!({"skill":skill,"motion":mc.name,"package":pc.name,"schema":schema}))
+        Ok(serde_json::json!({"skill":skill,"motion":mc.name,"package":pc.name,"schema":schema,
+            "ui_lock_configuration_links":ui_lock_configs,"scope":"read-only registry identity; no production authorization"}))
     }
     /// Separate audit bracket: values of known shared indicator fields only.
     /// These observations never authorize an unverified production template.
@@ -2488,6 +2503,36 @@ mod tests {
         for (at,bytes) in [(1552,2048u64.to_le_bytes().to_vec()),(2064,1536u64.to_le_bytes().to_vec()),(2576,20020i32.to_le_bytes().to_vec())] {
             let mut r=purify_fixture();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
             assert!(MotionPlan::discover_behavior(&mut r,128,20080).is_err());
+        }
+    }
+    #[test]
+    fn uilock_identity_audit_checks_owners_without_authorizing_a_motion() {
+        fn fixture()->Reflection<MutableMemory> {
+            let r=self_tap_registry_fixture(false);
+            {
+                let mut b=r.memory.0.borrow_mut();
+                for (class,at,name) in [(10752usize,64000usize,"IndicatorMotionUILock"),(11264,64200,"IndicatorPackageEasy")] {
+                    b[at..at+name.len()].copy_from_slice(name.as_bytes());b[at+name.len()]=0;
+                    b[class+16..class+24].copy_from_slice(&(at as u64).to_le_bytes());
+                }
+            }
+            r
+        }
+        let mut r=fixture();
+        let identity=MotionPlan::audit_registry_identity(&mut r,128,4030).unwrap();
+        assert_eq!(identity["motion"],"IndicatorMotionUILock");
+        assert!(MotionPlan::discover(&mut r,128,4030).is_err());
+        assert!(MotionPlan::discover_behavior(&mut r,128,4030).is_err());
+        assert!(MotionPlan::audit_registry_values(&mut r,128,4030).is_err(),"unknown values remain explicitly unsupported");
+        for at in [1568,2072] {
+            let mut r=fixture();r.memory.0.borrow_mut()[at..at+8].copy_from_slice(&0u64.to_le_bytes());
+            let identity=MotionPlan::audit_registry_identity(&mut r,128,4030).unwrap();
+            assert_eq!(identity["ui_lock_configuration_links"][if at==1568{"motion"}else{"package"}],"0x0");
+            assert!(MotionPlan::discover_behavior(&mut r,128,4030).is_err());
+        }
+        for (at,bytes) in [(1552,2048u64.to_le_bytes().to_vec()),(2064,1536u64.to_le_bytes().to_vec()),(2576,6430i32.to_le_bytes().to_vec())] {
+            let mut r=fixture();r.memory.0.borrow_mut()[at..at+bytes.len()].copy_from_slice(&bytes);
+            assert!(MotionPlan::audit_registry_identity(&mut r,128,4030).is_err(),"changed owner/config at {at}");
         }
     }
     #[test]

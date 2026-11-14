@@ -1161,6 +1161,7 @@ impl<M: Memory> Source<M> {
                 values.insert("transition_button_class".into(),serde_json::json!(c.name));
             }
         }
+        values.insert("target_backend_audit".into(),serde_json::json!(crate::target_selection::audit_backend(r,object)));
         check(r,&checks)?;check(r,&plan.ui.checks)?;Ok(serde_json::json!(values))
     }
     /// Read-only local visual anchors, independently bracketed for diagnostics.

@@ -130,6 +130,7 @@ fn main()->Result<(),String> {
             // This read remains available when only motion values are unsupported.
             // It validates the original match links before reading any counters.
             let cast_receipt=local_cast_receipt(&mut source.reflection,owners,indicator,hero);
+            let ui_audit=source.audit_ui_input();
             if cast_receipt.is_ok(){cast_receipt_ok+=1;}
             match result {
                 Ok(frame)=>{
@@ -142,6 +143,8 @@ fn main()->Result<(),String> {
                         "valid_drag":frame.frame.logical.valid_drag.get(),"first_drag":frame.frame.logical.first_drag.get(),
                         "native_source":frame.frame.logical.source.as_str(),"aim_world":frame.aim,"types":frame.control_types,
                         "control_holds":frame.control_holds,"cast_receipt":cast_receipt,
+                        "selection_input":frame.frame.selection_input.encode(),
+                        "ui_audit":ui_audit,
                         // Observe short recast/form windows after physical UP
                         // from this same coherent sample, without extra reads
                         // or a change to gameplay/controller behavior.
