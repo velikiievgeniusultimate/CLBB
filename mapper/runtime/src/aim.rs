@@ -138,6 +138,12 @@ fn hylos_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,
     skill==4910 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
         && rect==0 && base==1 && params==[3.,0.,30006.,0.5]
 }
+// Hanabi Q is a self shield: native application produces the shield and
+// increments FirstSkillUseCount. Its RectType1 does not authorize other skills.
+fn hanabi_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,params:&[f64])->bool {
+    skill==6010 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
+        && rect==1 && base==1 && params==[3.,0.,30006.,0.5]
+}
 fn movement_driven_template(motion:&str,package:&str,rect:i32,params:&[f64])->bool {
     motion=="IndicatorMotionRot" && package=="IndicatorPackageEasy_JianTou_DrivenByJoystick"
         && rect==11 && params.len()>=2 && params[0]==27.
@@ -492,7 +498,18 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
             hylos_self_tap_template(skill,motion_name,package_name,rect,base,&full)
         }
     } else {false};
-    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina && !hilda && !hylos {
+    let hanabi=if skill==6010 {
+        let array=owner(r,config,"m_ShowRectPara",checks)?;
+        let header=capture(r,checks,array,32)?;
+        if u64_at(&header,24)!=4 {false} else {
+            let at=typed_field(r,config,"m_BaseType",8)?;
+            let base=i32_at(&capture(r,checks,at,4)?,0);
+            let raw=capture(r,checks,array+32,16)?;
+            let full=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+            hanabi_self_tap_template(skill,motion_name,package_name,rect,base,&full)
+        }
+    } else {false};
+    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina && !hilda && !hylos && !hanabi {
         return Err("Unverified nonzero base-tap configuration".into());
     }
     for object in [motion,package] {
@@ -1837,6 +1854,27 @@ mod tests {
         assert!(!zero_extent_base_tap_template(m,p,0,&[3.,0.]));
     }
     #[test]
+    fn hanabi_shield_is_not_general_rect_one_tap_or_other_heroes() {
+        let m="IndicatorMotionBase";let p="IndicatorPackageEasy_Yuan";
+        let params=[3.,0.,30006.,0.5];
+        assert!(hanabi_self_tap_template(6010,m,p,1,1,&params));
+        for skill in [810,3510,4910,6000,6009,6020,6030,6011] {
+            assert!(!hanabi_self_tap_template(skill,m,p,1,1,&params));
+        }
+        for rect in [-1,0,11] {assert!(!hanabi_self_tap_template(6010,m,p,rect,1,&params));}
+        for base in [0,11,384] {assert!(!hanabi_self_tap_template(6010,m,p,1,base,&params));}
+        for i in 0..params.len() {
+            for value in [params[i]+1.,f64::NAN,f64::INFINITY] {
+                let mut changed=params;changed[i]=value;
+                assert!(!hanabi_self_tap_template(6010,m,p,1,1,&changed));
+            }
+        }
+        assert!(!hanabi_self_tap_template(6010,m,p,1,1,&params[..2]));
+        assert!(!hanabi_self_tap_template(6010,"IndicatorMotionPos",p,1,1,&params));
+        assert!(!hanabi_self_tap_template(6010,m,"IndicatorPackageEasy",1,1,&params));
+        assert!(!zero_extent_base_tap_template(m,p,1,&params));
+    }
+    #[test]
     fn hylos_buff_is_not_general_rect_zero_aim_or_other_heroes() {
         let m="IndicatorMotionBase";let p="IndicatorPackageEasy_Yuan";
         let params=[3.,0.,30006.,0.5];
@@ -1997,6 +2035,44 @@ mod tests {
         put64(&mut bytes,1536,5632);put64(&mut bytes,1560,4);
         for(at,v)in [(1568,3f32),(1572,0.),(1576,30006.),(1580,0.5)]{bytes[at..at+4].copy_from_slice(&v.to_le_bytes());}
         Reflection::new(MutableMemory(RefCell::new(bytes))).unwrap()
+    }
+    #[test]
+    fn hanabi_shield_contract_rechecks_config_links_types_and_trailing_parameters() {
+        fn fixture()->Reflection<MutableMemory> {
+            let r=base_tap_fixture();
+            {
+                let mut bytes=r.memory.0.borrow_mut();
+                bytes[1056..1060].copy_from_slice(&6010i32.to_le_bytes());
+                bytes[1060..1064].copy_from_slice(&1i32.to_le_bytes());
+                bytes[1072..1076].copy_from_slice(&1i32.to_le_bytes());
+            }
+            r
+        }
+        let mut r=fixture();let mut reads=Vec::new();
+        assert!(zero_extent_base_tap_contract(&mut r,128,256,384,6010,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",&mut reads).unwrap());
+        assert!(check(&r,&reads).is_ok());
+        r.memory.0.borrow_mut()[1576..1580].copy_from_slice(&30007f32.to_le_bytes());
+        assert!(check(&r,&reads).is_err());
+        for (address,bytes)in [
+            (416,1280u64.to_le_bytes().to_vec()),
+            (424,256u64.to_le_bytes().to_vec()),
+            (296,384u64.to_le_bytes().to_vec()),
+            (1056,4910i32.to_le_bytes().to_vec()),
+            (1060,0i32.to_le_bytes().to_vec()),
+            (1072,11i32.to_le_bytes().to_vec()),
+            (1560,2u64.to_le_bytes().to_vec()),
+            (1572,1f32.to_le_bytes().to_vec()),
+            (1576,30007f32.to_le_bytes().to_vec()),
+            (1580,0.6f32.to_le_bytes().to_vec()),
+        ] {
+            let mut r=fixture();r.memory.0.borrow_mut()[address..address+bytes.len()].copy_from_slice(&bytes);
+            assert!(zero_extent_base_tap_contract(&mut r,128,256,384,6010,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",&mut Vec::new()).is_err());
+        }
+        let mut r=fixture();
+        let table=u64_at(&r.memory.0.borrow()[4096+0x78..4096+0x80],0)as usize;
+        let ty=u64_at(&r.memory.0.borrow()[table+96+8..table+96+16],0)as usize;
+        r.memory.0.borrow_mut()[ty+8..ty+12].copy_from_slice(&(12u32<<16).to_le_bytes());
+        assert!(zero_extent_base_tap_contract(&mut r,128,256,384,6010,"IndicatorMotionBase","IndicatorPackageEasy_Yuan",&mut Vec::new()).is_err());
     }
     #[test]
     fn base_tap_contract_verifies_all_config_owners_type_skill_and_lifetime() {
