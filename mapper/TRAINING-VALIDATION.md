@@ -28,6 +28,12 @@ sudo -n python3 tools/read-training-descriptions.py --hero HERO_ID --frozen-mani
 и проверяет, что закрыты и описания, и GM. Сохранён `panel-closed.png`.
 Переключатель формы внутри описаний **не превращает героя в игре**.
 Отменённые или перехваченные панелью нажатия не являются тестом навыка.
+После реального превращения сверяйте все активные варианты кнопок, даже если
+описание не упоминает повторного нажатия. У Фарсы в полёте обнаружена отдельная
+обычная кнопка выхода 5256 вместо 5250. У неё отсутствует запись индикатора;
+преждевременное завершение полёта подтверждено штатным нажатием до добавления
+точного правила распознавания. Отсутствие записи само по себе не разрешает
+считать произвольную новую кнопку обычным нажатием.
 
 ## Текущие цели и призванные существа
 
@@ -148,6 +154,11 @@ Exercise form changes within one held input, such as Helcurt's accumulating
 knives. Touch/direction must survive and cancellation must retain the resource.
 For an isolated cancellation measurement, establish the previous cast's actual
 application before attributing a later effect to the next input.
+Inspect all actual button variants after a transformation even when the text
+omits repetition. Pharsa's flight exposes an ordinary exit form 5256 without
+an indicator registry entry; an early native UI exit established its semantics
+before the exact owned-form rule was added. Missing registry data alone never
+authorizes an arbitrary new form as a Tap.
 
 ## Отказы диагностического аудита
 
