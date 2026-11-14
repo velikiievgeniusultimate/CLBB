@@ -35,6 +35,28 @@ sudo -n python3 tools/read-training-descriptions.py --hero HERO_ID --frozen-mani
 точного правила распознавания. Отсутствие записи само по себе не разрешает
 считать произвольную новую кнопку обычным нажатием.
 
+## Условные действия: отдельные доказательства
+
+- Разделяйте удерживаемое прицеливание, выполнение навыка и кнопку остановки.
+  У Лесли это разные состояния: отмена подготовки может увеличить локальный
+  счётчик применения, не выпустив ни одной пули. Проверяйте урон и фазу кнопки.
+- Проверяйте каждый явно указанный класс цели. Для броска Кусаки нужны и враг,
+  и союзник: отмена сохраняет положение, применение переносит цель, а союзнику
+  не наносится урон. Создавайте дополнительную цель один раз с записью её GUID.
+- Сбросы перезарядки от убийства проверяйте с отключённым тренировочным
+  «без перезарядки». Сначала подтвердите смерть именно выбранной цели, затем
+  доступность повтора, отмену, применение и возвращение обычной перезарядки.
+  Восстанавливайте исходную настройку в `finally`, включая неуспешные тесты.
+- Возврат зарядов при попадании требует контрольного промаха. Выбирайте пустое
+  направление по свежим позициям всех противников; фиксированный вектор может
+  задеть перемещённую цель. Подтвердите расход, реальные попадания и повторное
+  применение раньше естественного восстановления. Неизменный счётчик сам по
+  себе не доказывает возврат заряда.
+
+Для готовности управления нужны доказательства условных кнопок и переходов.
+Точное численное соответствие всех формул урона/щита/пассивки — отдельная
+проверка: отмечайте её пределы, не подменяйте ею проверку управления.
+
 ## Текущие цели и призванные существа
 
 ```sh
@@ -175,3 +197,12 @@ validate actual entity type and rendered scene before choosing a target. Local
 raw observables are not certified cumulative counters. The contract auditor may
 retry a positively identified UI-only cached guard change, but must retain the
 same typed match owners and input epoch; production guards remain unchanged.
+
+Conditional controls need separate causal trials: distinguish held selection,
+execution and stop phases; exercise explicitly supported enemy and allied
+classes. Test kill resets with training no-cooldown disabled, confirm the actual
+victim death, repeat cancellation/application and ordinary cooldown restoration.
+Restore the original fixture in finally. For hit refunds, first establish a
+clear-angle miss using fresh enemy positions, then actual hits and renewed casts
+before natural recharge. A stable count alone is not refund evidence. Exact
+numeric effect formulas remain a separately documented limit.
