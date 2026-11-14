@@ -331,6 +331,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Hanekage returns to the separately observed body through an ordinary
         // repeat; initial6930 remains a directional entry and has its own lock.
         || (hero==69 && slot=="skill:2" && base==6930 && active==69300)
+        // Native ordinary scythe recall; readiness remains game-owned.
+        || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Lesley's firing channel exposes a native ordinary stop button.
         // The charge/target-selection phase5331 keeps its base range plan.
         || (hero==53 && slot=="skill:2" && base==5330 && active==5396)
@@ -2514,6 +2516,16 @@ mod tests {
         ] { assert!(!verified_button_only_form(67,slot,base,active)); }
         for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
             assert!(!verified_button_only_form(hero,"skill:0",6710,6711));
+        }
+    }
+    #[test]
+    fn thamuz_scythe_recall_does_not_change_throw_or_other_heroes() {
+        assert!(verified_button_only_form(72,"skill:0",7210,7260));
+        for (slot,base,active) in [("skill:0",7210,7210),("skill:1",7210,7260),("attack",7210,7260),("skill:0",7260,7260),("skill:0",7210,7224)] {
+            assert!(!verified_button_only_form(72,slot,base,active));
+        }
+        for hero in [9,13,21,22,25,26,31,40,43,47,55,56,71,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
+            assert!(!verified_button_only_form(hero,"skill:0",7210,7260));
         }
     }
     #[test]
