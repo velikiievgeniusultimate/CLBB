@@ -337,6 +337,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // registry entry. Both are native ordinary recasts on their own slots.
         || (hero==75 && ((slot=="skill:0" && base==7510 && active==7514)
             || (slot=="skill:1" && base==7520 && active==7522)))
+        // Faramis can end shadow early and pull contacted enemies through
+        // the same native slot;207613 has no indicator registry entry.
+        || (hero==76 && slot=="skill:0" && base==7610 && active==207613)
         // Lesley's firing channel exposes a native ordinary stop button.
         // The charge/target-selection phase5331 keeps its base range plan.
         || (hero==53 && slot=="skill:2" && base==5330 && active==5396)
@@ -394,6 +397,15 @@ fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
 
 #[cfg(test)]
 mod control_kind_tests {
+    #[test]
+    fn faramis_shadow_recast_is_only_its_observed_native_button() {
+        use super::verified_button_only_form;
+        assert!(verified_button_only_form(76,"skill:0",7610,207613));
+        for hero in [9,26,55,56,71,75,77,125] {assert!(!verified_button_only_form(hero,"skill:0",7610,207613));}
+        for (slot,base,active) in [("skill:1",7610,207613),("skill:0",7610,7610),("skill:0",7610,7613),("skill:0",207613,207613),("skill:1",7620,7625),("skill:2",7630,7637)] {
+            assert!(!verified_button_only_form(76,slot,base,active));
+        }
+    }
     #[test]
     fn kadita_wave_taps_are_exact_and_do_not_change_other_heroes() {
         use super::verified_button_only_form;
