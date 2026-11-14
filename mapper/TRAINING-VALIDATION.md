@@ -8,6 +8,29 @@
 Окончательную отметку пользователь ставит сам. Запрещённые к изменению герои
 передаются инструментам через явный frozen-manifest.
 
+## Обязательная карта условий для каждого навыка
+
+До испытаний выпишите из полного описания навыка и пассивки: допустимую цель
+(враг, союзник, сам герой, существо или поверхность), условие появления повтора,
+нужные попадания/стаки/форму, способ выбора цели и ожидаемый результат.
+Неизвестное условие остаётся непроверенным; начальный каст его не закрывает.
+Для каждого условного действия сохраняйте отдельно:
+
+1. Исходное состояние и отсутствие условия: дополнительная кнопка недоступна
+   либо попытка применения не даёт заявленного результата.
+2. Достижение условия штатными игровыми действиями: GUID и класс цели,
+   попадание/урон либо изменение нужного состояния, свежая форма кнопки.
+3. Применение появившегося действия, отпускание и отмену, если игра её допускает.
+4. Исчезновение условия и возможность следующего нормального применения без
+   оставшихся виртуальных контактов и блокировки других кнопок.
+
+Описание задаёт сценарий, но не доказывает реализацию кнопки. И наоборот,
+наблюдаемый новый ID не доказывает её смысл. Если условие кратковременно,
+подключайте наблюдатель до его создания. Если оно требует союзника, попадание
+по врагу не заменяет проверку союзной цели. Не объявляйте героя готовым по
+количеству распознанных основных навыков. В статусе отдельно перечисляйте
+проверенные условия и оставшиеся вопросы.
+
 ## Описания из интерфейса
 
 Откройте панель описаний стрелкой справа и включите «Полный». Для наблюдаемых
@@ -153,6 +176,14 @@ Read the installed game's expanded skill/passive descriptions first. Derive
 and reproduce target, hit, stack, form and recast conditions before calling a
 hero ready for user review. Successful scripts or inferred templates alone are
 insufficient. User confirmation remains separate.
+
+For each conditional action, record its prerequisite, target class/GUID and
+expected effect. Test absence of the prerequisite, create it through real game
+actions, exercise the resulting control (apply/release/cancel when supported),
+and verify recovery after the condition expires. An enemy-target trial cannot
+substitute for an ally-target trial. A new variant ID alone is not proof of a
+new control or channel completion. Keep unresolved conditions explicit in the
+hero's status; basic casts do not cover them.
 
 `read-training-descriptions.py` reads localized UI labels with screenshots and
 checks panel closure; it supports the observed three- and four-skill panels.
