@@ -220,6 +220,37 @@ fn native_range_shape(motion:&str,package:&str)->Option<f64> {
         _=>None,
     }
 }
+fn lesley_selector_family(skill:i32,motion:&str,package:&str)->bool {
+    skill==5330 && motion=="IndicatorMotionPosSelectAndRot"
+        && package=="IndicatorPackage_JianTou_Yuan_SameLengthWithRange"
+}
+// The effective radius changes with the owned level configuration (10 and
+// 15 observed). The arrow resource number is cosmetic; neither authorizes a
+// different motion, skill, common-attack mode or charge/cancel layout.
+fn lesley_selector_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,common:bool,p:&[f64])->bool {
+    lesley_selector_family(skill,motion,package) && rect==0 && base==384 && !common && p.len()==23
+        && p[0]==14. && p[1].is_finite() && p[1]>0. && p[1]<=100.
+        && p[2].is_finite() && p[2]>0. && p[2]<=10_000_000. && p[2].fract()==0. && p[3]==p[1]
+        && p[4..]==[0.3f32 as f64,5380.,1.,0.,0.,0.,1.,0.9f32 as f64,0.,0.,0.,0.,0.,0.,0.,0.,0.7f32 as f64,0.,1.]
+}
+fn lesley_selector_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,skill:i32,motion_name:&str,package_name:&str,checks:&mut Checks)->Result<bool> {
+    if !lesley_selector_family(skill,motion_name,package_name){return Ok(false);}
+    let(rect,_)=native_rect_config(r,comp,skill,checks)?;
+    let config=owner(r,comp,"m_Config",checks)?;
+    let base_at=typed_field(r,config,"m_BaseType",8)?;
+    let base=i32_at(&capture(r,checks,base_at,4)?,0);
+    let array=owner(r,config,"m_ShowRectPara",checks)?;
+    let header=capture(r,checks,array,32)?;
+    if u64_at(&header,24)!=23{return Err("Lesley selector array layout changed".into());}
+    let raw=capture(r,checks,array+32,23*4)?;
+    let params=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
+    let at=typed_field(r,motion,"bCommonAtk",2)?;
+    let common=capture(r,checks,at,1)?[0];
+    if common>1 || !lesley_selector_template(skill,motion_name,package_name,rect,base,common!=0,&params) {
+        return Err("Unverified Lesley selector configuration".into());
+    }
+    Ok(true)
+}
 fn verified_direction_geometry(skill:i32,motion:&str,package:&str,configured_direction:bool)->bool {
     native_template(motion,package)==Some(2)||configured_direction
         ||(skill==8430&&motion=="IndicatorMotionRot"&&package=="IndicatorPackageEasy")
@@ -240,6 +271,7 @@ fn valid_native_range(shape:f64,values:[f64;2])->bool {
 fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
     motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<(u64,f64)>> {
     let shape=if gord_bounce_range_family(skill,motion_name,package_name){22.}
+        else if lesley_selector_contract(r,comp,motion,skill,motion_name,package_name,checks)?{14.}
         else if let Some(shape)=native_range_shape(motion_name,package_name){shape}else{return Ok(None)};
     if shape==22. {
         let begin=checks.len();
@@ -741,7 +773,10 @@ impl MotionPlan {
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         // Read-only Grock discovery, not a production direction admission.
         let block_audit=skill==4430 && mc.name=="IndicatorMotion_Block" && pc.name=="IndicatorPackage_JianTou_PosYuan";
-        if !base_tap&&!shadow_direction&&!block_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        // Read-only discovery of Lesley's target selector. This does not
+        // admit the class as a production aim plan or infer Tap/Range/Direction.
+        let lesley_audit=skill==5330 && mc.name=="IndicatorMotionPosSelectAndRot" && pc.name=="IndicatorPackage_JianTou_Yuan_SameLengthWithRange";
+        if !base_tap&&!shadow_direction&&!block_audit&&!lesley_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
             if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
@@ -754,7 +789,7 @@ impl MotionPlan {
         }
         let mut values=serde_json::Map::new();
         for name in ["m_vDragResult","m_vDragTouchPos","m_vDragDir","m_vActiveDir"] {
-            let at=if base_tap||block_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
+            let at=if base_tap||block_audit||lesley_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
             if at<motion || at+12>motion+4096 {return Err("Audit vector outside motion".into());}
             let raw=capture(r,&mut checks,at,12)?;
             values.insert(name.into(),serde_json::json!(source::vec3(&raw)?));
@@ -764,6 +799,16 @@ impl MotionPlan {
                 let raw=capture(r,&mut checks,at,12)?;
                 values.insert(name.into(),serde_json::json!(source::vec3(&raw)?));
             }
+        }
+        if lesley_audit {
+            for name in ["bCommonAtk","m_UseTargetLockGuid"] {
+                let at=typed_field(r,motion,name,2)?;let raw=capture(r,&mut checks,at,1)?;
+                if raw[0]>1{return Err("Invalid selector diagnostic boolean".into());}
+                values.insert(name.into(),serde_json::json!(raw[0]!=0));
+            }
+            let at=typed_field(r,motion,"m_targetGuid",9)?;
+            let raw=capture(r,&mut checks,at,4)?;
+            values.insert("m_targetGuid".into(),serde_json::json!(u32::from_le_bytes(raw.try_into().unwrap())));
         }
         for name in ["m_fDragRatio","m_dragged","m_bVaildDraged"] {
             let at=if base_tap||block_audit{typed_field(r,motion,name,if name=="m_fDragRatio"{12}else{2})?}else{r.field(motion,name)?};
@@ -894,7 +939,10 @@ impl MotionPlan {
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let healing=heal_self_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
-        let kind=if healing {1} else if gord_bounce_range_family(skill,&mc.name,&pc.name) {
+        let kind=if healing {1} else if lesley_selector_family(skill,&mc.name,&pc.name) {
+            native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Lesley selector range contract")?;
+            3
+        } else if gord_bounce_range_family(skill,&mc.name,&pc.name) {
             native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Gord range contract")?;
             3
         } else if let Some(kind)=native_template(&mc.name,&pc.name) {
@@ -985,7 +1033,7 @@ impl MotionPlan {
             20150 => Some(("IndicatorMotionRot", "IndicatorPackageEasy_ShanXing_Normal")),
             20020 => Some(("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal")),
             8430 => Some(("IndicatorMotionRot", "IndicatorPackageEasy")),
-            _ if attack_geometry || configured_direction || (gord_bounce_range_family(skill,&name,&package_class.name)&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
+            _ if attack_geometry || configured_direction || ((gord_bounce_range_family(skill,&name,&package_class.name)||lesley_selector_family(skill,&name,&package_class.name))&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
             _ => None,
         };
         if expected.is_none_or(|(motion, package)| name != motion || package_class.name != package)
@@ -1785,6 +1833,42 @@ mod tests {
         assert!(!hylos_self_tap_template(4910,"IndicatorMotionPos",p,0,1,&params));
         assert!(!hylos_self_tap_template(4910,m,"IndicatorPackageEasy",0,1,&params));
         assert!(!zero_extent_base_tap_template(m,p,0,&params));
+    }
+    #[test]
+    fn lesley_selector_requires_owned_skill_and_layout_while_radius_can_change() {
+        let fixtures:serde_json::Value=serde_json::from_str(include_str!("../tests/fixtures/lesley-53-selector-configurations.json")).unwrap();
+        for row in fixtures.as_array().unwrap() {
+            let m=row["motion"].as_str().unwrap();let package=row["package"].as_str().unwrap();
+            let p=row["params"].as_array().unwrap().iter().map(|v|v.as_f64().unwrap()).collect::<Vec<_>>();
+            assert!(lesley_selector_template(5330,m,package,0,384,false,&p));
+            for skill in [5331,5332,5300,28910] {assert!(!lesley_selector_template(skill,m,package,0,384,false,&p));}
+            assert!(!lesley_selector_template(5330,m,package,1,384,false,&p));
+            assert!(!lesley_selector_template(5330,m,package,0,1,false,&p));
+            assert!(!lesley_selector_template(5330,m,package,0,384,true,&p));
+            assert!(!lesley_selector_template(5330,"IndicatorMotionPosSelectAndRotATK",package,0,384,false,&p));
+            assert!(!lesley_selector_template(5330,m,"IndicatorPackageEasy_Yuan",0,384,false,&p));
+            assert!(!lesley_selector_template(5330,m,package,0,384,false,&p[..22]));
+            for i in (0..p.len()).filter(|i|![1,2,3].contains(i)) {
+                let mut changed=p.clone();changed[i]+=1.;
+                assert!(!lesley_selector_template(5330,m,package,0,384,false,&changed));
+            }
+            for invalid in [0.,-1.,101.,f64::NAN,f64::INFINITY] {
+                let mut changed=p.clone();changed[1]=invalid;changed[3]=invalid;
+                assert!(!lesley_selector_template(5330,m,package,0,384,false,&changed));
+            }
+            let mut changed=p.clone();changed[3]+=1.;
+            assert!(!lesley_selector_template(5330,m,package,0,384,false,&changed));
+            for invalid in [0.,1.5,f64::NAN,f64::INFINITY] {
+                let mut changed=p.clone();changed[2]=invalid;
+                assert!(!lesley_selector_template(5330,m,package,0,384,false,&changed));
+            }
+            // Synthetic intermediate radius tests schema adaptation, not an
+            // assertion that this exact level configuration was observed.
+            let mut changed=p.clone();changed[1]=12.5;changed[3]=12.5;
+            assert!(lesley_selector_template(5330,m,package,0,384,false,&changed));
+            assert_eq!(native_range_shape(m,package),None);
+            assert_eq!(native_template(m,package),None);
+        }
     }
     #[test]
     fn helcurt_knife_fan_requires_each_observed_form_and_complete_configuration() {
