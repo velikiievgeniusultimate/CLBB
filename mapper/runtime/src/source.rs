@@ -319,6 +319,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Pharsa's flight exposes an ordinary manual exit button. Native UI
         // repetition ends flight early; this form has no indicator registry.
         || (hero==52 && slot=="skill:3" && base==5250 && active==5256)
+        // Lesley's firing channel exposes a native ordinary stop button.
+        // The charge/target-selection phase5331 keeps its base range plan.
+        || (hero==53 && slot=="skill:2" && base==5330 && active==5396)
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -2389,6 +2392,15 @@ mod tests {
             (52,"skill:3",5250,5250),(52,"skill:2",5250,5256),
             (52,"skill:3",5230,5256),(51,"skill:3",5250,5256),
             (52,"skill:3",5250,5257),(52,"extra:3",5250,5256),
+        ] {assert!(!verified_button_only_form(hero,slot,base,active));}
+    }
+    #[test]
+    fn lesley_channel_stop_is_not_her_targeting_or_charge_phase() {
+        assert!(verified_button_only_form(53,"skill:2",5330,5396));
+        for (hero,slot,base,active) in [
+            (53,"skill:2",5330,5330),(53,"skill:2",5330,5331),
+            (53,"skill:2",5330,5380),(53,"skill:1",5330,5396),
+            (53,"skill:2",5310,5396),(52,"skill:2",5330,5396),
         ] {assert!(!verified_button_only_form(hero,slot,base,active));}
     }
     #[test]
