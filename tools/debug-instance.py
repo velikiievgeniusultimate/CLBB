@@ -109,7 +109,7 @@ def start(name):
  with (state/'logs/supervisor.log').open('ab')as log:
   child=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
  write(state/'logs/supervisor.json',{'pid':child.pid,'started_ns':time.monotonic_ns(),'background_focus':True})
- return {'profile':name,'state':str(state),'supervisor_pid':child.pid,'account':'private profile; sign in once to the additional account'}
+ return {'profile':name,'state':str(state),'supervisor_pid':child.pid,'account':'private persistent profile; primary login is never imported'}
 
 def window(name,show):
  import ctypes as C,ctypes.util
@@ -157,24 +157,26 @@ def status(name):
    except ValueError:out[key]=raw
  return out
 
-def stop(name):
+def stop(name,keep_resources=False):
  state=profile(name)
  if live(state):control(state,'close')
  # Do not unmount until the exact owned secondary process has actually exited.
  end=time.monotonic()+3
  while live(state) and time.monotonic()<end:time.sleep(.05)
  if live(state):raise ValueError('Secondary still live; keeping its resource mounts')
- for relative in reversed(list(RESOURCES.values())):
+ for relative in ([] if keep_resources else reversed(list(RESOURCES.values()))):
   target=state/relative
   if subprocess.run(['mountpoint','-q',str(target)]).returncode==0:subprocess.run(['fusermount3','-u',str(target)],check=True)
  return {'profile':name,'stopped':True,'account_preserved':True}
 
 def main():
- parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('action',choices=['prepare','start','status','stop','show','hide','command']);parser.add_argument('profile');parser.add_argument('command',nargs='*');args=parser.parse_args()
+ parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('action',choices=['prepare','start','status','stop','restart','show','hide','command']);parser.add_argument('profile');parser.add_argument('command',nargs='*');args=parser.parse_args()
  if args.action=='prepare':result={'state':str(prepare(args.profile))}
  elif args.action=='start':result=start(args.profile)
  elif args.action=='status':result=status(args.profile)
  elif args.action=='stop':result=stop(args.profile)
+ elif args.action=='restart':
+  stop(args.profile,keep_resources=True);result=start(args.profile)
  elif args.action in ['show','hide']:result=window(args.profile,args.action=='show')
  else:result=control(profile(args.profile),' '.join(args.command))
  print(result if isinstance(result,str)else json.dumps(result,ensure_ascii=False))
