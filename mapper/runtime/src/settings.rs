@@ -354,7 +354,7 @@ impl Settings {
             "extra:0" => 66,
             "extra:1" => 68,
             "extra:2" => 70,
-            "extra:3" => 0x01000007,
+            "item:active" | "extra:3" => 0x01000007,
             "match:statistics" => 0x01000001,
             "shop:quick" => 90,
             "upgrade:0" => 49,
@@ -407,7 +407,7 @@ impl Settings {
         matches!(self.get(key, hero).as_str(), "true" | "1")
     }
     pub fn binding(&self, hero: i32, slot: &str) -> clbb_moba_core::controller::host::Binding {
-        let prefix = if slot == "match:statistics" { "common" } else { "hero" };
+        let prefix = if matches!(slot, "match:statistics" | "item:active") { "common" } else { "hero" };
         let key = |f| format!("{prefix}.bindings.{slot}.{f}");
         let code = self.integer(&key("key"), hero);
         let code = if valid_key(code) && !self.reserved(code, hero) {
@@ -625,6 +625,24 @@ fn native_skill_slot(slot: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn active_item_has_two_global_modes_and_personal_settings_never_split_it() {
+        let mut s = Settings::default();
+        assert_eq!(s.binding(25, "item:active").key, 0x01000007);
+        assert_eq!(s.binding(25, "item:active").cast_mode, 0);
+        for mode in [0, 1] {
+            s.set("common.bindings.item:active.cast_mode", &mode.to_string(), 25).unwrap();
+            s.set("common.bindings.item:active.key", "88", 25).unwrap();
+            s.set("hero.bindings.item:active.cast_mode", &(1-mode).to_string(), 25).unwrap();
+            s.set("hero.bindings.item:active.key", "90", 25).unwrap();
+            for hero in 1..=133 {
+                assert_eq!(s.binding(hero, "item:active").key, 88);
+                assert_eq!(s.binding(hero, "item:active").cast_mode, mode);
+                assert_eq!(s.binding(hero, "extra:3").key, 0x01000007);
+            }
+        }
+        assert!(s.set("common.bindings.item:active.cast_mode", "2", 25).is_err());
+    }
     #[test]
     fn statistics_binding_is_global_rebindable_and_does_not_inherit_hero_overrides() {
         let mut s = Settings::default();

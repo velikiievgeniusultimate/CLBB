@@ -574,6 +574,7 @@ static void add_inheritance(Control *c) {
   gtk_box_append(GTK_BOX(c->row), c->inherit_reset);
 }
 static int action_key(const char *slot) {
+  if (!strcmp(slot,"item:active")) return 0x01000007;
   if (g_str_has_prefix(slot,"skill:")) { int n=slot[6]-'0'; return n>=0&&n<4 ? "QWER"[n] : 0; }
   if (!strcmp(slot,"combo:0")) return 'E';
   if (!strcmp(slot,"combo:1")) return 'R';
@@ -612,6 +613,7 @@ static const char *battle_spell_name(int skill) {
 }
 static const char *action_title(const char *slot, int skill, const char *config) {
   (void)config;
+  if (!strcmp(slot,"item:active")) return "Предметы";
   if (!strcmp(slot,"skill:0")) return "Навык 1";
   if (!strcmp(slot,"skill:1")) return "Навык 2";
   if (!strcmp(slot,"skill:2")) return "Навык 3";
@@ -686,7 +688,7 @@ static void action_body(ClbbSettings *s,GtkWidget *content,const char *slot,cons
   gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow),12);
   gtk_box_append(GTK_BOX(content),flow);
   action_scope(s,flow,"common",config,mode_config,slot,type,cancel);
-  action_scope(s,flow,"hero",config,mode_config,slot,type,cancel);
+  if (strcmp(slot,"item:active")) action_scope(s,flow,"hero",config,mode_config,slot,type,cancel);
   if(((s->hero==126 && (!strcmp(slot,"skill:0")||!strcmp(slot,"skill:1")||!strcmp(slot,"skill:2"))) || (s->hero==78 && !strcmp(slot,"skill:0"))))
     gtk_box_append(GTK_BOX(content),wrap_label("Результат навыка зависит от длительности удержания. Применение — только при отпускании.","clbb-muted"));
 }

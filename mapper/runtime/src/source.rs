@@ -550,11 +550,20 @@ impl UiPlan {
             // inherit SkillButton without sharing its name prefix. Classify
             // by the validated metadata ancestry; explicit Ex subclasses
             // remain additional controls even when they inherit SkillButton.
-            let kind = if button == attack { "attack" }
+            let mut kind = if button == attack { "attack" }
                 else if skill_button_class(r, &class)? { "skill" } else { "extra" };
             let owner = link(r, button, "m_Self", &mut checks)?;
             let data = link(r, button, "m_SkillData", &mut checks)?;
             let skill = if data != 0 { r.field(data, "m_InitSkillID")? } else { 0 };
+            // Verified native active equipment button. Keep unrelated extra:3
+            // hero controls out of this global item binding.
+            if kind == "extra" && class.name == "KeySkillEquip" && index == 3 && skill != 0 {
+                let base = r.integer(skill)?;
+                if base == 25790 {
+                    checks.push((skill, base.to_le_bytes().to_vec()));
+                    kind = "item";
+                }
+            }
             let native_index=index;
             let mut index=index;
             if kind=="skill" && class.name=="KeySkillLockDeadHero" && skill!=0 {
@@ -566,7 +575,9 @@ impl UiPlan {
                     index=ordinal;
                 }
             }
-            let slot = if kind == "attack" {
+            let slot = if kind == "item" {
+                "item:active".into()
+            } else if kind == "attack" {
                 "attack".into()
             } else {
                 format!("{kind}:{index}")
@@ -840,7 +851,7 @@ impl UiPlan {
                 };
                 variants.count += 1;
             }
-            if button.kind == "skill" || button.kind == "extra" {
+            if button.kind == "skill" || button.kind == "extra" || button.kind == "item" {
                 let blocked = button
                     .timer
                     .and_then(|timer_link| pointer(r, consumed, timer_link).ok())
@@ -1577,6 +1588,11 @@ impl<M: Memory> Source<M> {
         for variant in skill_state.buttons.iter_mut().take(skill_state.count.min(32) as usize) {
             variant.charge_skill = control_holds.get(variant.slot.as_str())
                 .copied().map(flag).unwrap_or_default();
+        }
+        for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="item") {
+            if entry.slot.as_str()=="item:active" && entry.skill_id.int()==25790 {
+                control_types.insert(entry.slot.owned(),1);
+            }
         }
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill" || b.kind.as_str()=="extra") {
             let choice_family=plan.ui.buttons.iter().any(|b|b.slot==entry.slot.as_str()&&(b.choice_family||b.target_family));

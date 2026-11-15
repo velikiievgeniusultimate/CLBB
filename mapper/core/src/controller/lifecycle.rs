@@ -12,6 +12,7 @@ impl Controller {
     }
     pub(crate) fn tap_only(&self,b: &Button) -> bool {
         (b.kind == "match_ui" && b.slot == "match:statistics")
+            || (b.kind == "item" && b.slot == "item:active" && b.skillId == 25790)
             || (b.kind == "upgrade"
             && (0..4).contains(&b.index)
             && b.slot == format!("upgrade:{}", b.index))
@@ -253,7 +254,7 @@ impl Controller {
                 }
             }
         }
-        if (b.kind != "skill" && b.kind != "extra") || !self.cooldownSeen_ {
+        if (b.kind != "skill" && b.kind != "extra" && b.kind != "item") || !self.cooldownSeen_ {
             return "";
         }
         let s = &self.cooldownState_;

@@ -660,6 +660,16 @@ int main(int argc, char **argv) {
     g_assert_cmpuint(g_list_model_get_n_items(gtk_drop_down_get_model(GTK_DROP_DOWN(vengeance_mode))),==,2);
     g_print("CLBB_VENGEANCE_PLAIN_BUTTON_UI_OK separate two-mode spell\n");
 
+    put(&p,"hero.id","25");
+    put(&p,"preview.controls","1\t25\nitem:active\titem:active\titem:active\t25790\t25790\t1\n");
+    clbb_settings_refresh(s);
+    g_assert_nonnull(find_control(window,"common.bindings.item:active.key"));
+    g_assert_null(find_control(window,"hero.bindings.item:active.key"));
+    GtkWidget *item_mode=find_type(find_control(window,"common.bindings.item:active.cast_mode"),GTK_TYPE_DROP_DOWN);
+    g_assert_nonnull(item_mode);
+    g_assert_cmpuint(g_list_model_get_n_items(gtk_drop_down_get_model(GTK_DROP_DOWN(item_mode))),==,2);
+    g_hash_table_remove(p.values,"preview.controls");
+    g_print("CLBB_ITEM_SHARED_TWO_MODES_UI_OK\n");
     g_print("CLBB_SETTINGS_SELFTEST_OK key normalization, reserved LMB, hotkey "
             "conflicts, refresh, hero switch, overrides, stop movement, "
             "atomic display apply, preserved draft, atomic FPS VSync, "
