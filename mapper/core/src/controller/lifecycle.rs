@@ -11,7 +11,8 @@ impl Controller {
         self.intrinsic_direction_attack(old) && self.intrinsic_direction_attack(new)
     }
     pub(crate) fn tap_only(&self,b: &Button) -> bool {
-        (b.kind == "upgrade"
+        (b.kind == "match_ui" && b.slot == "match:statistics")
+            || (b.kind == "upgrade"
             && (0..4).contains(&b.index)
             && b.slot == format!("upgrade:{}", b.index))
             || (b.kind == "quick_buy" && b.slot == "shop:quick")

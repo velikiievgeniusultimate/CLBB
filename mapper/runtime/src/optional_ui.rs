@@ -60,6 +60,36 @@ fn list<M: Memory>(r: &Reflection<M>, checks: &mut Checks, object: u64) -> Resul
     Ok(raw.chunks_exact(8).map(|b| u64_at(b, 0)).collect())
 }
 
+fn button_widget<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks, object: u64) -> Result<u64> {
+    owner(r, checks, object)?;
+    if r.class_name(r.pointer(object)?)? != "GameObject" { return Err("Statistics button is not a GameObject".into()); }
+    let native = link(r, checks, object, "m_CachedPtr")?;
+    if u64_at(&capture(r, checks, native + 40, 8)?, 0) != object { return Err("Statistics button owner changed".into()); }
+    let table = u64_at(&capture(r, checks, native + 48, 8)?, 0);
+    let count = u64_at(&capture(r, checks, native + 64, 8)?, 0);
+    if !(1..=32).contains(&count) { return Err("Invalid button component count".into()); }
+    let entries = capture(r, checks, table, count as usize * 16)?;
+    let mut found = None;
+    for entry in entries.chunks_exact(16) {
+        let component = u64_at(entry, 8);
+        if component == 0 { continue; }
+        if u64_at(&capture(r, checks, component + 48, 8)?, 0) != native { return Err("Foreign button component".into()); }
+        let managed = u64_at(&capture(r, checks, component + 40, 8)?, 0);
+        if managed == 0 { continue; }
+        let mut class = r.class(r.pointer(managed)?)?;
+        let mut button = false;
+        for _ in 0..16 {
+            if class.name == "UIButton" { button = true; break; }
+            if class.parent == 0 { break; }
+            class = r.class(class.parent)?;
+        }
+        if !button { continue; }
+        if link(r, checks, managed, "m_CachedPtr")? != component || found.is_some() { return Err("Ambiguous button owner".into()); }
+        found = Some(link(r, checks, managed, "mWidget")?);
+    }
+    found.filter(|v| *v != 0).ok_or("Statistics button widget absent".into())
+}
+
 #[derive(Clone)]
 struct Control {
     slot: String,
@@ -241,6 +271,7 @@ pub struct OptionalUi {
     upgrades: Family,
     shop: Family,
     attacks: Family,
+    statistics: Family,
 }
 impl OptionalUi {
     pub(crate) fn upgrade_inventory_verified<M:Memory>(&self,r:&Reflection<M>)->bool {
@@ -291,10 +322,12 @@ impl OptionalUi {
             upgrades: Family::default(),
             shop: Family::default(),
             attacks: Family::default(),
+            statistics: Family::default(),
         };
         result.upgrades = result.build_upgrades(r);
         result.shop = result.build_shop(r);
         result.attacks = result.build_attacks(r);
+        result.statistics = result.build_statistics(r);
         Ok(result)
     }
 
@@ -323,6 +356,7 @@ impl OptionalUi {
         if frames != self.frames {
             self.frames = frames;
             self.shop.retry = true;
+            self.statistics.retry = true;
         }
         if !self.upgrades.valid(r) {
             self.upgrades = self.build_upgrades(r);
@@ -334,8 +368,9 @@ impl OptionalUi {
             self.attacks = self.build_attacks(r);
         }
 
+        if !self.statistics.valid(r) { self.statistics = self.build_statistics(r); }
         let mut discovered = Vec::new();
-        for family in [&mut self.upgrades, &mut self.shop, &mut self.attacks] {
+        for family in [&mut self.upgrades, &mut self.shop, &mut self.attacks, &mut self.statistics] {
             let mut candidates: HashMap<String, Vec<s::Button>> = HashMap::new();
             if !current(r, &family.checks) {
                 family.retry = true;
@@ -392,6 +427,41 @@ impl OptionalUi {
             append_capability(ui, "upgrade:3", "upgrade", 3);
         }
         Ok(())
+    }
+
+    fn build_statistics<M: Memory>(&self, r: &mut Reflection<M>) -> Family {
+        let mut family = Family::default();
+        let result = (|| -> Result<()> {
+            let mut record = None;
+            let mut hud = None;
+            for frame in self.frames.iter().copied().filter(|v| *v != 0) {
+                let class = r.class_name(r.pointer(frame)?)?;
+                let target = match class {
+                    "UIHeroRecord" => &mut record,
+                    "UIBattleInfo" => &mut hud,
+                    _ => continue,
+                };
+                owner(r, &mut family.checks, frame)?;
+                if target.replace(frame).is_some() { return Err("Ambiguous statistics frame".into()); }
+            }
+            let (frame, close) = if let Some(frame) = record { (frame, true) }
+                else if let Some(frame) = hud { (frame, false) } else { return Ok(()); };
+            let info = link(r, &mut family.checks, frame, "m_UIFrameInfo")?;
+            owner(r, &mut family.checks, info)?;
+            let (target, sprite) = if close {
+                let target = link(r, &mut family.checks, info, "m_button_Back")?;
+                (target, button_widget(r, &mut family.checks, target)?)
+            } else {
+                (link(r, &mut family.checks, info, "m_Score")?,
+                 link(r, &mut family.checks, info, "m_label_Time")?)
+            };
+            family.controls.push(Control::new(r, &mut family.checks,
+                "match:statistics".into(), "match_ui", close as i32, target, sprite)?);
+            Ok(())
+        })();
+        family.retry = result.is_err() || !current(r, &family.checks);
+        if family.retry { family.controls.clear(); }
+        family
     }
 
     fn build_upgrades<M: Memory>(&self, r: &mut Reflection<M>) -> Family {

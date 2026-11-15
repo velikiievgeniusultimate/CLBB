@@ -91,7 +91,7 @@ fn button_widget(r: &mut Reflection<ProcessMemory>, object:u64)->Option<Value> {
 }
 fn interesting(name:&str)->bool {
     let name=name.to_ascii_lowercase();
-    ["hero","item","label","text","button","info","sprite","scroll","grid","cell","choose","select","title","name","content","train","list","tog","ok","confirm","model"].iter().any(|part|name.contains(part))
+    ["data","score","hero","item","label","text","button","info","sprite","scroll","grid","cell","choose","select","title","name","content","train","list","tog","ok","confirm","model"].iter().any(|part|name.contains(part))
 }
 fn birth(pid:u32)->Result<String> {
     let stat=std::fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|e|e.to_string())?;

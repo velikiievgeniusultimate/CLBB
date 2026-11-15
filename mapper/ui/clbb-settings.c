@@ -1368,6 +1368,8 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
                  "отменяет ввод; Backspace очищает назначение. Системные "
                  "сочетания не передаются игре.",
                  "clbb-muted"));
+  card = section(b, "Матч");
+  bind_control(s, card, "Открыть / закрыть статистику", "common.bindings.match:statistics.key", 0x01000001);
   card = section(b, "Запись отладки управления");
   switch_control(s, card, "Запись отладки", "debug.recording", 0);
   switch_control(s, card, "Автоматические метки расхождений", "debug.auto_marks", 1);

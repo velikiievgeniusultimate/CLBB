@@ -355,6 +355,7 @@ impl Settings {
             "extra:1" => 68,
             "extra:2" => 70,
             "extra:3" => 0x01000007,
+            "match:statistics" => 0x01000001,
             "shop:quick" => 90,
             "upgrade:0" => 49,
             "upgrade:1" => 50,
@@ -406,7 +407,7 @@ impl Settings {
         matches!(self.get(key, hero).as_str(), "true" | "1")
     }
     pub fn binding(&self, hero: i32, slot: &str) -> clbb_moba_core::controller::host::Binding {
-        let prefix = "hero";
+        let prefix = if slot == "match:statistics" { "common" } else { "hero" };
         let key = |f| format!("{prefix}.bindings.{slot}.{f}");
         let code = self.integer(&key("key"), hero);
         let code = if valid_key(code) && !self.reserved(code, hero) {
@@ -416,7 +417,7 @@ impl Settings {
         };
         clbb_moba_core::controller::host::Binding {
             key: code,
-            cast_mode: self.integer(&key("cast_mode"), hero),
+            cast_mode: if slot == "match:statistics" { 1 } else { self.integer(&key("cast_mode"), hero) },
             aim_type: 0,
             stop_movement: self.boolean(&key("stop_movement"), hero),
         }
@@ -624,6 +625,19 @@ fn native_skill_slot(slot: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn statistics_binding_is_global_rebindable_and_does_not_inherit_hero_overrides() {
+        let mut s = Settings::default();
+        for hero in 1..=133 { assert_eq!(s.binding(hero, "match:statistics").key, 0x01000001); }
+        s.set("common.bindings.match:statistics.key", "88", 25).unwrap();
+        s.set("hero.bindings.match:statistics.key", "90", 25).unwrap();
+        for hero in 1..=133 {
+            assert_eq!(s.binding(hero, "match:statistics").key, 88);
+            assert_eq!(s.binding(hero, "match:statistics").cast_mode, 1);
+        }
+        s.set("common.bindings.match:statistics.key", "0", 25).unwrap();
+        assert_eq!(s.binding(25, "match:statistics").key, 0);
+    }
     #[test]
     fn guinevere_ultimate_stop_is_personal_editable_and_seeded_once() {
         let mut s = Settings::default();
