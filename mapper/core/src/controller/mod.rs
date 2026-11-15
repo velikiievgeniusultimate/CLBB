@@ -100,6 +100,8 @@ pub struct AuxiliaryTap {
     pub until: i64,
     pub cooldownSlot: String,
     pub cooldownVariant: i32,
+    /// Native cancel ACK identifies the equipment button base, not its effect.
+    pub cancelSkill: i32,
     pub hero: i32,
     pub epoch: String,
     pub cancelRequested: bool,

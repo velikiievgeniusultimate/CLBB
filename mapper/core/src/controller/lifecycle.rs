@@ -908,7 +908,7 @@ impl Controller {
         if id < 0 {
             return;
         }
-        let variant = if b.kind == "extra" {
+        let variant = if matches!(b.kind.as_str(), "extra" | "item") {
             self.cooldown_variant(b)
         } else {
             0
@@ -919,12 +919,13 @@ impl Controller {
             key: b.key,
             point: b.press,
             until: if b.castMode == 1 { self.now_ + 16_000_000 } else { i64::MAX },
-            cooldownSlot: if b.kind == "extra" {
+            cooldownSlot: if matches!(b.kind.as_str(), "extra" | "item") {
                 b.slot.clone()
             } else {
                 String::new()
             },
             cooldownVariant: variant,
+            cancelSkill: if b.kind == "item" { b.skillId } else { variant },
             hero:self.heroId_,epoch:self.frameEpoch_.clone(),cancelRequested:false,cancelSentNs:0,
         });
         if b.castMode == 1 { host.timer(Timer::Auxiliary, Some(16)); }
