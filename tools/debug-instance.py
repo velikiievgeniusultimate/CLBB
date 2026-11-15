@@ -144,7 +144,13 @@ def window(name,show):
     X.XMoveWindow(d,w,1940+index*15,30+index*15) # Observed Philips HDMI-A-1.
     X.XMapWindow(d,w) # No activation, raising, or desktop input.
    else:X.XIconifyWindow(d,w,X.XDefaultScreen(d))
-  X.XSync(d,0);owned.identity();return {'profile':name,'pid':pid,'windows':[hex(w)for w in candidates],'visible_requested':show,'focus_requested':False}
+  X.XSync(d,0)
+  hidden_atom=X.XInternAtom(d,b'_NET_WM_STATE_HIDDEN',0);end=time.monotonic()+.5
+  while True:
+   hidden={hex(w):hidden_atom in values(w,'_NET_WM_STATE')for w in candidates}
+   if all(value==(not show) for value in hidden.values()) or time.monotonic()>=end:break
+   time.sleep(.02)
+  owned.identity();return {'profile':name,'pid':pid,'windows':[hex(w)for w in candidates],'visible_requested':show,'hidden_observed':hidden,'focus_requested':False}
  finally:X.XCloseDisplay(d)
 
 def status(name):
