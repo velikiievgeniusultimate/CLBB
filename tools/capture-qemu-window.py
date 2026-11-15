@@ -14,7 +14,13 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--pid', type=int, help='Exact owned runtime PID; defaults to current-atl-pid.json')
 parser.add_argument('--output', type=pathlib.Path, help='PNG destination; defaults to logs/owned-window-current.png')
 parser.add_argument('--display', required=True, help='Exact selected local X11 display')
+parser.add_argument('--state-root', type=pathlib.Path, help='Explicit isolated debug state; primary remains default')
 options = parser.parse_args()
+if options.state_root:
+    state=options.state_root.resolve()
+    marker=json.loads((state/'.clbb-debug-instance.json').read_text())
+    if marker.get('source_root')!=str(root) or marker.get('state_root')!=str(state):raise SystemExit('Foreign debug state')
+    root=state
 import re
 if not re.fullmatch(r':[0-9]{1,5}(?:\.[0-9]{1,3})?', options.display):
     raise SystemExit('Explicit local X11 display required')

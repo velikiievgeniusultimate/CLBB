@@ -105,14 +105,19 @@ def observations(samples: list[dict], movement: bool, physical_up_ns: int | None
 
 
 class Probe:
-    def __init__(self, expected_hero: int, report: dict, expected_pid: int | None = None):
+    def __init__(self, expected_hero: int, report: dict, expected_pid: int | None = None, state_root: Path | None = None):
         self.hero = expected_hero
         self.report = report
-        self.metadata_path = ROOT / "logs/current-atl-pid.json"
+        self.state_root = Path(state_root).resolve() if state_root is not None else ROOT
+        if state_root is not None:
+            marker = json.loads((self.state_root / ".clbb-debug-instance.json").read_text())
+            if marker.get("source_root") != str(ROOT) or marker.get("state_root") != str(self.state_root):
+                raise RuntimeError("Debug state belongs to another checkout")
+        self.metadata_path = self.state_root / "logs/current-atl-pid.json"
         self.pid = json.loads(self.metadata_path.read_text())["pid"]
         if expected_pid is not None and self.pid != expected_pid:
             raise RuntimeError(f"Expected watched runtime PID {expected_pid}, selected PID is {self.pid}; refusing input")
-        if type(self.pid) is not int or self.pid <= 0 or not runtime_executable_is_owned(self.pid, ROOT):
+        if type(self.pid) is not int or self.pid <= 0 or not runtime_executable_is_owned(self.pid, self.state_root):
             raise RuntimeError("Recorded process is not the verified owned runtime")
         self.proc = Path("/proc") / str(self.pid)
         self.executable = (self.proc / "exe").resolve(strict=True)
@@ -122,8 +127,10 @@ class Probe:
             digest = hashlib.file_digest(source, "sha256").hexdigest()
         if self.stat_binary() != self.binary_stat:
             raise RuntimeError("Runtime binary changed during hashing")
-        self.selection = (ROOT / ".clbb-local-runtime.json").read_bytes() if (ROOT / ".clbb-local-runtime.json").exists() else None
+        self.selection = (self.state_root / ".clbb-local-runtime.json").read_bytes() if (self.state_root / ".clbb-local-runtime.json").exists() else None
         self.socket_path = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "clbb" / f"mapper-{self.pid}.sock"
+        if state_root is not None:
+            self.socket_path = self.state_root / "run/clbb" / f"mapper-{self.pid}.sock"
         self.pointer = WAYPOINTS[0]
         self.last_input_at = time.monotonic()
         self.in_control = False
@@ -149,7 +156,7 @@ class Probe:
             raise RuntimeError("Verified runtime binary changed")
         if json.loads(self.metadata_path.read_text())["pid"] != self.pid:
             raise RuntimeError("Selected runtime process changed")
-        marker = ROOT / ".clbb-local-runtime.json"
+        marker = self.state_root / ".clbb-local-runtime.json"
         if (marker.read_bytes() if marker.exists() else None) != self.selection:
             raise RuntimeError("Selected runtime candidate changed")
 
