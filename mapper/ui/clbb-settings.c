@@ -613,7 +613,7 @@ static const char *battle_spell_name(int skill) {
 }
 static const char *action_title(const char *slot, int skill, const char *config) {
   (void)config;
-  if (!strcmp(slot,"item:active")) return "Предметы";
+  if (!strcmp(slot,"item:active")) return "Активный предмет";
   if (!strcmp(slot,"skill:0")) return "Навык 1";
   if (!strcmp(slot,"skill:1")) return "Навык 2";
   if (!strcmp(slot,"skill:2")) return "Навык 3";
