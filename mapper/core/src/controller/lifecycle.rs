@@ -13,6 +13,7 @@ impl Controller {
     pub(crate) fn tap_only(&self,b: &Button) -> bool {
         (b.kind == "match_ui" && b.slot == "match:statistics")
             || (b.kind == "item" && b.slot == "item:active" && b.skillId == 25790)
+            || (b.kind == "assist" && b.slot == "ally:mathilda" && b.skillId == 10224)
             || (b.kind == "upgrade"
             && (0..4).contains(&b.index)
             && b.slot == format!("upgrade:{}", b.index))
@@ -254,6 +255,8 @@ impl Controller {
                 }
             }
         }
+        // The received Mathilda button has no native cooldown timer. Its
+        // live widget owns availability; do not turn a missing timer into a lock.
         if (b.kind != "skill" && b.kind != "extra" && b.kind != "item") || !self.cooldownSeen_ {
             return "";
         }
@@ -908,7 +911,7 @@ impl Controller {
         if id < 0 {
             return;
         }
-        let variant = if matches!(b.kind.as_str(), "extra" | "item") {
+        let variant = if matches!(b.kind.as_str(), "extra" | "item" | "assist") {
             self.cooldown_variant(b)
         } else {
             0
@@ -919,13 +922,13 @@ impl Controller {
             key: b.key,
             point: b.press,
             until: if b.castMode == 1 { self.now_ + 16_000_000 } else { i64::MAX },
-            cooldownSlot: if matches!(b.kind.as_str(), "extra" | "item") {
+            cooldownSlot: if matches!(b.kind.as_str(), "extra" | "item" | "assist") {
                 b.slot.clone()
             } else {
                 String::new()
             },
             cooldownVariant: variant,
-            cancelSkill: if b.kind == "item" { b.skillId } else { variant },
+            cancelSkill: if matches!(b.kind.as_str(),"item"|"assist") { b.skillId } else { variant },
             hero:self.heroId_,epoch:self.frameEpoch_.clone(),cancelRequested:false,cancelSentNs:0,
         });
         if b.castMode == 1 { host.timer(Timer::Auxiliary, Some(16)); }

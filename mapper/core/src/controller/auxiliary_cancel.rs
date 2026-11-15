@@ -5,7 +5,8 @@ impl Controller {
         if self.auxiliaryTaps_.iter().any(|t|t.cancelRequested) {return true;}
         let Some(i)=self.auxiliaryTaps_.iter().position(|t| {
             t.until==i64::MAX && (matches!(t.cooldownSlot.as_str(),"extra:0"|"extra:1")
-                || (t.cooldownSlot=="item:active" && t.cancelSkill==25790))
+                || (t.cooldownSlot=="item:active" && t.cancelSkill==25790)
+                || (t.cooldownSlot=="ally:mathilda" && t.cancelSkill==10224))
                 && t.cooldownSlot==self.frameActiveSlot_
                 && t.hero==self.heroId_ && t.epoch==self.frameEpoch_
         }) else{return false;};

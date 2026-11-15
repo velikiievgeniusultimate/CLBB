@@ -1091,7 +1091,7 @@ impl Runtime {
         let linked=sample.linked.is_some();
         for b in sample.frame.ui.buttons.iter().take(sample.frame.ui.button_count.min(32) as usize)
             .chain(sample.frame.ui.capability_controls.iter().take(sample.frame.ui.capability_count.min(32) as usize)) {
-            if !matches!(b.kind.as_str(),"skill"|"extra"|"item"|"attack"|"upgrade"|"quick_buy") || !b.active.get() || !b.press_uv.valid() || !seen.insert(b.slot.as_str()) {continue;}
+            if !matches!(b.kind.as_str(),"skill"|"extra"|"item"|"assist"|"attack"|"upgrade"|"quick_buy") || !b.active.get() || !b.press_uv.valid() || !seen.insert(b.slot.as_str()) {continue;}
             let slot=b.slot.as_str();
             if linked && matches!(slot,"skill:2"|"skill:3") {continue;}
             let variant=sample.frame.skill_state.buttons.iter().take(sample.frame.skill_state.count.min(32) as usize)

@@ -358,6 +358,11 @@ fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     }
     if ancestry.iter().any(|name| name == "SkillButton") { "skill" } else { "extra" }
 }
+// The granted ally button is not owned by the recipient's hero identity.
+fn mathilda_ally_control(class: &str, index: i32, base: i32) -> bool {
+    class == "KeySkillDyExtra" && index == 4 && base == 10224
+}
+
 // Native auxiliary hero controls need not use the ordinal of their visual
 // skill slot. Rafaela's resurrection selector reports index0 just like Q.
 // Only this observed hero/class/base tuple gets a distinct fourth binding;
@@ -564,6 +569,13 @@ impl UiPlan {
                     kind = "item";
                 }
             }
+            if kind == "extra" && skill != 0 {
+                let base = r.integer(skill)?;
+                if mathilda_ally_control(&class.name, index, base) {
+                    checks.push((skill, base.to_le_bytes().to_vec()));
+                    kind = "assist";
+                }
+            }
             let native_index=index;
             let mut index=index;
             if kind=="skill" && class.name=="KeySkillLockDeadHero" && skill!=0 {
@@ -575,7 +587,9 @@ impl UiPlan {
                     index=ordinal;
                 }
             }
-            let slot = if kind == "item" {
+            let slot = if kind == "assist" {
+                "ally:mathilda".into()
+            } else if kind == "item" {
                 "item:active".into()
             } else if kind == "attack" {
                 "attack".into()
@@ -1589,8 +1603,9 @@ impl<M: Memory> Source<M> {
             variant.charge_skill = control_holds.get(variant.slot.as_str())
                 .copied().map(flag).unwrap_or_default();
         }
-        for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="item") {
-            if entry.slot.as_str()=="item:active" && entry.skill_id.int()==25790 {
+        for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|matches!(b.kind.as_str(),"item"|"assist")) {
+            if (entry.slot.as_str()=="item:active" && entry.skill_id.int()==25790)
+                || (entry.slot.as_str()=="ally:mathilda" && entry.skill_id.int()==10224) {
                 control_types.insert(entry.slot.owned(),1);
             }
         }
@@ -2212,6 +2227,14 @@ fn attach_aldous_reveal_cancel(frame:&mut s::Frame,types:&std::collections::BTre
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    #[test]
+    fn mathilda_gift_requires_its_exact_native_identity() {
+        assert!(mathilda_ally_control("KeySkillDyExtra",4,10224));
+        for (class,index,base) in [("KeySkillEquip",4,10224),("KeySkillDyExtra",3,10224),
+            ("KeySkillDyExtra",4,10220),("SkillButton",4,10224)] {
+            assert!(!mathilda_ally_control(class,index,base));
+        }
+    }
     #[test]
     fn aldous_reveal_cancel_requires_own_pressed_contact_and_both_native_flags() {
         let fixture=||{

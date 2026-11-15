@@ -76,3 +76,15 @@ arbitrary native crash is not isolated by in-process ABI checks.
 осознанное ограничение безопасности указателей, а не обещание неограниченной
 горячей выгрузки. Обычные рабочие правки маппера теперь проверяются без
 перезапуска, а изменения самого нативного хоста требуют обычного обновления.
+
+### Shared Mathilda ally button / Кнопка помощи Матильды
+
+The received native `KeySkillDyExtra` index 4 / base 10224 is identified independently
+of the recipient hero as `ally:mathilda`. Common settings only, default V, release
+mode by default, instant mode optional. It is a plain button with no aiming.
+The grant has no native cooldown timer; missing timer does not block admission.
+Held cancellation uses the existing native cancellation acknowledgement protocol.
+
+Полученная кнопка «Помощь Матильды» общая для всех героев, включая саму Матильду
+в режимах с одинаковыми героями. По умолчанию V и применение при отпускании;
+моментальное применение выбирается в общих настройках. Наводки нет.

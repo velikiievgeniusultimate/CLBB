@@ -453,7 +453,7 @@ fn main() -> Result<()> {
         if args.len() != 4 { return Err("Usage: hero-contract-audit --level-only PID OUTPUT.json".into()); }
         let pid: u32 = args[2].parse().map_err(|_| "Invalid PID")?;
         if pid == 0 { return Err("PID must be positive".into()); }
-        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+        let root=std::env::var_os("CLBB_STATE_ROOT").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf());
         verify_selected_runtime(&root,pid)?;
         let identity = process_identity(pid)?;
         let mut reflection = Reflection::new(ProcessMemory::diagnostic(pid)?)?;
@@ -481,7 +481,7 @@ fn main() -> Result<()> {
         Some(id)
     }else{None};
     if size.iter().any(|v:&f64|!v.is_finite()||!(32. ..=16384.).contains(v)) {return Err("Resolution outside audit bounds".into());}
-    let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf();
+    let root=std::env::var_os("CLBB_STATE_ROOT").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf());
     verify_selected_runtime(&root,pid)?;
     let identity=process_identity(pid)?;
     let started=Instant::now();let start_ns=now_ns();
