@@ -25,9 +25,20 @@ def profile(name):
  return BASE/name
 
 def selection():
+ current=json.loads((ROOT/'.clbb-local-runtime.json').read_text())
  pending=ROOT/'logs/wind-item-cancel-2026-11-16/pending-activation.json'
- if pending.exists():return json.loads(pending.read_text())['new']
- return json.loads((ROOT/'.clbb-local-runtime.json').read_text())
+ if pending.exists():
+  activation=json.loads(pending.read_text())
+  if current==activation['old']:return activation['new']
+ return current
+
+def sync_runtime(state):
+ path=state/'.clbb-local-runtime.json'
+ selected={**selection(),'state':str(state)}
+ if path.exists() and json.loads(path.read_text())==selected:return
+ candidate=Path(selected['directory'])
+ subprocess.run([sys.executable,str(ROOT/'distribution/release.py'),'verify',str(candidate)],check=True)
+ write(path,selected)
 
 def prepare(name):
  state=profile(name)
@@ -98,6 +109,7 @@ def live(state):
 def start(name):
  state=prepare(name)
  if live(state):raise ValueError('This debug profile is already running')
+ sync_runtime(state)
  mounts(state)
  # Test actual namespace boundaries before any game process is started.
  check="import os,json; from pathlib import Path; p=Path(os.environ['CLBB_STATE_ROOT']); q=p/'.namespace-write-check'; q.write_text('private'); q.unlink(); print(json.dumps({'primary_hidden':not Path("+repr(str(ROOT/'game/base.apk'))+").exists(),'private_tmp':not Path('/tmp/atl_cache').exists(),'config':os.environ['XDG_CONFIG_HOME']}))"

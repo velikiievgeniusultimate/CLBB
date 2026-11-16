@@ -769,7 +769,7 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
   if (valid) for (guint n=1;lines[n];++n) {
     if (!*lines[n]) continue;
     char **v=g_strsplit(lines[n],"\t",7);
-    if (g_strv_length(v)==6&&valid_action(v[0])&&valid_action(v[1])&&
+    if (g_strv_length(v)==6&&strcmp(v[0],"ally:mathilda")&&valid_action(v[0])&&valid_action(v[1])&&
         (!strcmp(v[0],v[1])||(g_str_has_prefix(v[0],"skill:")&&g_str_has_prefix(v[1],v[0])&&v[1][strlen(v[0])]==':'))&&
         (!strcmp(v[1],v[2])||(!strcmp(v[0],"extra:2")&&((atoi(v[3])==20080&&!strcmp(v[2],"extra:2:20080"))||(atoi(v[3])==20030&&!strcmp(v[2],"extra:2:20030"))||(atoi(v[3])==20190&&!strcmp(v[2],"extra:2:20190")))))&&!g_hash_table_contains(seen,v[0])) {
       g_hash_table_add(seen,g_strdup(v[0]));
@@ -1311,6 +1311,11 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   b = page(s, "controls", "Герой",
            "Личные параметры наследуют общие, пока вы их не измените. ↶ — вернуть общее значение.");
   s->hero_title=gtk_widget_get_first_child(b);
+  card = section(b, "Помощь Матильды");
+  bind_control(s, card, "Клавиша", "common.bindings.ally:mathilda.key", 'V');
+  mode_control(s, card, "Нажатие", "common.bindings.ally:mathilda.cast_mode", 0, FALSE);
+  GtkWidget *assist_group = gtk_widget_get_parent(gtk_widget_get_parent(card));
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(assist_group)), TRUE);
   card = section(b, "Передвижение");
   s->movement_group=gtk_widget_get_parent(gtk_widget_get_parent(card));
   GtkWidget *movement_flow=gtk_flow_box_new();
