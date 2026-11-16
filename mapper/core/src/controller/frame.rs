@@ -183,6 +183,17 @@ impl Controller {
                 self.finish_skill(host, true)
             }
         }
+        // After a crash or movement out of boarding range, keep the physical
+        // key owned until UP but clean up the old virtual contact immediately.
+        if !fresh.iter().any(|button| button.slot == "ally:johnson" && button.available) {
+            for index in (0..self.auxiliaryTaps_.len()).rev() {
+                if self.auxiliaryTaps_[index].cooldownSlot == "ally:johnson" {
+                    let tap=self.auxiliaryTaps_.remove(index);
+                    host.end(tap.id,tap.point);
+                    self.sync_clock(host);
+                }
+            }
+        }
         self.buttons_ = fresh;
         if self.activeSlot_=="attack" && self.skillTouch_>=0
             && !self.buttons_.iter().any(|b|self.aimed_attack(b)) {

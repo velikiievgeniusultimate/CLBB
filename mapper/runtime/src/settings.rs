@@ -382,7 +382,7 @@ impl Settings {
             "extra:0" => 66,
             "extra:1" => 68,
             "extra:2" => 70,
-            "ally:mathilda" => 86,
+            "ally:mathilda" | "ally:johnson" => 86,
             "item:active" | "extra:3" => 0x01000007,
             "match:statistics" => 0x01000001,
             "shop:quick" => 90,
@@ -537,6 +537,9 @@ impl Settings {
             }
             _ if is_binding && key.ends_with(".cast_mode") => matches!(value, "0" | "1"),
             _ if key.starts_with("hero.movement.")&&key.ends_with(".override") => matches!(value,"true"|"false"|"0"|"1"),
+            _ if key.strip_prefix("hero.allowed_conflict.").is_some_and(|key| {
+                key.parse::<i32>().is_ok_and(|code| code != 0 && valid_key(code))
+            }) => value == "-" || (value.len() == 16 && value.bytes().all(|b| b.is_ascii_hexdigit())),
             "hero.cancel_key.override" => matches!(value, "true" | "false" | "0" | "1"),
             _ if is_binding && (key.ends_with(".override") || key.ends_with(".stop_movement")) => {
                 matches!(value, "true" | "false" | "0" | "1")

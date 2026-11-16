@@ -71,7 +71,7 @@ mod tests {
         fn release_resolver(&mut self, _: u64) {}
         fn navigation(&mut self, _: Point, p: Point, _: bool) -> Result<Vec<Point>, String> { Ok(vec![p]) }
         fn binding(&mut self, _: i32, b: &Button, _: &str) -> Binding {
-            Binding { key: if b.slot=="extra:1" || b.slot=="item:active" || b.slot=="ally:mathilda" {68} else if b.kind == "attack" { self.attack_key } else { 81 },
+            Binding { key: if b.slot=="extra:1" || b.slot=="item:active" || b.slot=="ally:mathilda" || b.slot=="ally:johnson" {68} else if b.kind == "attack" { self.attack_key } else { 81 },
                 aim_type: if b.kind=="attack" { self.attack_aim } else {2}, cast_mode: if b.kind == "attack" { self.attack_mode } else { 0 }, stop_movement: false }
         }
         fn cancel_key(&mut self, _: i32) -> i32 { 84 }
@@ -367,6 +367,26 @@ mod tests {
             assert!(h.active.contains_key(&primary));assert!(h.active.contains_key(&movement));
         }
         assert!(c.auxiliaryTaps_.is_empty());
+    }
+    #[test]
+    fn johnson_boarding_contact_is_released_once_when_invitation_disappears() {
+        let (mut controller,mut host)=setup(Some(false));
+        let movement=controller.movementTouch_;
+        let mut shown=frame(60,Some(false));
+        shown.ui.button_count=3;
+        shown.ui.buttons[2]=snapshot::Button {
+            slot:text("ally:johnson"),kind:text("assist"),skill_id:n(303260.),
+            active:flag(true),press_uv:v2(0.6,0.9),center_uv:v2(0.6,0.9),
+            radius_uv:v2(0.1,0.1),..Default::default()
+        };
+        send(&mut controller,&mut host,shown);
+        key(&mut controller,&mut host,61,68,true);
+        let boarding=controller.auxiliaryTaps_[0].id;
+        send(&mut controller,&mut host,frame(62,Some(false)));
+        assert_eq!(host.ended,vec![boarding]);
+        assert!(host.active.contains_key(&movement));
+        key(&mut controller,&mut host,63,68,false);
+        assert_eq!(host.ended,vec![boarding]);
     }
     #[test]
     fn held_mathilda_gift_cancel_waits_for_native_ack_and_keeps_other_fingers() {

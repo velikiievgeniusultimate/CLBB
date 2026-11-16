@@ -26,6 +26,7 @@ typedef struct {
   gboolean visible_not;
   char *inherit_key;
   GtkWidget *inherit_reset;
+  GtkWidget *conflict_button;
 } Control;
 
 struct ClbbSettings {
@@ -590,7 +591,7 @@ static void add_inheritance(Control *c) {
   gtk_box_append(GTK_BOX(c->row), c->inherit_reset);
 }
 static int action_key(const char *slot) {
-  if (!strcmp(slot,"ally:mathilda")) return 'V';
+  if (!strcmp(slot,"ally:mathilda") || !strcmp(slot,"ally:johnson")) return 'V';
   if (!strcmp(slot,"item:active")) return 0x01000007;
   if (g_str_has_prefix(slot,"skill:")) { int n=slot[6]-'0'; return n>=0&&n<4 ? "QWER"[n] : 0; }
   if (!strcmp(slot,"combo:0")) return 'E';
@@ -914,6 +915,7 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
     g_autofree char *title=pass?g_strdup(battle_spell_name(id)):g_strdup_printf("%s · Активен",battle_spell_name(id));
     palette_action(s,"extra:2",slot,title,PALETTE_SPELLS,0);
   }
+  palette_action(s,"ally:johnson","ally:johnson","Посадка к Джонсону",PALETTE_TEMP,1);
   palette_action(s,"ally:mathilda","ally:mathilda","Помощь Матильды",PALETTE_TEMP,1);
   palette_action(s,"item:active","item:active","Активный предмет",PALETTE_TEMP,1);
   palette_update(s);
@@ -1570,6 +1572,14 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   clbb_settings_refresh(s);
   return s;
 }
+static void toggle_conflict(GtkButton *button, gpointer user) {
+  ClbbSettings *s=user;
+  int code=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button),"clbb-conflict-key"));
+  gboolean allowed=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button),"clbb-conflict-allowed"));
+  g_autofree char *setting=g_strdup_printf("bindings.allow_conflict.%d",code);
+  stop_capture(s);
+  if(write_value(s,setting,allowed?"false":"true"))clbb_settings_refresh(s);
+}
 void clbb_settings_refresh(ClbbSettings *s) {
   if (!s || s->refreshing)
     return;
@@ -1606,6 +1616,8 @@ void clbb_settings_refresh(ClbbSettings *s) {
   g_free(t);
   char *conflict_text=read_text(s,"bindings.conflicts","");
   char **conflicts=g_strsplit(conflict_text,"\n",128);g_free(conflict_text);
+  g_autofree char *allowed_text=read_text(s,"bindings.allowed_conflicts","");
+  g_auto(GStrv) allowed_keys=g_strsplit(allowed_text,"\n",128);
   for (guint i = 0; i < s->controls->len; ++i) {
     Control *c = g_ptr_array_index(s->controls, i);
     if (s->capture == c)
@@ -1620,11 +1632,27 @@ void clbb_settings_refresh(ClbbSettings *s) {
       } else t = key_name(n);
       gtk_button_set_label(GTK_BUTTON(c->widget), t);
       g_free(t);
-      gboolean conflict=FALSE;
-      for (guint k=0;conflicts[k];++k) if (n!=0&&atoi(conflicts[k])==n) {conflict=TRUE;break;}
-      if (conflict) gtk_widget_add_css_class(c->widget,"clbb-conflict");
+      gboolean conflict=FALSE,allowed=FALSE;
+      if(s->hero==s->live_profile&&s->live_profile>0)
+        for(guint k=0;conflicts[k];++k)if(n!=0&&atoi(conflicts[k])==n){conflict=TRUE;break;}
+      if(conflict)for(guint k=0;allowed_keys[k];++k)
+        if(atoi(allowed_keys[k])==n){allowed=TRUE;break;}
+      if(conflict&&!allowed)gtk_widget_add_css_class(c->widget,"clbb-conflict");
       else gtk_widget_remove_css_class(c->widget,"clbb-conflict");
-      gtk_widget_set_tooltip_text(c->widget,conflict?"Конфликт назначений: клавиша отключена. Измените один из биндов.":NULL);
+      if(conflict&&!c->conflict_button){
+        c->conflict_button=gtk_button_new();
+        gtk_widget_add_css_class(c->conflict_button,"clbb-secondary");
+        gtk_box_append(GTK_BOX(c->row),c->conflict_button);
+        g_signal_connect(c->conflict_button,"clicked",G_CALLBACK(toggle_conflict),s);
+      }
+      if(c->conflict_button){
+        gtk_widget_set_visible(c->conflict_button,conflict);
+        g_object_set_data(G_OBJECT(c->conflict_button),"clbb-conflict-key",GINT_TO_POINTER(n));
+        g_object_set_data(G_OBJECT(c->conflict_button),"clbb-conflict-allowed",GINT_TO_POINTER(allowed));
+        gtk_button_set_label(GTK_BUTTON(c->conflict_button),allowed?"✓ Конфликт разрешён":"Разрешить конфликт");
+        gtk_widget_set_tooltip_text(c->conflict_button,allowed?"Нажмите, чтобы вернуть блокировку":"Если действия доступны одновременно, сработает одно");
+      }
+      gtk_widget_set_tooltip_text(c->widget,conflict&&!allowed?"Конфликт назначений: клавиша отключена":NULL);
       break;
     case CONTROL_SWITCH:
       if (GTK_IS_TOGGLE_BUTTON(c->widget)) {

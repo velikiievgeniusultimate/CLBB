@@ -150,8 +150,11 @@ impl Controller {
             }
             return true;
         }
+        let johnson_available = self.buttons_.iter()
+            .any(|button| button.available && button.key == key && button.slot == "ally:johnson");
         let mut unavailable = false;
         for b in self.buttons_.clone() {
+            if johnson_available && b.slot == "ally:mathilda" { continue; }
             let mut matches = key != 0 && b.key == key;
             if self.heroId_ == 25
                 && b.skillId == 2520

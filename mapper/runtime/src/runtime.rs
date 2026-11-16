@@ -20,6 +20,15 @@ const BATTLE_SPELLS: [i32; 12] = [
     20020, 20030, 20040, 20050, 20060, 20070, 20080, 20100, 20140, 20150, 20160, 20190,
 ];
 
+fn conflict_signature(owners: &[String]) -> String {
+    let mut names = owners.iter().map(String::as_str).collect::<Vec<_>>();
+    names.sort_unstable();
+    let hash = names.join("\0").bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    });
+    format!("{hash:016x}")
+}
+
 fn profile_setting(key: &str) -> Option<(i32, &str)> {
     let (id, setting) = key.strip_prefix("profile.")?.split_once('.')?;
     let hero = id.parse::<i32>().ok()?;
@@ -378,6 +387,16 @@ fn core_decision_diagnostics(v:&clbb_moba_core::controller::view::View,event:&st
     value
 }
 impl Adapter {
+    fn conflict_allowed(&self, key: i32, hero: i32) -> bool {
+        let Some(owners) = self.conflicts.get(&key) else { return false };
+        self.settings.get(&format!("hero.allowed_conflict.{key}"), hero)
+            == conflict_signature(owners)
+    }
+
+    fn conflict_blocks(&self, key: i32, hero: i32) -> bool {
+        self.conflicts.contains_key(&key) && !self.conflict_allowed(key, hero)
+    }
+
     fn refresh_conflicts(&mut self, hero:i32, settings_changed:bool) {
         use std::hash::{Hash,Hasher};
         let mut hash=std::collections::hash_map::DefaultHasher::new();
@@ -413,7 +432,12 @@ impl Adapter {
         if self.settings.integer("hero.movement.click_mode",hero)==2 {
             for direction in ["up","down","left","right"] {add(self.settings.integer(&format!("hero.movement.{direction}"),hero),format!("Движение · {direction}"));}
         } else {add(self.settings.integer("hero.movement.button",hero),"Движение".into());}
-        owners.retain(|_,names|names.len()>1);owners
+        owners.retain(|_, names| {
+            names.len() > 1 && !(names.len() == 2
+                && names.iter().any(|name| name == "ally:mathilda")
+                && names.iter().any(|name| name == "ally:johnson"))
+        });
+        owners
     }
 }
 impl Host for Adapter {
@@ -552,12 +576,12 @@ impl Host for Adapter {
         if hero==71 && button.kind=="attack" && button.slot=="attack" && binding.aim_type!=2 {
             binding.key=0;
         }
-        if self.conflicts.contains_key(&binding.key) { binding.key=0; }
+        if self.conflict_blocks(binding.key, hero) { binding.key=0; }
         binding
     }
     fn cancel_key(&mut self, hero: i32) -> i32 {
         let key=self.settings.integer("hero.cancel_key", hero);
-        if self.conflicts.contains_key(&key) {0} else {key}
+        if self.conflict_blocks(key, hero) {0} else {key}
     }
     fn timer(&mut self, timer: Timer, delay: Option<i64>) {
         let slot = &mut self.timers[timer_index(timer)];
@@ -1030,7 +1054,7 @@ impl Runtime {
         };
         let hero=self.core.inspect().heroId_;
         let active_match=self.core.inspect().ready_!=0 && self.host.fresh().is_some();
-        if active_match && key!=0 && self.host.conflicts.contains_key(&key) && down {
+        if active_match && key!=0 && self.host.conflict_blocks(key, hero) && down {
             self.debug_route_reason="conflicting_binding_disabled";
             return true;
         }
@@ -1232,6 +1256,8 @@ impl Runtime {
                 }
                 rows
             },
+            "bindings.allowed_conflicts" => self.host.conflicts.keys().filter(|key| self.host.conflict_allowed(**key, hero))
+                .map(|key| format!("{key}\n")).collect::<String>(),
             "bindings.conflicts"=>self.host.conflicts.iter().map(|(key,names)|format!("{key}\t{}\n",names.join(", "))).collect::<String>(),
             "common.battle_spell_id"=>self.host.fresh().and_then(|s|s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize).find(|b|b.kind.as_str()=="extra"&&b.slot.as_str()=="extra:2")).map(|b|b.skill_id.int()).unwrap_or(0).to_string(),
             "hero.linked_controls"=>if self.host.fresh().is_some_and(|s|s.linked.is_some()) {"1".into()}else{"0".into()},
@@ -1255,6 +1281,14 @@ impl Runtime {
         self.read.as_ptr()
     }
     fn write(&mut self, key: &str, value: &str) -> bool {
+        if let Some(raw) = key.strip_prefix("bindings.allow_conflict.") {
+            let Ok(code) = raw.parse::<i32>() else { return false };
+            let hero = self.core.inspect().heroId_;
+            let Some(owners) = self.host.conflicts.get(&code) else { return false };
+            if hero <= 0 || !matches!(value, "true" | "false") { return false; }
+            let signature = if value == "true" { conflict_signature(owners) } else { "-".into() };
+            return self.host.settings.set(&format!("hero.allowed_conflict.{code}"), &signature, hero).is_ok();
+        }
         if key=="audio.refresh" {crate::audio::refresh();return true;}
         if matches!(key,"updates.check"|"updates.install"){return matches!(value,"1"|"true")&&self.updates.request(key); }
         if key=="debug.mark" {return self.recorder.mark(now_ns(),value,false);}

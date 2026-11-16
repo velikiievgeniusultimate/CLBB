@@ -13,7 +13,7 @@ impl Controller {
     pub(crate) fn tap_only(&self,b: &Button) -> bool {
         (b.kind == "match_ui" && b.slot == "match:statistics")
             || (b.kind == "item" && b.slot == "item:active" && b.skillId == 25790)
-            || (b.kind == "assist" && b.slot == "ally:mathilda" && b.skillId == 10224)
+            || (b.kind == "assist" && matches!((b.slot.as_str(),b.skillId), ("ally:mathilda",10224)|("ally:johnson",303260)))
             || (b.kind == "upgrade"
             && (0..4).contains(&b.index)
             && b.slot == format!("upgrade:{}", b.index))

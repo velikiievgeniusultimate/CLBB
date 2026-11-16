@@ -240,6 +240,7 @@ pub struct ButtonPlan {
     target_retry: i64,
     pub timer: Option<u64>,
     pub widget: Option<Widget>,
+    johnson_interactive: Option<u64>,
 }
 pub struct UiPlan {
     pub object: u64,
@@ -569,8 +570,14 @@ impl UiPlan {
                     kind = "item";
                 }
             }
+            let mut johnson_interactive = None;
             if kind == "extra" && skill != 0 {
                 let base = r.integer(skill)?;
+                if class.name == "KeySkillProgressBar" && index == 4 && base == 303260 {
+                    checks.push((skill, base.to_le_bytes().to_vec()));
+                    johnson_interactive = Some(r.field(button, "interactive")?);
+                    kind = "assist";
+                }
                 if mathilda_ally_control(&class.name, index, base) {
                     checks.push((skill, base.to_le_bytes().to_vec()));
                     kind = "assist";
@@ -587,7 +594,9 @@ impl UiPlan {
                     index=ordinal;
                 }
             }
-            let slot = if kind == "assist" {
+            let slot = if johnson_interactive.is_some() {
+                "ally:johnson".into()
+            } else if kind == "assist" {
                 "ally:mathilda".into()
             } else if kind == "item" {
                 "item:active".into()
@@ -642,6 +651,7 @@ impl UiPlan {
                 target_family,target:None,target_retry:0,
                 timer,
                 widget: None,
+                johnson_interactive,
             });
         }
         let info = link(r, object, "m_UIFrameInfo", &mut checks)?;
@@ -784,6 +794,27 @@ impl UiPlan {
             ..Default::default()
         };
         for button in &mut self.buttons {
+            if let Some(address) = button.johnson_interactive {
+                let visible = (|| -> Result<bool> {
+                    let mut visibility = Vec::new();
+                    if !boolean(r, &mut visibility, address)? { return Ok(false); }
+                    let icon = link(r, button.object, "m_SkillIcon", &mut visibility)?;
+                    for name in ["mIsActive", "mIsVisibleByAlpha", "mIsVisibleByPanel", "mEnabled"] {
+                        let field = r.field(icon, name)?;
+                        if !boolean(r, &mut visibility, field)? { return Ok(false); }
+                    }
+                    let alpha_at = r.field(icon, "finalAlpha")?;
+                    let alpha = f32_at(&capture(r, &mut visibility, alpha_at, 4)?, 0);
+                    let draw = r.field(icon, "drawCall")?;
+                    if !(alpha > 0. && alpha <= 1.001) || pointer(r, &mut visibility, draw)? == 0 {
+                        return Ok(false);
+                    }
+                    check(r, &visibility)?;
+                    consumed.extend(visibility);
+                    Ok(true)
+                })().unwrap_or(false);
+                if !visible { continue; }
+            }
             if button.path.validate(r).is_err() {
                 let owner = r.link(button.object, "m_Self")?;
                 button.path = Path::new(r, owner, false)?;
@@ -1605,7 +1636,8 @@ impl<M: Memory> Source<M> {
         }
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|matches!(b.kind.as_str(),"item"|"assist")) {
             if (entry.slot.as_str()=="item:active" && entry.skill_id.int()==25790)
-                || (entry.slot.as_str()=="ally:mathilda" && entry.skill_id.int()==10224) {
+                || (entry.slot.as_str()=="ally:mathilda" && entry.skill_id.int()==10224)
+                || (entry.slot.as_str()=="ally:johnson" && entry.skill_id.int()==303260) {
                 control_types.insert(entry.slot.owned(),1);
             }
         }
