@@ -36,8 +36,8 @@ def registry():
 
 
 def names():
-    result = {PRIMARY: "Основной аккаунт"}
     labels = registry()["labels"]
+    result = {PRIMARY: labels.get(PRIMARY, "Основной аккаунт")}
     if not BASE.exists():
         return result
     for folder in sorted(BASE.iterdir()):
@@ -112,14 +112,19 @@ def close(account):
     STARTING.pop(account, None)
 
 
+def profile_label(text):
+    label = text.strip()
+    if not label or len(label) > 48 or any(not character.isprintable() for character in label):
+        raise ValueError("Введите название длиной до 48 символов.")
+    return label
+
+
 def dispatch(account, action, target):
     if action == "list":
         return "\n".join(f"{name}\t{label}\t{int(running(name))}\t{int(name == account)}"
                          for name, label in names().items())
     if action == "add":
-        label = target.strip()
-        if not label or len(label) > 48 or any(not character.isprintable() for character in label):
-            raise ValueError("Введите название длиной до 48 символов.")
+        label = profile_label(target)
         if sum(running(name) for name in names()) >= 2:
             raise ValueError("Закройте одно окно перед добавлением аккаунта.")
         target = "account-" + uuid.uuid4().hex[:16]
@@ -129,6 +134,15 @@ def dispatch(account, action, target):
         instances.write(REGISTRY, data)
         start(target)
         return "Профиль добавлен. Войдите в аккаунт в новом окне игры."
+    if action == "rename":
+        profile, separator, new_label = target.partition("\t")
+        if not separator or profile not in names():
+            raise ValueError("Выберите существующий профиль.")
+        label = profile_label(new_label)
+        data = registry()
+        data["labels"][profile] = label
+        instances.write(REGISTRY, data)
+        return "Профиль переименован."
     if target not in names() or target == account:
         raise ValueError("Выберите другой аккаунт.")
     if action == "second":

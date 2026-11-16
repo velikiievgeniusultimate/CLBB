@@ -33,7 +33,8 @@ struct ClbbSettings {
   GtkWidget *debug_status;
   GtkWidget *account_picker, *account_name, *account_status;
   GtkWidget *account_add, *account_switch, *account_second, *account_reload;
-  GPtrArray *account_ids;
+  GtkWidget *account_rename, *account_rename_row, *account_rename_name, *account_rename_save;
+  GPtrArray *account_ids, *account_labels;
   GArray *account_flags;
   gboolean account_busy;
   GtkWidget *audio_input, *audio_output, *audio_status;
@@ -109,6 +110,16 @@ static const char css[] =
     ".clbb-section-content { margin-top: 12px; }"
     ".clbb-binding-scope { background: #19161c; border: 1px solid #392832; border-radius: 5px; padding: 12px; }"
     ".clbb-settings .clbb-conflict { border: 1px solid #ff526f; color: #ff8197; background: #42232f; }"
+    ".clbb-settings entry.clbb-account-entry, .clbb-settings dropdown.clbb-account-picker searchentry {"
+    " background: #211b25; background-image: none; border: 1px solid #493341; border-radius: 7px;"
+    " color: #fff4f6; box-shadow: none; outline: none; min-height: 35px; padding: 0 10px; }"
+    ".clbb-settings entry.clbb-account-entry:focus-within,"
+    ".clbb-settings dropdown.clbb-account-picker searchentry:focus-within { border-color: #ff5876; box-shadow: none; }"
+    ".clbb-settings .clbb-account-entry text, .clbb-settings .clbb-account-picker searchentry text {"
+    " background: transparent; color: #fff4f6; caret-color: #ff5876; }"
+    ".clbb-settings .clbb-account-entry placeholder, .clbb-settings .clbb-account-picker searchentry placeholder { color: #c1a9b9; }"
+    ".clbb-settings .clbb-account-picker searchentry image { color: #c1a9b9; }"
+    ".clbb-settings .clbb-account-picker popover separator { background: #493341; }"
     ".clbb-palette-page .clbb-title { font-size: 32px; font-weight: 750; color: #fff4f6; }"
     ".clbb-palette-page .clbb-muted { color: #c1a9b9; }"
     ".clbb-palette-toolbar { margin-top: 34px; margin-bottom: 15px; }"
@@ -1042,10 +1053,14 @@ static void accounts_update_buttons(ClbbSettings *s) {
   gtk_widget_set_sensitive(s->account_second,other&&!(flags&ACCOUNT_OPEN));
   gtk_widget_set_sensitive(s->account_add,!s->account_busy);
   gtk_widget_set_sensitive(s->account_reload,!s->account_busy);
+  gtk_widget_set_sensitive(s->account_rename,valid&&!s->account_busy);
+  gtk_widget_set_sensitive(s->account_rename_save,valid&&!s->account_busy);
 }
 static void accounts_selected(GObject *picker,GParamSpec *spec,gpointer user) {
   (void)picker;(void)spec;
-  accounts_update_buttons(user);
+  ClbbSettings *s=user;
+  gtk_widget_set_visible(s->account_rename_row,FALSE);
+  accounts_update_buttons(s);
 }
 static void accounts_request(ClbbSettings *s,const char *verb,const char *target);
 
@@ -1102,6 +1117,7 @@ static void accounts_finished(GObject *source,GAsyncResult *result,gpointer igno
     guint old=gtk_drop_down_get_selected(GTK_DROP_DOWN(s->account_picker));
     g_autofree char *selected=old<s->account_ids->len?g_strdup(g_ptr_array_index(s->account_ids,old)):NULL;
     g_ptr_array_set_size(s->account_ids,0);
+    g_ptr_array_set_size(s->account_labels,0);
     g_array_set_size(s->account_flags,0);
     g_autoptr(GtkStringList) options=gtk_string_list_new(NULL);
     g_auto(GStrv) rows=g_strsplit(reply,"\n",-1);
@@ -1117,6 +1133,7 @@ static void accounts_finished(GObject *source,GAsyncResult *result,gpointer igno
           flags&ACCOUNT_OPEN?" · открыт":"",NULL);
       gtk_string_list_append(options,title);
       g_ptr_array_add(s->account_ids,g_strdup(fields[0]));
+      g_ptr_array_add(s->account_labels,g_strdup(fields[1]));
       g_array_append_val(s->account_flags,flags);
     }
     gtk_drop_down_set_model(GTK_DROP_DOWN(s->account_picker),G_LIST_MODEL(options));
@@ -1125,6 +1142,7 @@ static void accounts_finished(GObject *source,GAsyncResult *result,gpointer igno
   }else{
     gtk_label_set_text(GTK_LABEL(s->account_status),reply);
     if(g_str_has_prefix(request,"add\t"))gtk_editable_set_text(GTK_EDITABLE(s->account_name),"");
+    if(g_str_has_prefix(request,"rename\t"))gtk_widget_set_visible(s->account_rename_row,FALSE);
     accounts_request(s,"list",NULL);
   }
   accounts_update_buttons(s);
@@ -1150,9 +1168,28 @@ static void accounts_clicked(GtkButton *button,gpointer user) {
   }
   guint index=gtk_drop_down_get_selected(GTK_DROP_DOWN(s->account_picker));
   if(index>=s->account_ids->len)return;
+  if(clicked==s->account_rename){
+    gtk_editable_set_text(GTK_EDITABLE(s->account_rename_name),g_ptr_array_index(s->account_labels,index));
+    gtk_widget_set_visible(s->account_rename_row,TRUE);
+    gtk_widget_grab_focus(s->account_rename_name);
+    gtk_editable_select_region(GTK_EDITABLE(s->account_rename_name),0,-1);
+    return;
+  }
+  if(clicked==s->account_rename_save){
+    const char *name=gtk_editable_get_text(GTK_EDITABLE(s->account_rename_name));
+    if(!*name){gtk_label_set_text(GTK_LABEL(s->account_status),"Введите новое название.");return;}
+    g_autofree char *target=g_strdup_printf("%s\t%s",(char *)g_ptr_array_index(s->account_ids,index),name);
+    accounts_request(s,"rename",target);
+    return;
+  }
   gboolean switching=clicked==s->account_switch;
   gtk_label_set_text(GTK_LABEL(s->account_status),switching?"Переключаю аккаунт…":"Запускаю второе окно…");
   accounts_request(s,switching?"switch":"second",g_ptr_array_index(s->account_ids,index));
+}
+static void accounts_rename_enter(GtkEntry *entry,gpointer user) {
+  (void)entry;
+  ClbbSettings *s=user;
+  accounts_clicked(GTK_BUTTON(s->account_rename_save),s);
 }
 static void accounts_page(ClbbSettings *s) {
   GtkWidget *page_box=page(s,"accounts","Аккаунты",
@@ -1161,20 +1198,37 @@ static void accounts_page(ClbbSettings *s) {
   gtk_widget_add_css_class(card,"clbb-section");
   gtk_box_append(GTK_BOX(page_box),card);
   s->account_ids=g_ptr_array_new_with_free_func(g_free);
+  s->account_labels=g_ptr_array_new_with_free_func(g_free);
   s->account_flags=g_array_new(FALSE,FALSE,sizeof(guint));
   s->account_picker=gtk_drop_down_new(NULL,NULL);
+  gtk_widget_add_css_class(s->account_picker,"clbb-account-picker");
   gtk_drop_down_set_enable_search(GTK_DROP_DOWN(s->account_picker),TRUE);
   gtk_box_append(GTK_BOX(card),s->account_picker);
   GtkWidget *actions=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,8);
   s->account_switch=gtk_button_new_with_label("Сменить аккаунт");
   s->account_second=gtk_button_new_with_label("Запустить второе окно с этим аккаунтом");
   s->account_reload=gtk_button_new_with_label("Обновить список");
+  s->account_rename=gtk_button_new_with_label("Переименовать");
   gtk_box_append(GTK_BOX(actions),s->account_switch);
   gtk_box_append(GTK_BOX(actions),s->account_second);
+  gtk_box_append(GTK_BOX(actions),s->account_rename);
   gtk_box_append(GTK_BOX(actions),s->account_reload);
   gtk_box_append(GTK_BOX(card),actions);
+  s->account_rename_row=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,8);
+  s->account_rename_name=gtk_entry_new();
+  gtk_widget_add_css_class(s->account_rename_name,"clbb-account-entry");
+  gtk_entry_set_max_length(GTK_ENTRY(s->account_rename_name),48);
+  gtk_entry_set_placeholder_text(GTK_ENTRY(s->account_rename_name),"Новое название");
+  gtk_widget_set_hexpand(s->account_rename_name,TRUE);
+  s->account_rename_save=gtk_button_new_with_label("Сохранить название");
+  gtk_box_append(GTK_BOX(s->account_rename_row),s->account_rename_name);
+  gtk_box_append(GTK_BOX(s->account_rename_row),s->account_rename_save);
+  gtk_box_append(GTK_BOX(card),s->account_rename_row);
+  gtk_widget_set_visible(s->account_rename_row,FALSE);
+  g_signal_connect(s->account_rename_name,"activate",G_CALLBACK(accounts_rename_enter),s);
   GtkWidget *add=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,8);
   s->account_name=gtk_entry_new();
+  gtk_widget_add_css_class(s->account_name,"clbb-account-entry");
   gtk_entry_set_placeholder_text(GTK_ENTRY(s->account_name),"Название нового аккаунта");
   gtk_entry_set_max_length(GTK_ENTRY(s->account_name),48);
   gtk_widget_set_hexpand(s->account_name,TRUE);
@@ -1185,7 +1239,7 @@ static void accounts_page(ClbbSettings *s) {
   gtk_box_append(GTK_BOX(card),wrap_label("В новом окне войдите через меню самой игры.","clbb-muted"));
   s->account_status=wrap_label("","clbb-accent");
   gtk_box_append(GTK_BOX(card),s->account_status);
-  GtkWidget *buttons[]={s->account_switch,s->account_second,s->account_reload,s->account_add};
+  GtkWidget *buttons[]={s->account_switch,s->account_second,s->account_reload,s->account_add,s->account_rename,s->account_rename_save};
   for(guint i=0;i<G_N_ELEMENTS(buttons);++i){
     gtk_widget_add_css_class(buttons[i],"clbb-secondary");
     g_signal_connect(buttons[i],"clicked",G_CALLBACK(accounts_clicked),s);
@@ -1979,6 +2033,7 @@ void clbb_settings_destroy(ClbbSettings *s) {
   clbb_settings_hide(s);
   g_object_set_data(G_OBJECT(s->panel),"clbb-accounts-owner",NULL);
   g_ptr_array_unref(s->account_ids);
+  g_ptr_array_unref(s->account_labels);
   g_array_unref(s->account_flags);
   g_free(s->hero_layout);
   g_free(s->palette_selected);
