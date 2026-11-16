@@ -31,6 +31,11 @@ typedef struct {
 
 struct ClbbSettings {
   GtkWidget *debug_status;
+  GtkWidget *account_picker, *account_name, *account_status;
+  GtkWidget *account_add, *account_switch, *account_second, *account_reload;
+  GPtrArray *account_ids;
+  GArray *account_flags;
+  gboolean account_busy;
   GtkWidget *audio_input, *audio_output, *audio_status;
   GPtrArray *audio_input_ids, *audio_output_ids;
   char *audio_inventory[2];
@@ -1026,16 +1031,180 @@ static void close_clicked(GtkButton *b, gpointer data) {
   (void)b;
   clbb_settings_hide(data);
 }
+enum { ACCOUNT_OPEN = 1, ACCOUNT_CURRENT = 2 };
+
+static void accounts_update_buttons(ClbbSettings *s) {
+  guint index=gtk_drop_down_get_selected(GTK_DROP_DOWN(s->account_picker));
+  gboolean valid=index<s->account_ids->len;
+  guint flags=valid?g_array_index(s->account_flags,guint,index):0;
+  gboolean other=!s->account_busy&&valid&&!(flags&ACCOUNT_CURRENT);
+  gtk_widget_set_sensitive(s->account_switch,other);
+  gtk_widget_set_sensitive(s->account_second,other&&!(flags&ACCOUNT_OPEN));
+  gtk_widget_set_sensitive(s->account_add,!s->account_busy);
+  gtk_widget_set_sensitive(s->account_reload,!s->account_busy);
+}
+static void accounts_selected(GObject *picker,GParamSpec *spec,gpointer user) {
+  (void)picker;(void)spec;
+  accounts_update_buttons(user);
+}
+static void accounts_request(ClbbSettings *s,const char *verb,const char *target);
+
+static void accounts_worker(GTask *task,gpointer source,gpointer request,GCancellable *cancel) {
+  (void)source;
+  const char *configured=g_getenv("CLBB_ACCOUNTS_SOCKET");
+  g_autofree char *path=configured?g_strdup(configured):
+      g_build_filename(g_get_home_dir(),".local","share","clbb-debug-instances",".accounts.sock",NULL);
+  g_autoptr(GSocketAddress) address=g_unix_socket_address_new(path);
+  g_autoptr(GSocketClient) client=g_socket_client_new();
+  g_socket_client_set_timeout(client,45);
+  g_autoptr(GError) error=NULL;
+  g_autoptr(GSocketConnection) connection=g_socket_client_connect(client,G_SOCKET_CONNECTABLE(address),cancel,&error);
+  if(!connection){
+    g_task_return_new_error(task,G_IO_ERROR,G_IO_ERROR_NOT_CONNECTED,
+        "Служба аккаунтов недоступна. Запустите CLBB с обычного ярлыка.");
+    return;
+  }
+  const char *wire=request;
+  GOutputStream *output=g_io_stream_get_output_stream(G_IO_STREAM(connection));
+  if(!g_output_stream_write_all(output,wire,strlen(wire),NULL,cancel,&error)){
+    g_task_return_error(task,g_steal_pointer(&error));return;
+  }
+  GInputStream *input=g_io_stream_get_input_stream(G_IO_STREAM(connection));
+  g_autoptr(GString) reply=g_string_new(NULL);
+  char chunk[2048];
+  gssize size;
+  while((size=g_input_stream_read(input,chunk,sizeof(chunk),cancel,&error))>0){
+    g_string_append_len(reply,chunk,size);
+    if(reply->len>32768){
+      g_task_return_new_error(task,G_IO_ERROR,G_IO_ERROR_INVALID_DATA,"Ответ службы аккаунтов слишком длинный.");
+      return;
+    }
+  }
+  if(size<0){g_task_return_error(task,g_steal_pointer(&error));return;}
+  if(!g_utf8_validate(reply->str,-1,NULL)||!g_str_has_prefix(reply->str,"OK\n")){
+    const char *message=g_utf8_validate(reply->str,-1,NULL)&&g_str_has_prefix(reply->str,"ERR\n")
+        ?reply->str+4:"Не удалось выполнить действие с аккаунтом.";
+    g_task_return_new_error(task,G_IO_ERROR,G_IO_ERROR_FAILED,"%s",message);
+    return;
+  }
+  g_task_return_pointer(task,g_strdup(reply->str+3),g_free);
+}
+static void accounts_finished(GObject *source,GAsyncResult *result,gpointer ignored) {
+  (void)ignored;
+  ClbbSettings *s=g_object_get_data(source,"clbb-accounts-owner");
+  if(!s)return;
+  g_autoptr(GError) error=NULL;
+  g_autofree char *reply=g_task_propagate_pointer(G_TASK(result),&error);
+  const char *request=g_task_get_task_data(G_TASK(result));
+  s->account_busy=FALSE;
+  if(!reply)gtk_label_set_text(GTK_LABEL(s->account_status),error->message);
+  else if(!strcmp(request,"list\n")){
+    guint old=gtk_drop_down_get_selected(GTK_DROP_DOWN(s->account_picker));
+    g_autofree char *selected=old<s->account_ids->len?g_strdup(g_ptr_array_index(s->account_ids,old)):NULL;
+    g_ptr_array_set_size(s->account_ids,0);
+    g_array_set_size(s->account_flags,0);
+    g_autoptr(GtkStringList) options=gtk_string_list_new(NULL);
+    g_auto(GStrv) rows=g_strsplit(reply,"\n",-1);
+    guint preferred=GTK_INVALID_LIST_POSITION,current=GTK_INVALID_LIST_POSITION;
+    for(guint i=0;rows[i];++i){
+      g_auto(GStrv) fields=g_strsplit(rows[i],"\t",5);
+      if(g_strv_length(fields)!=4)continue;
+      guint flags=(!strcmp(fields[2],"1")?ACCOUNT_OPEN:0)
+                  | (!strcmp(fields[3],"1")?ACCOUNT_CURRENT:0);
+      if(!g_strcmp0(fields[0],selected))preferred=s->account_ids->len;
+      if(flags&ACCOUNT_CURRENT)current=s->account_ids->len;
+      g_autofree char *title=g_strconcat(fields[1],flags&ACCOUNT_CURRENT?" · текущий":
+          flags&ACCOUNT_OPEN?" · открыт":"",NULL);
+      gtk_string_list_append(options,title);
+      g_ptr_array_add(s->account_ids,g_strdup(fields[0]));
+      g_array_append_val(s->account_flags,flags);
+    }
+    gtk_drop_down_set_model(GTK_DROP_DOWN(s->account_picker),G_LIST_MODEL(options));
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(s->account_picker),
+        preferred!=GTK_INVALID_LIST_POSITION?preferred:current);
+  }else{
+    gtk_label_set_text(GTK_LABEL(s->account_status),reply);
+    if(g_str_has_prefix(request,"add\t"))gtk_editable_set_text(GTK_EDITABLE(s->account_name),"");
+    accounts_request(s,"list",NULL);
+  }
+  accounts_update_buttons(s);
+}
+static void accounts_request(ClbbSettings *s,const char *verb,const char *target) {
+  if(s->account_busy)return;
+  s->account_busy=TRUE;
+  accounts_update_buttons(s);
+  g_autoptr(GTask) task=g_task_new(s->panel,NULL,accounts_finished,NULL);
+  g_task_set_task_data(task,target?g_strdup_printf("%s\t%s\n",verb,target):g_strdup_printf("%s\n",verb),g_free);
+  g_task_run_in_thread(task,accounts_worker);
+}
+static void accounts_clicked(GtkButton *button,gpointer user) {
+  ClbbSettings *s=user;
+  GtkWidget *clicked=GTK_WIDGET(button);
+  if(clicked==s->account_reload){accounts_request(s,"list",NULL);return;}
+  if(clicked==s->account_add){
+    const char *name=gtk_editable_get_text(GTK_EDITABLE(s->account_name));
+    if(!*name){gtk_label_set_text(GTK_LABEL(s->account_status),"Введите название аккаунта.");return;}
+    gtk_label_set_text(GTK_LABEL(s->account_status),"Подготавливаю новый профиль…");
+    accounts_request(s,"add",name);
+    return;
+  }
+  guint index=gtk_drop_down_get_selected(GTK_DROP_DOWN(s->account_picker));
+  if(index>=s->account_ids->len)return;
+  gboolean switching=clicked==s->account_switch;
+  gtk_label_set_text(GTK_LABEL(s->account_status),switching?"Переключаю аккаунт…":"Запускаю второе окно…");
+  accounts_request(s,switching?"switch":"second",g_ptr_array_index(s->account_ids,index));
+}
+static void accounts_page(ClbbSettings *s) {
+  GtkWidget *page_box=page(s,"accounts","Аккаунты",
+      "Выберите аккаунт для текущего или второго окна CLBB.");
+  GtkWidget *card=gtk_box_new(GTK_ORIENTATION_VERTICAL,12);
+  gtk_widget_add_css_class(card,"clbb-section");
+  gtk_box_append(GTK_BOX(page_box),card);
+  s->account_ids=g_ptr_array_new_with_free_func(g_free);
+  s->account_flags=g_array_new(FALSE,FALSE,sizeof(guint));
+  s->account_picker=gtk_drop_down_new(NULL,NULL);
+  gtk_drop_down_set_enable_search(GTK_DROP_DOWN(s->account_picker),TRUE);
+  gtk_box_append(GTK_BOX(card),s->account_picker);
+  GtkWidget *actions=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,8);
+  s->account_switch=gtk_button_new_with_label("Сменить аккаунт");
+  s->account_second=gtk_button_new_with_label("Запустить второе окно с этим аккаунтом");
+  s->account_reload=gtk_button_new_with_label("Обновить список");
+  gtk_box_append(GTK_BOX(actions),s->account_switch);
+  gtk_box_append(GTK_BOX(actions),s->account_second);
+  gtk_box_append(GTK_BOX(actions),s->account_reload);
+  gtk_box_append(GTK_BOX(card),actions);
+  GtkWidget *add=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,8);
+  s->account_name=gtk_entry_new();
+  gtk_entry_set_placeholder_text(GTK_ENTRY(s->account_name),"Название нового аккаунта");
+  gtk_entry_set_max_length(GTK_ENTRY(s->account_name),48);
+  gtk_widget_set_hexpand(s->account_name,TRUE);
+  s->account_add=gtk_button_new_with_label("Добавить аккаунт");
+  gtk_box_append(GTK_BOX(add),s->account_name);
+  gtk_box_append(GTK_BOX(add),s->account_add);
+  gtk_box_append(GTK_BOX(card),add);
+  gtk_box_append(GTK_BOX(card),wrap_label("В новом окне войдите через меню самой игры.","clbb-muted"));
+  s->account_status=wrap_label("","clbb-accent");
+  gtk_box_append(GTK_BOX(card),s->account_status);
+  GtkWidget *buttons[]={s->account_switch,s->account_second,s->account_reload,s->account_add};
+  for(guint i=0;i<G_N_ELEMENTS(buttons);++i){
+    gtk_widget_add_css_class(buttons[i],"clbb-secondary");
+    g_signal_connect(buttons[i],"clicked",G_CALLBACK(accounts_clicked),s);
+  }
+  g_object_set_data(G_OBJECT(s->panel),"clbb-accounts-owner",s);
+  g_signal_connect(s->account_picker,"notify::selected",G_CALLBACK(accounts_selected),s);
+  accounts_update_buttons(s);
+}
 static void nav_selected(GtkListBox *list, GtkListBoxRow *row, gpointer data) {
   (void)list;
   if (!row)
     return;
   ClbbSettings *s = data;
-  const char *names[] = {"main", "controls", "sound", "hotkeys"};
+  const char *names[] = {"main", "controls", "sound", "hotkeys", "accounts"};
   int i = gtk_list_box_row_get_index(row);
   if (i >= 0 && i < (int)G_N_ELEMENTS(names)) {
     stop_capture(s);
     gtk_stack_set_visible_child_name(s->stack, names[i]);
+    if(!strcmp(names[i],"accounts"))accounts_request(s,"list",NULL);
     clbb_settings_refresh(s);
   }
 }
@@ -1450,7 +1619,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_widget_set_size_request(sidebar, 185, -1);
   gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar), GTK_SELECTION_SINGLE);
   const char *items[] = {"Основное", "Герой", "Звук",
-                         "Горячие клавиши"};
+                         "Горячие клавиши", "Аккаунты"};
   for (guint i = 0; i < G_N_ELEMENTS(items); ++i)
     gtk_list_box_append(GTK_LIST_BOX(sidebar),
                         label(items[i], "clbb-nav-label"));
@@ -1590,6 +1759,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_box_append(GTK_BOX(card), wrap_label("По метке сохраняются 5 секунд до и 5 после: ввод, координаты, камера и результаты применения. Без меток окно хранится только в памяти. По умолчанию Ctrl+S; можно назначить Ctrl, Shift, Alt с клавишей. Автометки отмечают подозрения, а не доказывают ошибку. Активные фрагменты — до 256 МиБ; старые переносятся в archive.", "clbb-muted"));
   s->debug_status = wrap_label("Запись выключена", "clbb-muted");
   gtk_box_append(GTK_BOX(card), s->debug_status);
+  accounts_page(s);
   GtkWidget *footer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
   gtk_widget_add_css_class(footer, "clbb-footer");
   s->capture_hint = wrap_label(
@@ -1807,6 +1977,9 @@ void clbb_settings_destroy(ClbbSettings *s) {
   if (!s)
     return;
   clbb_settings_hide(s);
+  g_object_set_data(G_OBJECT(s->panel),"clbb-accounts-owner",NULL);
+  g_ptr_array_unref(s->account_ids);
+  g_array_unref(s->account_flags);
   g_free(s->hero_layout);
   g_free(s->palette_selected);
   g_free(s->palette_hero_name);

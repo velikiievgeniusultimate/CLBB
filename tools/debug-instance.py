@@ -40,7 +40,7 @@ def sync_runtime(state):
  subprocess.run([sys.executable,str(ROOT/'distribution/release.py'),'verify',str(candidate)],check=True)
  write(path,selected)
 
-def prepare(name):
+def prepare(name, *, interactive=False):
  state=profile(name)
  if state.exists():
   marker=json.loads((state/'.clbb-debug-instance.json').read_text())
@@ -52,7 +52,12 @@ def prepare(name):
  (state/'run').chmod(0o700)
  for resource in RESOURCES.values():(state/resource).mkdir(parents=True,exist_ok=True)
  # Only the developer mapper configuration is cloned, never Android/game data.
- settings=json.loads((Path.home()/'.config/clbb/settings.json').read_text());settings['values'].update({'display.resolution':'1280x720','display.fps_limit':'60','display.vsync':'true','audio.muted':'true','debug.recording':'true'});settings['values'].pop('display.imported_resolution',None);write(state/'config/clbb/settings.json',settings)
+ settings_path=Path.home()/'.config/clbb/settings.json'
+ settings=json.loads(settings_path.read_text()) if settings_path.is_file() else {'values':{}}
+ if not interactive:
+  settings['values'].update({'display.resolution':'1280x720','display.fps_limit':'60','display.vsync':'true','audio.muted':'true','debug.recording':'true'})
+  settings['values'].pop('display.imported_resolution',None)
+ write(state/'config/clbb/settings.json',settings)
  cached=ROOT/'cache/native-apk-libraries.json'
  if cached.is_file():shutil.copy2(cached,state/'cache/native-apk-libraries.json')
  write(state/'.clbb-local-runtime.json',{**selected,'state':str(state)})
