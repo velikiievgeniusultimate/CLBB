@@ -39,7 +39,12 @@ struct ClbbSettings {
   GPtrArray *controls;
   GtkWidget *hero_box;
   GtkWidget *hero_title;
-  GtkWidget *movement_group;
+  GtkWidget *palette_search, *palette_tiles, *profile_picker;
+  GtkWidget *palette_tabs[4];
+  GArray *profile_ids;
+  int palette_group, selected_profile, live_profile, active_spell;
+  char *palette_selected;
+  char *offline_forms;
   char *hero_layout;
   GtkWidget *brand;
   GtkWidget *message;
@@ -145,8 +150,12 @@ static const char css[] =
     ".clbb-override { font-size: 11px; color: #c5b4c0; }";
 
 static char *read_text(ClbbSettings *s, const char *key, const char *fallback) {
+  g_autofree char *profile_key = s->selected_profile > 0 && g_str_has_prefix(key,"hero.")
+      && (g_str_has_prefix(key,"hero.bindings.") || g_str_has_prefix(key,"hero.movement.")
+          || g_str_has_prefix(key,"hero.cancel_key"))
+      ? g_strdup_printf("profile.%d.%s",s->selected_profile,key) : NULL;
   const char *v =
-      s->callbacks.read ? s->callbacks.read(s->callbacks.user, key) : NULL;
+      s->callbacks.read ? s->callbacks.read(s->callbacks.user, profile_key ? profile_key : key) : NULL;
   return g_strdup(v && *v ? v : fallback);
 }
 static int read_int(ClbbSettings *s, const char *key, int fallback) {
@@ -168,8 +177,12 @@ static gboolean write_value(ClbbSettings *s, const char *key,
                             const char *value) {
   if (s->refreshing)
     return TRUE;
+  g_autofree char *profile_key = s->selected_profile > 0 && g_str_has_prefix(key,"hero.")
+      && (g_str_has_prefix(key,"hero.bindings.") || g_str_has_prefix(key,"hero.movement.")
+          || g_str_has_prefix(key,"hero.cancel_key"))
+      ? g_strdup_printf("profile.%d.%s",s->selected_profile,key) : NULL;
   gboolean ok =
-      s->callbacks.write && s->callbacks.write(s->callbacks.user, key, value);
+      s->callbacks.write && s->callbacks.write(s->callbacks.user, profile_key ? profile_key : key, value);
   gtk_label_set_text(GTK_LABEL(s->message),
                      ok ? "Изменения сохранены"
                         : "Не удалось сохранить: проверьте назначение кнопки");
@@ -554,7 +567,10 @@ static void mode_control(ClbbSettings *s, GtkWidget *box, const char *title,
   const char *const spells[] = {"Моментальное прожатие", "Обычный навык",
                                 "Моментальный с наведением",
                                 "Прожатие с удержанием", NULL};
-  c->battle_spell_mode = g_str_has_suffix(key, ".bindings.extra:2.cast_mode");
+  const char *spell_key=strstr(key,".bindings.spell:");
+  int spell=spell_key?atoi(spell_key+strlen(".bindings.spell:")):0;
+  c->battle_spell_mode=g_str_has_suffix(key,".bindings.extra:2.cast_mode")
+      || (spell&&spell!=20030&&spell!=20040&&spell!=20080&&spell!=20190);
   c->widget = gtk_drop_down_new_from_strings(
       c->battle_spell_mode ? spells : movement ? moves : casts);
   g_signal_connect(c->widget, "notify::selected", G_CALLBACK(changed_mode), c);
@@ -614,7 +630,7 @@ static const char *battle_spell_name(int skill) {
 }
 static const char *action_title(const char *slot, int skill, const char *config) {
   (void)config;
-  if (!strcmp(slot,"item:active")) return "Активный предмет";
+  if (!strcmp(slot,"item:active") || !strcmp(slot,"extra:3")) return "Активный предмет";
   if (!strcmp(slot,"ally:mathilda")) return "Помощь Матильды";
   if (!strcmp(slot,"skill:0")) return "Навык 1";
   if (!strcmp(slot,"skill:1")) return "Навык 2";
@@ -637,16 +653,21 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
   gtk_flow_box_insert(GTK_FLOW_BOX(flow),box,-1);
   gtk_box_append(GTK_BOX(box),label(personal?"Для этого героя":"Для всех героев","clbb-section-title"));
   guint first=s->controls->len;
-  (void)config;
-  char *key=cancel?g_strdup_printf("%s.cancel_key",prefix):g_strdup_printf("%s.bindings.%s.key",prefix,slot);
+  const char *binding=g_str_has_prefix(config,"spell:")?config:slot;
+  char *key=cancel?g_strdup_printf("%s.cancel_key",prefix):g_strdup_printf("%s.bindings.%s.key",prefix,binding);
   bind_control(s,box,"Клавиша",key,cancel?'T':action_key(slot));g_free(key);
+  if (g_str_has_prefix(slot,"skill:") && strlen(slot)==7 && slot[6]>='0' && slot[6]<='3') {
+    key=g_strdup_printf("%s.bindings.upgrade:%c.key",prefix,slot[6]);
+    bind_control(s,box,"Прокачка навыка",key,'1'+slot[6]-'0');
+    g_free(key);
+  }
   gboolean fixed=g_str_has_prefix(slot,"combo:");
   gboolean held_only=((s->hero==126 && (!strcmp(slot,"skill:0")||!strcmp(slot,"skill:1")||!strcmp(slot,"skill:2"))) || (s->hero==78 && !strcmp(slot,"skill:0")));
-  if (!cancel&&!fixed) {
+  if (!cancel&&!fixed&&strcmp(slot,"match:statistics")) {
     GPtrArray *forms=g_ptr_array_new_with_free_func(g_free);
     g_ptr_array_add(forms,g_strdup(!strcmp(slot,"extra:2")?mode_config:slot));
     char **lines=g_strsplit(s->hero_layout,"\n",258);
-    if (!held_only && g_str_has_prefix(slot,"skill:")) for (guint n=1;lines[n]&&forms->len<16;++n) {
+    if (!held_only && g_str_has_prefix(slot,"skill:")) for (guint n=0;lines[n]&&forms->len<16;++n) {
       char **v=g_strsplit(lines[n],"\t",7);
       if (g_strv_length(v)==6&&!strcmp(v[0],slot)&&valid_action(v[1])&&g_str_has_prefix(v[1],slot)&&v[1][strlen(slot)]==':') {
         gboolean found=FALSE;for (guint k=0;k<forms->len;++k) found|=!strcmp(g_ptr_array_index(forms,k),v[1]);
@@ -655,6 +676,16 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
       g_strfreev(v);
     }
     g_strfreev(lines);
+    if(!held_only&&s->offline_forms&&g_str_has_prefix(slot,"skill:")) {
+      g_auto(GStrv) saved=g_strsplit(s->offline_forms,"\n",-1);
+      for(guint n=0;saved[n]&&forms->len<16;n++){
+        g_auto(GStrv) cols=g_strsplit(saved[n],"\t",4);
+        if(g_strv_length(cols)!=3||atoi(cols[0])!=s->hero||strcmp(cols[1],slot))continue;
+        g_autofree char *form=g_strdup_printf("%s:%s",slot,cols[2]);
+        if(valid_action(form)&&!g_ptr_array_find_with_equal_func(forms,form,g_str_equal,NULL))
+          g_ptr_array_add(forms,g_steal_pointer(&form));
+      }
+    }
     for (guint n=0;n<forms->len;++n) {
       const char *form=g_ptr_array_index(forms,n);
       char *title=forms->len>1?g_strdup_printf("Нажатие · версия %u",n+1):g_strdup("Нажатие");
@@ -690,21 +721,9 @@ static void action_body(ClbbSettings *s,GtkWidget *content,const char *slot,cons
   gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow),12);
   gtk_box_append(GTK_BOX(content),flow);
   action_scope(s,flow,"common",config,mode_config,slot,type,cancel);
-  if (strcmp(slot,"item:active") && strcmp(slot,"ally:mathilda")) action_scope(s,flow,"hero",config,mode_config,slot,type,cancel);
+  if (s->hero>0 && strcmp(slot,"match:statistics")) action_scope(s,flow,"hero",config,mode_config,slot,type,cancel);
   if(((s->hero==126 && (!strcmp(slot,"skill:0")||!strcmp(slot,"skill:1")||!strcmp(slot,"skill:2"))) || (s->hero==78 && !strcmp(slot,"skill:0"))))
     gtk_box_append(GTK_BOX(content),wrap_label("Результат навыка зависит от длительности удержания. Применение — только при отпускании.","clbb-muted"));
-}
-static void action_card(ClbbSettings *s,const char *slot,const char *config,const char *mode_config,int skill,int type,GHashTable *expanded,gboolean cancel) {
-  char *title;
-  if (!strcmp(slot,"extra:2")) {
-    const char *name=battle_spell_name(skill);
-    title=name?g_strdup_printf("Боевой навык - %s",name):g_strdup_printf("Боевой навык - №%d",skill);
-  } else title=g_strdup(cancel?"Отмена навыка":action_title(slot,skill,config));
-  GtkWidget *content=section(s->hero_box,title);g_free(title);
-  GtkWidget *card=gtk_widget_get_parent(gtk_widget_get_parent(content));
-  g_object_set_data_full(G_OBJECT(card),"clbb-control-slot",g_strdup(config),g_free);
-  action_body(s,content,slot,config,mode_config,type,cancel);
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(card)),g_hash_table_contains(expanded,config));
 }
 static void movement_scope(ClbbSettings *s,GtkWidget *flow,gboolean personal) {
   GtkWidget *box=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
@@ -750,47 +769,163 @@ static void clear_dynamic(ClbbSettings *s, GtkWidget *box) {
   while ((w = gtk_widget_get_first_child(box)))
     gtk_box_remove(GTK_BOX(box), w);
 }
-static void build_hero(ClbbSettings *s,int hero,const char *layout) {
-  GHashTable *expanded=g_hash_table_new_full(g_str_hash,g_str_equal,g_free,NULL);
-  if (hero==s->hero) for (GtkWidget *card=gtk_widget_get_first_child(s->hero_box);card;card=gtk_widget_get_next_sibling(card)) {
-    const char *slot=g_object_get_data(G_OBJECT(card),"clbb-control-slot");
-    GtkWidget *header=gtk_widget_get_first_child(card);
-    if (slot&&GTK_IS_TOGGLE_BUTTON(header)&&gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(header))) g_hash_table_add(expanded,g_strdup(slot));
+enum { PALETTE_BASIC, PALETTE_SKILLS, PALETTE_SPELLS, PALETTE_TEMP };
+
+static const char *follow_up(int hero,const char *slot) {
+  if(hero==77&&!strcmp(slot,"skill:1"))return "Отмена стены";
+  if(hero==9&&!strcmp(slot,"skill:2"))return "Завершить вращение";
+  if(hero==21&&!strcmp(slot,"skill:1"))return "Возврат к теням";
+  return "";
+}
+
+static void palette_update(ClbbSettings *s);
+
+static void palette_tile_clicked(GtkButton *button, gpointer user) {
+  ClbbSettings *s=user;
+  const char *slot=g_object_get_data(G_OBJECT(button),"clbb-slot");
+  g_free(s->palette_selected);
+  s->palette_selected=g_strdup(slot);
+  stop_capture(s);
+  palette_update(s);
+}
+
+static void palette_update(ClbbSettings *s) {
+  if(!s->palette_tiles) return;
+  for(GtkWidget *tile=gtk_widget_get_first_child(s->palette_tiles);tile;
+      tile=gtk_widget_get_first_child(s->palette_tiles))
+    gtk_flow_box_remove(GTK_FLOW_BOX(s->palette_tiles),tile);
+  g_autofree char *query=g_utf8_casefold(gtk_editable_get_text(GTK_EDITABLE(s->palette_search)),-1);
+  GtkWidget *first=NULL,*chosen=NULL;
+  for(GtkWidget *pane=gtk_widget_get_first_child(s->hero_box);pane;pane=gtk_widget_get_next_sibling(pane)) {
+    const char *slot=g_object_get_data(G_OBJECT(pane),"clbb-slot");
+    const char *title=g_object_get_data(G_OBJECT(pane),"clbb-title");
+    const char *bind=g_object_get_data(G_OBJECT(pane),"clbb-key");
+    int fallback=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pane),"clbb-fallback"));
+    int group=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pane),"clbb-group"));
+    g_autofree char *key=key_name(read_int(s,bind,fallback));
+    g_autofree char *description=g_strdup_printf("%s · %s",title,key);
+    const char *groups[]={"Базовые","Навыки героя","Боевые навыки","Временные"};
+    const char *upgrade=g_str_has_prefix(slot,"skill:")?" Прокачка навыка":"";
+    g_autofree char *haystack=g_strdup_printf("%s %s %s%s",description,groups[group],follow_up(s->hero,slot),upgrade);
+    g_autofree char *text=g_utf8_casefold(haystack,-1);
+    gboolean show=*query?strstr(text,query)!=NULL:group==s->palette_group;
+    gtk_widget_set_visible(pane,FALSE);
+    if(!show)continue;
+    if(!first)first=pane;
+    if(!g_strcmp0(slot,s->palette_selected))chosen=pane;
+    GtkWidget *tile=gtk_button_new_with_label(description);
+    gtk_widget_set_hexpand(tile,TRUE);
+    g_object_set_data_full(G_OBJECT(tile),"clbb-slot",g_strdup(slot),g_free);
+    g_signal_connect(tile,"clicked",G_CALLBACK(palette_tile_clicked),s);
+    gtk_flow_box_insert(GTK_FLOW_BOX(s->palette_tiles),tile,-1);
   }
+  if(!chosen)chosen=first;
+  if(chosen) {
+    gtk_widget_set_visible(chosen,TRUE);
+    const char *slot=g_object_get_data(G_OBJECT(chosen),"clbb-slot");
+    for(GtkWidget *row=gtk_widget_get_first_child(s->palette_tiles);row;row=gtk_widget_get_next_sibling(row)) {
+      GtkWidget *tile=gtk_flow_box_child_get_child(GTK_FLOW_BOX_CHILD(row));
+      if(!g_strcmp0(slot,g_object_get_data(G_OBJECT(tile),"clbb-slot")))
+        gtk_widget_add_css_class(tile,"suggested-action");
+    }
+  }
+}
+static void palette_search_changed(GtkEditable *editable, gpointer user) {
+  (void)editable; palette_update(user);
+}
+static void palette_tab_clicked(GtkButton *button,gpointer user) {
+  ClbbSettings *s=user;
+  s->palette_group=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button),"clbb-group"));
+  g_clear_pointer(&s->palette_selected,g_free);
+  for(int i=0;i<4;i++) {
+    if(i==s->palette_group)gtk_widget_add_css_class(s->palette_tabs[i],"suggested-action");
+    else gtk_widget_remove_css_class(s->palette_tabs[i],"suggested-action");
+  }
+  stop_capture(s);
+  gtk_editable_set_text(GTK_EDITABLE(s->palette_search),"");
+  palette_update(s);
+}
+static GtkWidget *palette_pane(ClbbSettings *s,const char *slot,const char *title,int group,const char *bind,int fallback) {
+  GtkWidget *pane=gtk_box_new(GTK_ORIENTATION_VERTICAL,10);
+  gtk_widget_add_css_class(pane,"clbb-section-content");
+  gtk_box_append(GTK_BOX(pane),label(title,"clbb-section-title"));
+  g_object_set_data_full(G_OBJECT(pane),"clbb-slot",g_strdup(slot),g_free);
+  g_object_set_data_full(G_OBJECT(pane),"clbb-title",g_strdup(title),g_free);
+  g_object_set_data_full(G_OBJECT(pane),"clbb-key",g_strdup(bind),g_free);
+  g_object_set_data(G_OBJECT(pane),"clbb-fallback",GINT_TO_POINTER(fallback));
+  g_object_set_data(G_OBJECT(pane),"clbb-group",GINT_TO_POINTER(group));
+  gtk_box_append(GTK_BOX(s->hero_box),pane);
+  return pane;
+}
+static void palette_action(ClbbSettings *s,const char *slot,const char *config,const char *title,int group,int type) {
+  gboolean cancel=!strcmp(slot,"cancel");
+  const char *scope=s->hero&&!g_str_equal(slot,"match:statistics")?"hero":"common";
+  g_autofree char *key=cancel?g_strdup_printf("%s.cancel_key",scope):g_strdup_printf("%s.bindings.%s.key",scope,config);
+  GtkWidget *pane=palette_pane(s,config,title,group,key,cancel?'T':action_key(slot));
+  action_body(s,pane,slot,config,config,type,cancel);
+  const char *phase=follow_up(s->hero,slot);
+  if(*phase){
+    g_autofree char *note=g_strdup_printf("%s — клавиша этого навыка",phase);
+    gtk_box_append(GTK_BOX(pane),wrap_label(note,"clbb-muted"));
+  }
+}
+static void build_hero(ClbbSettings *s,int hero,const char *layout) {
   clear_dynamic(s,s->hero_box);
   s->hero=hero;g_free(s->hero_layout);s->hero_layout=g_strdup(layout);
-  char **lines=g_strsplit(layout,"\n",258);
-  char *expected=g_strdup_printf("1\t%d",hero);
-  gboolean valid=hero>0&&strlen(layout)<=16384&&lines[0]&&!strcmp(lines[0],expected);
-  s->active_profile=valid;
-  gboolean any=FALSE,can_cancel=FALSE;
-  GtkWidget *attack_group=NULL;
-  GHashTable *seen=g_hash_table_new_full(g_str_hash,g_str_equal,g_free,NULL);
-  if (valid) for (guint n=1;lines[n];++n) {
-    if (!*lines[n]) continue;
-    char **v=g_strsplit(lines[n],"\t",7);
-    if (g_strv_length(v)==6&&strcmp(v[0],"ally:mathilda")&&valid_action(v[0])&&valid_action(v[1])&&
-        (!strcmp(v[0],v[1])||(g_str_has_prefix(v[0],"skill:")&&g_str_has_prefix(v[1],v[0])&&v[1][strlen(v[0])]==':'))&&
-        (!strcmp(v[1],v[2])||(!strcmp(v[0],"extra:2")&&((atoi(v[3])==20080&&!strcmp(v[2],"extra:2:20080"))||(atoi(v[3])==20030&&!strcmp(v[2],"extra:2:20030"))||(atoi(v[3])==20190&&!strcmp(v[2],"extra:2:20190")))))&&!g_hash_table_contains(seen,v[0])) {
-      g_hash_table_add(seen,g_strdup(v[0]));
-      int type=CLAMP(atoi(v[5]),0,4);any=TRUE;can_cancel|=g_str_has_prefix(v[0],"skill:")||g_str_has_prefix(v[0],"combo:")||g_str_has_prefix(v[0],"extra:");
-      if (g_str_has_prefix(v[0],"attack")) {
-        if (!attack_group) {
-          attack_group=section(s->hero_box,"Атака");
-          GtkWidget *card=gtk_widget_get_parent(gtk_widget_get_parent(attack_group));
-          g_object_set_data_full(G_OBJECT(card),"clbb-control-slot",g_strdup("attacks"),g_free);
-          gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(card)),g_hash_table_contains(expanded,"attacks"));
-        }
-        gtk_box_append(GTK_BOX(attack_group),label(action_title(v[0],atoi(v[3]),v[0]),"clbb-section-title"));
-        action_body(s,attack_group,v[0],v[0],v[2],type,FALSE);
-      } else action_card(s,v[0],v[0],v[2],atoi(v[3]),type,expanded,FALSE);
-    }
-    g_strfreev(v);
+  g_clear_pointer(&s->offline_forms,g_free);
+  if(hero>0&&!*layout)s->offline_forms=read_text(s,"profiles.forms","");
+  s->active_profile=hero>0;
+  GtkWidget *pane=palette_pane(s,"movement","Передвижение",PALETTE_BASIC,
+       hero?"hero.movement.button":"movement.button",KEY_MOUSE|2);
+  GtkWidget *flow=gtk_flow_box_new();
+  gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(flow),GTK_SELECTION_NONE);
+  gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(flow),1);
+  gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(flow),2);
+  gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flow),12);
+  gtk_box_append(GTK_BOX(pane),flow);
+  movement_scope(s,flow,FALSE);
+  if(hero>0)movement_scope(s,flow,TRUE);
+  const char *basic[]={"attack","attack:minion","attack:tower","extra:0","extra:1","cancel","match:statistics","shop:quick"};
+  for(guint i=0;i<G_N_ELEMENTS(basic);i++) {
+    const char *slot=basic[i];
+    const char *title=!strcmp(slot,"cancel")?"Отмена навыка":
+        !strcmp(slot,"match:statistics")?"Статистика":action_title(slot,0,slot);
+    palette_action(s,slot,slot,title,PALETTE_BASIC,0);
   }
-  if (any&&can_cancel) action_card(s,"cancel","cancel","cancel",0,1,expanded,TRUE);
-  if (!any) gtk_box_append(GTK_BOX(s->hero_box),wrap_label("Откройте героя в матче или тренировке — здесь появятся его доступные кнопки.","clbb-muted"));
-  gtk_widget_set_visible(s->movement_group,any);
-  g_hash_table_unref(seen);g_strfreev(lines);g_free(expected);g_hash_table_unref(expanded);
+  for(int i=0;i<3;i++) {
+    g_autofree char *slot=g_strdup_printf("skill:%d",i);
+    palette_action(s,slot,slot,action_title(slot,0,slot),PALETTE_SKILLS,0);
+  }
+  g_auto(GStrv) lines=g_strsplit(layout,"\n",258);
+  GHashTable *seen=g_hash_table_new_full(g_str_hash,g_str_equal,g_free,NULL);
+  for(guint i=0;lines[i];i++){
+    g_auto(GStrv) cols=g_strsplit(lines[i],"\t",7);
+    if(g_strv_length(cols)!=6||!valid_action(cols[0])||
+       (strcmp(cols[0],"skill:3")&&!g_str_has_prefix(cols[0],"combo:"))||
+       !g_hash_table_add(seen,g_strdup(cols[0])))continue;
+    palette_action(s,cols[0],cols[0],action_title(cols[0],atoi(cols[3]),cols[0]),PALETTE_SKILLS,atoi(cols[5]));
+  }
+  g_hash_table_unref(seen);
+  const int spells[]={20020,20030,20040,20050,20060,20070,20080,20100,20140,20150,20160,20190};
+  for(int pass=0;pass<2;pass++)for(guint i=0;i<G_N_ELEMENTS(spells);i++) {
+    int id=spells[i];
+    if((pass==0)!=(id==s->active_spell && hero==s->live_profile))continue;
+    g_autofree char *slot=g_strdup_printf("spell:%d",id);
+    g_autofree char *title=pass?g_strdup(battle_spell_name(id)):g_strdup_printf("%s · Активен",battle_spell_name(id));
+    palette_action(s,"extra:2",slot,title,PALETTE_SPELLS,0);
+  }
+  palette_action(s,"ally:mathilda","ally:mathilda","Помощь Матильды",PALETTE_TEMP,1);
+  palette_action(s,"item:active","item:active","Активный предмет",PALETTE_TEMP,1);
+  palette_update(s);
+}
+static void palette_pick_profile(GObject *picker,GParamSpec *spec,gpointer user) {
+  (void)spec;
+  ClbbSettings *s=user;
+  guint index=gtk_drop_down_get_selected(GTK_DROP_DOWN(picker));
+  if(index>=s->profile_ids->len)return;
+  s->selected_profile=g_array_index(s->profile_ids,int,index);
+  stop_capture(s);
+  clbb_settings_refresh(s);
 }
 static gboolean on_key(GtkEventControllerKey *controller, guint keyval,
                        guint keycode, GdkModifierType state, gpointer data) {
@@ -1311,25 +1446,52 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   b = page(s, "controls", "Герой",
            "Личные параметры наследуют общие, пока вы их не измените. ↶ — вернуть общее значение.");
   s->hero_title=gtk_widget_get_first_child(b);
-  card = section(b, "Помощь Матильды");
-  bind_control(s, card, "Клавиша", "common.bindings.ally:mathilda.key", 'V');
-  mode_control(s, card, "Нажатие", "common.bindings.ally:mathilda.cast_mode", 0, FALSE);
-  GtkWidget *assist_group = gtk_widget_get_parent(gtk_widget_get_parent(card));
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(assist_group)), TRUE);
-  card = section(b, "Передвижение");
-  s->movement_group=gtk_widget_get_parent(gtk_widget_get_parent(card));
-  GtkWidget *movement_flow=gtk_flow_box_new();
-  gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(movement_flow),GTK_SELECTION_NONE);
-  gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(movement_flow),1);
-  gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(movement_flow),2);
-  gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(movement_flow),12);
-  gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(movement_flow),12);
-  gtk_box_append(GTK_BOX(card),movement_flow);
-  movement_scope(s,movement_flow,FALSE);movement_scope(s,movement_flow,TRUE);
-  gtk_box_append(GTK_BOX(card),wrap_label("Движение начинается сразу. Порог удержания отличает короткий клик от зажатой кнопки.","clbb-muted"));
+  GtkWidget *toolbar=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,10);
+  s->palette_search=gtk_search_entry_new();
+  gtk_widget_set_hexpand(s->palette_search,TRUE);
+  g_object_set(s->palette_search,"placeholder-text","Найти действие или клавишу",NULL);
+  gtk_box_append(GTK_BOX(toolbar),s->palette_search);
+  GtkStringList *profiles=gtk_string_list_new(NULL);
+  gtk_string_list_append(profiles,"Текущий герой");
+  s->profile_ids=g_array_new(FALSE,FALSE,sizeof(int));
+  int automatic=0;
+  g_array_append_val(s->profile_ids,automatic);
+  g_autofree char *catalog=read_text(s,"profiles.catalog","");
+  g_auto(GStrv) rows=g_strsplit(catalog,"\n",-1);
+  for(guint i=0;rows[i];i++){
+    char *separator=strchr(rows[i],'\t');
+    if(!separator)continue;
+    int id=atoi(rows[i]);
+    if(id<1||id>134)continue;
+    gtk_string_list_append(profiles,separator+1);
+    g_array_append_val(s->profile_ids,id);
+  }
+  s->profile_picker=gtk_drop_down_new(G_LIST_MODEL(profiles),NULL);
+  gtk_drop_down_set_enable_search(GTK_DROP_DOWN(s->profile_picker),TRUE);
+  gtk_box_append(GTK_BOX(toolbar),s->profile_picker);
+  gtk_box_append(GTK_BOX(b),toolbar);
+  GtkWidget *tabs=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,6);
+  const char *tab_titles[]={"Базовые","Навыки героя","Боевые навыки","Временные"};
+  for(int i=0;i<4;i++){
+    s->palette_tabs[i]=gtk_button_new_with_label(tab_titles[i]);
+    g_object_set_data(G_OBJECT(s->palette_tabs[i]),"clbb-group",GINT_TO_POINTER(i));
+    g_signal_connect(s->palette_tabs[i],"clicked",G_CALLBACK(palette_tab_clicked),s);
+    gtk_box_append(GTK_BOX(tabs),s->palette_tabs[i]);
+  }
+  s->palette_group=PALETTE_SKILLS;
+  gtk_widget_add_css_class(s->palette_tabs[s->palette_group],"suggested-action");
+  gtk_box_append(GTK_BOX(b),tabs);
+  s->palette_tiles=gtk_flow_box_new();
+  gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(s->palette_tiles),GTK_SELECTION_NONE);
+  gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(s->palette_tiles),TRUE);
+  gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(s->palette_tiles),8);
+  gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(s->palette_tiles),8);
+  gtk_box_append(GTK_BOX(b),s->palette_tiles);
   Control *c;
   s->hero_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
   gtk_box_append(GTK_BOX(b), s->hero_box);
+  g_signal_connect(s->palette_search,"changed",G_CALLBACK(palette_search_changed),s);
+  g_signal_connect(s->profile_picker,"notify::selected",G_CALLBACK(palette_pick_profile),s);
   b = page(s, "sound", "Звук", "Общий уровень, игровой звук и голосовой чат.");
   card = section(b, "Громкость CLBB");
   const char *volume_titles[] = {"Общий уровень", "Игра", "Голосовой чат"};
@@ -1421,14 +1583,21 @@ void clbb_settings_refresh(ClbbSettings *s) {
   audio_refresh(s);
   display_refresh(s);
   pacing_refresh(s);
-  int hero = read_int(s, "hero.id", 0);
-  char *layout=read_text(s,"hero.controls","");
-  if (hero!=s->hero) stop_capture(s);
-  if (hero!=s->hero||g_strcmp0(layout,s->hero_layout)) build_hero(s,hero,layout);
-  g_free(layout);
-  char *hero_name=read_text(s,"hero.name",hero>0?"Герой":"Герой не выбран");
-  gtk_label_set_text(GTK_LABEL(s->hero_title),s->active_profile?hero_name:"Герой не выбран");
-  g_free(hero_name);
+  int live=read_int(s,"hero.id",0);
+  int hero=s->selected_profile?s->selected_profile:live;
+  int spell=read_int(s,"common.battle_spell_id",0);
+  g_autofree char *layout=live==hero?read_text(s,"hero.controls",""):g_strdup("");
+  if(hero!=s->hero)stop_capture(s);
+  if(hero!=s->hero||live!=s->live_profile||spell!=s->active_spell||g_strcmp0(layout,s->hero_layout)){
+    s->live_profile=live;
+    s->active_spell=spell;
+    build_hero(s,hero,layout);
+  }
+  g_autofree char *hero_name=read_text(s,"hero.name","Герой");
+  if(s->selected_profile){
+    GtkStringObject *item=gtk_drop_down_get_selected_item(GTK_DROP_DOWN(s->profile_picker));
+    gtk_label_set_text(GTK_LABEL(s->hero_title),gtk_string_object_get_string(item));
+  } else gtk_label_set_text(GTK_LABEL(s->hero_title),hero>0?hero_name:"Управление");
   char *t = read_text(s, "name", "CLBB");
   gtk_label_set_text(GTK_LABEL(s->brand), t);
   g_free(t);
@@ -1509,6 +1678,21 @@ void clbb_settings_refresh(ClbbSettings *s) {
 
   }
   g_strfreev(conflicts);
+  for(GtkWidget *row=gtk_widget_get_first_child(s->palette_tiles);row;row=gtk_widget_get_next_sibling(row)){
+    GtkWidget *tile=gtk_flow_box_child_get_child(GTK_FLOW_BOX_CHILD(row));
+    const char *slot=g_object_get_data(G_OBJECT(tile),"clbb-slot");
+    for(GtkWidget *pane=gtk_widget_get_first_child(s->hero_box);pane;pane=gtk_widget_get_next_sibling(pane)){
+      if(g_strcmp0(slot,g_object_get_data(G_OBJECT(pane),"clbb-slot")))continue;
+      const char *title=g_object_get_data(G_OBJECT(pane),"clbb-title");
+      const char *bind=g_object_get_data(G_OBJECT(pane),"clbb-key");
+      int fallback=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pane),"clbb-fallback"));
+      g_autofree char *key=key_name(read_int(s,bind,fallback));
+      g_autofree char *caption=g_strdup_printf("%s · %s",title,key);
+      if(g_strcmp0(caption,gtk_button_get_label(GTK_BUTTON(tile))))
+        gtk_button_set_label(GTK_BUTTON(tile),caption);
+      break;
+    }
+  }
   gtk_widget_set_visible(s->movement_distance_row,
                          read_int(s, "movement.click_mode", 0) == 0);
   s->refreshing = FALSE;
@@ -1551,6 +1735,9 @@ void clbb_settings_destroy(ClbbSettings *s) {
     return;
   clbb_settings_hide(s);
   g_free(s->hero_layout);
+  g_free(s->palette_selected);
+  g_free(s->offline_forms);
+  g_array_unref(s->profile_ids);
   gtk_overlay_remove_overlay(GTK_OVERLAY(gtk_widget_get_parent(s->panel)),
                              s->panel);
   g_weak_ref_clear(&s->previous_focus);

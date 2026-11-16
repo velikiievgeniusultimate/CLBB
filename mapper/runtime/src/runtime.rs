@@ -16,6 +16,20 @@ use clbb_moba_core::{
         host::{Binding, Host, Timer},
     },
 };
+const BATTLE_SPELLS: [i32; 12] = [
+    20020, 20030, 20040, 20050, 20060, 20070, 20080, 20100, 20140, 20150, 20160, 20190,
+];
+
+fn profile_setting(key: &str) -> Option<(i32, &str)> {
+    let (id, setting) = key.strip_prefix("profile.")?.split_once('.')?;
+    let hero = id.parse::<i32>().ok()?;
+    ((1..=134).contains(&hero)
+        && (setting.starts_with("hero.bindings.")
+            || setting.starts_with("hero.movement.")
+            || matches!(setting, "hero.cancel_key" | "hero.cancel_key.override")))
+        .then_some((hero, setting))
+}
+
 use std::{
     collections::BTreeMap,
     ffi::{CStr, CString, c_char, c_void},
@@ -371,7 +385,7 @@ impl Adapter {
             hero.hash(&mut hash);s.linked.is_some().hash(&mut hash);
             for b in s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize)
                 .chain(s.frame.ui.capability_controls.iter().take(s.frame.ui.capability_count.min(32) as usize)) {
-                b.slot.as_str().hash(&mut hash);b.active.get().hash(&mut hash);b.press_uv.valid().hash(&mut hash);
+                b.slot.as_str().hash(&mut hash);b.skill_id.int().hash(&mut hash);b.active.get().hash(&mut hash);b.press_uv.valid().hash(&mut hash);
             }
             hash.finish()
         });
@@ -389,7 +403,10 @@ impl Adapter {
             let slot=b.slot.as_str();
             if !b.active.get()||!b.press_uv.valid()||!seen.insert(slot) {continue;}
             if sample.linked.is_some()&&matches!(slot,"skill:2"|"skill:3") {continue;}
-            add(self.settings.binding(hero,slot).key,slot.into());
+            let binding_slot = if slot == "extra:2" && BATTLE_SPELLS.contains(&b.skill_id.int()) {
+                format!("spell:{}", b.skill_id.int())
+            } else { slot.to_owned() };
+            add(self.settings.binding(hero,&binding_slot).key,slot.into());
         }
         if sample.linked.is_some() { for n in 0..2 {let slot=format!("combo:{n}");add(self.settings.binding(hero,&slot).key,slot);} }
         add(self.settings.integer("hero.cancel_key",hero),"Отмена навыка".into());
@@ -516,7 +533,9 @@ impl Host for Adapter {
     }
     fn binding(&mut self, hero: i32, button: &Button, config: &str) -> Binding {
         if self.fresh().is_none() { self.settings.clear_native_holds(); }
-        let mut binding=self.settings.binding(hero,config);
+        let spell = (config == "extra:2" && BATTLE_SPELLS.contains(&button.skillId))
+            .then(|| format!("spell:{}", button.skillId));
+        let mut binding=self.settings.binding(hero,spell.as_deref().unwrap_or(config));
         if config == "extra:2" && !matches!(button.skillId, 20020 | 20150) {
             binding.cast_mode = match binding.cast_mode {
                 2 => 1,
@@ -527,7 +546,7 @@ impl Host for Adapter {
         if let Some(sample)=self.fresh().filter(|s|s.frame.hero_id.int()==hero) {
             binding.aim_type=*sample.control_types.get(&button.slot).unwrap_or(&0);
         }
-        if config == "extra:2" && crate::settings::plain_spell_id(button.skillId) {
+        if spell.is_none() && config == "extra:2" && crate::settings::plain_spell_id(button.skillId) {
             binding.cast_mode = self.settings.integer(&format!("hero.bindings.extra:2:{}.cast_mode",button.skillId), hero);
         }
         if hero==71 && button.kind=="attack" && button.slot=="attack" && binding.aim_type!=2 {
@@ -1133,6 +1152,11 @@ impl Runtime {
         let v=match key {
             "audio.input_devices"|"audio.output_devices"|"audio.status"|"audio.capture_status"|"audio.playback_status"=>crate::audio::read(key),
             "hero.id"=>hero.to_string(),"hero.name"=>hero_display_name(hero),
+            "profiles.catalog" => (1..=134).map(|id| format!("{id}\t{}\n", hero_display_name(id))).collect(),
+            _ if profile_setting(key).is_some() => {
+                let (profile, setting) = profile_setting(key).unwrap();
+                self.host.settings.get(setting, profile)
+            },
             "status"|"diagnostics.status"=>if !self.error.is_empty(){self.error.clone()}else if !self.host.settings.boolean("enabled",0){"Управление CLBB выключено".into()}else if self.host.fresh().is_none(){"Ожидаю матч и кнопки героя".into()}else if self.suspended{"Профиль готов · управление приостановлено".into()}else{view.status_.owned()},
             "diagnostics.controller"=>self.controller_diagnostics(&view).to_string(),
             "diagnostics.input"=>self.input_diagnostics(&view).to_string(),
@@ -1197,6 +1221,17 @@ impl Runtime {
                 }).to_string()
             }).unwrap_or_else(|| "{\"ready\":false}".into()),
             "hero.controls"=>self.hero_controls(),
+            "profiles.forms" => {
+                let mut rows = String::new();
+                for (profile, skills) in &self.host.settings.observed_forms {
+                    for ((slot, base), forms) in skills {
+                        for form in forms.iter().filter(|form| *form != base) {
+                            rows.push_str(&format!("{profile}\t{slot}\t{form}\n"));
+                        }
+                    }
+                }
+                rows
+            },
             "bindings.conflicts"=>self.host.conflicts.iter().map(|(key,names)|format!("{key}\t{}\n",names.join(", "))).collect::<String>(),
             "common.battle_spell_id"=>self.host.fresh().and_then(|s|s.frame.ui.buttons.iter().take(s.frame.ui.button_count.min(32) as usize).find(|b|b.kind.as_str()=="extra"&&b.slot.as_str()=="extra:2")).map(|b|b.skill_id.int()).unwrap_or(0).to_string(),
             "hero.linked_controls"=>if self.host.fresh().is_some_and(|s|s.linked.is_some()) {"1".into()}else{"0".into()},
@@ -1246,7 +1281,8 @@ impl Runtime {
                 _ => false,
             };
         }
-        let hero = self.core.inspect().heroId_;
+        let current_hero = self.core.inspect().heroId_;
+        let (hero, key) = profile_setting(key).unwrap_or((current_hero, key));
         match self.host.settings.set(key, value, hero) {
             Ok(()) => {
                 self.error.clear();

@@ -199,6 +199,34 @@ impl Settings {
     }
     pub fn get(&self, key: &str, hero: i32) -> String {
         if key == "enabled" { return "true".into(); }
+        if let Some((scope, tail)) = key.split_once(".bindings.spell:") {
+            if let Some((id, field)) = tail.split_once('.') {
+                let canonical = Self::canonical(key, hero);
+                let override_marker = self.values.get(&format!("{canonical}.override"));
+                let has_override = override_marker.is_some_and(|value| matches!(value.as_str(), "true" | "1"));
+                if scope == "hero" && !has_override && !field.ends_with("override") {
+                    let common = format!("common.bindings.spell:{id}.{field}");
+                    if override_marker.is_some() || self.values.contains_key(&common) {
+                        return self.get(&common, hero);
+                    }
+                }
+                if !field.ends_with("override") && (scope == "common" || !has_override)
+                    && (scope != "common" || !self.values.contains_key(&canonical))
+                {
+                    let legacy = if field == "cast_mode"
+                        && id.parse().is_ok_and(plain_spell_id)
+                    {
+                        format!("{scope}.bindings.extra:2:{id}.{field}")
+                    } else {
+                        format!("{scope}.bindings.extra:2.{field}")
+                    };
+                    return self.get(&legacy, hero);
+                }
+                if let Some(value) = self.values.get(&canonical) {
+                    return value.clone();
+                }
+            }
+        }
         if let Some((scope, tail))=key.split_once(".bindings.") {
             if let Some((slot,field))=tail.rsplit_once('.') {
                 if hold_duration_skill(hero,slot) {
@@ -408,7 +436,7 @@ impl Settings {
         matches!(self.get(key, hero).as_str(), "true" | "1")
     }
     pub fn binding(&self, hero: i32, slot: &str) -> clbb_moba_core::controller::host::Binding {
-        let prefix = if matches!(slot, "match:statistics" | "item:active" | "ally:mathilda") { "common" } else { "hero" };
+        let prefix = if slot == "match:statistics" { "common" } else { "hero" };
         let key = |f| format!("{prefix}.bindings.{slot}.{f}");
         let code = self.integer(&key("key"), hero);
         let code = if valid_key(code) && !self.reserved(code, hero) {
@@ -504,7 +532,7 @@ impl Settings {
             _ if is_binding && key.ends_with(".key") => {
                 integer.is_some_and(|v| valid_key(v) && !self.reserved(v, hero))
             }
-            _ if is_binding && key.ends_with(".bindings.extra:2.cast_mode") => {
+            _ if is_binding && (key.ends_with(".bindings.extra:2.cast_mode") || key.contains(".bindings.spell:") && key.ends_with(".cast_mode")) => {
                 matches!(value, "0" | "1" | "2" | "3")
             }
             _ if is_binding && key.ends_with(".cast_mode") => matches!(value, "0" | "1"),
@@ -627,7 +655,20 @@ fn native_skill_slot(slot: &str) -> bool {
 mod tests {
     use super::*;
     #[test]
-    fn mathilda_gift_is_global_including_the_giver_and_defaults_to_release() {
+    fn battle_spell_settings_preserve_existing_binds_and_allow_independent_overrides() {
+        let mut settings=Settings::default();
+        settings.set("hero.bindings.extra:2.key","71",25).unwrap();
+        assert_eq!(settings.binding(25,"spell:20150").key,71);
+        assert_eq!(settings.binding(25,"spell:20100").key,71);
+        settings.set("hero.bindings.spell:20150.key","72",25).unwrap();
+        assert_eq!(settings.binding(25,"spell:20150").key,72);
+        assert_eq!(settings.binding(25,"spell:20100").key,71);
+        assert_eq!(settings.binding(53,"spell:20150").key,70);
+        settings.set("hero.bindings.spell:20150.key.override","false",25).unwrap();
+        assert_eq!(settings.binding(25,"spell:20150").key,70);
+    }
+    #[test]
+    fn mathilda_gift_inherits_until_a_hero_has_an_override() {
         let mut s=Settings::default();
         for hero in 1..=133 {
             assert_eq!(s.binding(hero,"ally:mathilda").key,86);
@@ -638,13 +679,13 @@ mod tests {
             s.set("common.bindings.ally:mathilda.cast_mode",&mode.to_string(),53).unwrap();
             s.set("hero.bindings.ally:mathilda.key","90",102).unwrap();
             for hero in 1..=133 {
-                assert_eq!(s.binding(hero,"ally:mathilda").key,88);
+                assert_eq!(s.binding(hero,"ally:mathilda").key,if hero==102 {90} else {88});
                 assert_eq!(s.binding(hero,"ally:mathilda").cast_mode,mode);
             }
         }
     }
     #[test]
-    fn active_item_has_two_global_modes_and_personal_settings_never_split_it() {
+    fn active_item_has_two_modes_and_supports_personal_overrides() {
         let mut s = Settings::default();
         assert_eq!(s.binding(25, "item:active").key, 0x01000007);
         assert_eq!(s.binding(25, "item:active").cast_mode, 0);
@@ -654,8 +695,8 @@ mod tests {
             s.set("hero.bindings.item:active.cast_mode", &(1-mode).to_string(), 25).unwrap();
             s.set("hero.bindings.item:active.key", "90", 25).unwrap();
             for hero in 1..=133 {
-                assert_eq!(s.binding(hero, "item:active").key, 88);
-                assert_eq!(s.binding(hero, "item:active").cast_mode, mode);
+                assert_eq!(s.binding(hero, "item:active").key, if hero==25 {90} else {88});
+                assert_eq!(s.binding(hero, "item:active").cast_mode, if hero==25 {1-mode} else {mode});
                 assert_eq!(s.binding(hero, "extra:3").key, 0x01000007);
             }
         }

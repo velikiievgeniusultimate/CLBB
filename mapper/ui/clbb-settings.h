@@ -36,6 +36,9 @@ typedef struct ClbbSettings ClbbSettings;
  * debug.status (read-only), debug.mark (write-only manual marker)
  * hero.id (read-only number), hero.name (read-only display name)
  * hero.cancel_key (default 84 = T)
+ * profiles.catalog and profiles.forms supply the offline hero selector and known forms.
+ * profile.<id>.hero.* routes personal reads and writes to the selected profile.
+ * spell:<id> settings inherit the corresponding legacy extra:2 values until edited.
  *
  * common.bindings.<slot>.key / .cast_mode / .stop_movement
  * hero.bindings.<slot>.key / .cast_mode / .stop_movement / .override
@@ -58,9 +61,9 @@ typedef struct ClbbSettings ClbbSettings;
  * mode-config slot TAB base skill ID TAB current skill ID TAB type LF.
  * Repeated native slots with different config slots describe versions inside
  * the same skill card, not additional buttons. Only present buttons are listed; cooldown does not
- * itself remove a button. The Hero page is built from this bounded layout.
+ * itself remove a button. This layout adds live forms to the permanent palette.
  * LMB (0x02000001) must always be rejected by the settings owner.
- * .cast_mode is not offered for attack, upgrade, shop, recall or regeneration.
+ * Upgrade controls are key-only and live inside the corresponding skill card.
  */
 typedef struct {
   const char *(*read)(void *user, const char *key);
