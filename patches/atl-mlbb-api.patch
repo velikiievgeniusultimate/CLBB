@@ -1,7 +1,16 @@
 diff --git a/meson.build b/meson.build
-index 2c31844..ee46de8 100644
+index 2c31844..4a71eb8 100644
 --- a/meson.build
 +++ b/meson.build
+@@ -61,7 +61,7 @@ subdir('src/api-impl')
+ custom_target('api-impl.jar', build_by_default: true, input: [hax_jar], output: ['api-impl.jar'],
+               install: true,
+               install_dir : get_option('libdir') / 'java/dex/android_translation_layer',
+-              command: ['dx', '--dex', '--incremental', '--output='+join_paths(builddir_base, 'api-impl.jar'), hax_jar.full_path()])
++              command: ['dx', '--dex', '--output='+join_paths(builddir_base, 'api-impl.jar'), hax_jar.full_path()])
+ 
+ # gstub.jar
+ subdir('src/gstub')
 @@ -107,6 +107,13 @@ upcalls_header = declare_dependency(sources: upcalls_header_tgt)
  # TODO: switch everything over from relative paths and move this to src/shared_includes
  shared_includes_dir = include_directories('src/api-impl-jni/')
@@ -2088,7 +2097,7 @@ index 560084b..f1d378b 100644
  	gtk_widget_insert_before(GTK_WIDGET(popover), decor_view, NULL);
  	gtk_popover_present(popover);
 diff --git a/src/api-impl-jni/widgets/android_view_SurfaceView.c b/src/api-impl-jni/widgets/android_view_SurfaceView.c
-index 11b6564..258e5ee 100644
+index 11b6564..1392ac4 100644
 --- a/src/api-impl-jni/widgets/android_view_SurfaceView.c
 +++ b/src/api-impl-jni/widgets/android_view_SurfaceView.c
 @@ -1,4 +1,9 @@
@@ -2101,7 +2110,7 @@ index 11b6564..258e5ee 100644
  
  #include "../defines.h"
  #include "../util.h"
-@@ -54,10 +59,19 @@ static void surface_view_widget_snapshot(GtkWidget *widget, GdkSnapshot *snapsho
+@@ -54,16 +59,69 @@ static void surface_view_widget_snapshot(GtkWidget *widget, GdkSnapshot *snapsho
  			gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(0, gtk_widget_get_height(widget)));
  			gtk_snapshot_scale(snapshot, 1, -1);
  		}
@@ -2121,7 +2130,66 @@ index 11b6564..258e5ee 100644
  	if (surface_view_widget->frame_callback) {
  		surface_view_widget->frame_callback(surface_view_widget);
  		surface_view_widget->frame_callback = NULL;
-@@ -161,6 +175,8 @@ JNIEXPORT jlong JNICALL Java_android_view_SurfaceView_native_1constructor(JNIEnv
+ 	}
+ }
+ 
++// Map/unmap and input dispatch all run on the GTK thread. The widget hierarchy
++// owns the surfaces; each root keeps only the list of its mapped children.
++static GQuark mapped_surfaces_key(void)
++{
++	return g_quark_from_static_string("atl-mapped-game-surfaces");
++}
++
++static void surface_view_widget_map(GtkWidget *widget)
++{
++	GTK_WIDGET_CLASS(surface_view_widget_parent_class)->map(widget);
++	GtkRoot *root = gtk_widget_get_root(widget);
++	if (!root)
++		return;
++	GPtrArray *surfaces = g_object_get_qdata(G_OBJECT(root), mapped_surfaces_key());
++	if (!surfaces) {
++		surfaces = g_ptr_array_new();
++		g_object_set_qdata_full(G_OBJECT(root), mapped_surfaces_key(), surfaces,
++		                        (GDestroyNotify)g_ptr_array_unref);
++	}
++	g_ptr_array_add(surfaces, widget);
++}
++
++static void surface_view_widget_unmap(GtkWidget *widget)
++{
++	GtkRoot *root = gtk_widget_get_root(widget);
++	if (root) {
++		GPtrArray *surfaces = g_object_get_qdata(G_OBJECT(root), mapped_surfaces_key());
++		if (surfaces)
++			g_ptr_array_remove_fast(surfaces, widget);
++	}
++	GTK_WIDGET_CLASS(surface_view_widget_parent_class)->unmap(widget);
++}
++
++GtkWidget *surface_view_widget_unique(GtkWidget *root)
++{
++	GPtrArray *surfaces = g_object_get_qdata(G_OBJECT(root), mapped_surfaces_key());
++	if (surfaces && surfaces->len == 1) {
++		GtkWidget *widget = g_ptr_array_index(surfaces, 0);
++		if (gtk_widget_get_width(widget) > 0 && gtk_widget_get_height(widget) > 0)
++			return widget;
++	}
++	return NULL;
++}
++
+ static void surface_view_widget_dispose(GObject *object)
+ {
+ 	SurfaceViewWidget *surface_view_widget = SURFACE_VIEW_WIDGET(object);
+@@ -79,6 +137,8 @@ static void surface_view_widget_class_init(SurfaceViewWidgetClass *class)
+ 	GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(class);
+ 
+ 	// resize signal copied from GtkDrawingArea
++	widget_class->map = surface_view_widget_map;
++	widget_class->unmap = surface_view_widget_unmap;
+ 	widget_class->size_allocate = surface_view_widget_size_allocate;
+ 	widget_class->snapshot = surface_view_widget_snapshot;
+ 	G_OBJECT_CLASS(class)->dispose = surface_view_widget_dispose;
+@@ -161,6 +221,8 @@ JNIEXPORT jlong JNICALL Java_android_view_SurfaceView_native_1constructor(JNIEnv
  	GtkWidget *dummy = surface_view_widget_new();
  	gtk_widget_set_name(dummy, "dummy widget for SurfaceView");
  	GtkWidget *graphics_offload = gtk_graphics_offload_new(dummy);
@@ -2130,6 +2198,16 @@ index 11b6564..258e5ee 100644
  	wrapper_widget_set_child(WRAPPER_WIDGET(wrapper), graphics_offload);
  	wrapper_widget_set_jobject(WRAPPER_WIDGET(wrapper), env, this);
  	// TODO: is this correct for all usecases? how do we know when it's not?
+diff --git a/src/api-impl-jni/widgets/android_view_SurfaceView.h b/src/api-impl-jni/widgets/android_view_SurfaceView.h
+index fc402fe..305c372 100644
+--- a/src/api-impl-jni/widgets/android_view_SurfaceView.h
++++ b/src/api-impl-jni/widgets/android_view_SurfaceView.h
+@@ -15,3 +15,5 @@ struct _SurfaceViewWidgetClass {
+ };
+ 
+ void surface_view_widget_set_texture(SurfaceViewWidget *surface_view_widget, GdkTexture *texture, gboolean needs_flip);
++
++GtkWidget *surface_view_widget_unique(GtkWidget *root);
 diff --git a/src/api-impl-jni/widgets/android_webkit_WebView.c b/src/api-impl-jni/widgets/android_webkit_WebView.c
 index ef0513d..b7af23c 100644
 --- a/src/api-impl-jni/widgets/android_webkit_WebView.c
@@ -2846,6 +2924,18 @@ index 91d2a62..1f6de91 100644
  	public int commit() {
  		return 0;
  	}
+diff --git a/src/api-impl/android/atl/ATLLoadedApp.java b/src/api-impl/android/atl/ATLLoadedApp.java
+index 6ca40db..603317c 100644
+--- a/src/api-impl/android/atl/ATLLoadedApp.java
++++ b/src/api-impl/android/atl/ATLLoadedApp.java
+@@ -208,6 +208,7 @@ public final class ATLLoadedApp {
+ 		int label_res = 0;
+ 		for (PackageParser.Activity activity : pkg.activities) {
+ 			if (className.equals(activity.className)) {
++				ContentProvider.atl_start_process_providers(this, activity.info.processName);
+ 				label_res = activity.info.labelRes;
+ 				theme_res = activity.info.getThemeResource();
+ 				break;
 diff --git a/src/api-impl/android/atl/ATLLoadedAppManager.java b/src/api-impl/android/atl/ATLLoadedAppManager.java
 index 99ddaf7..6d4aa03 100644
 --- a/src/api-impl/android/atl/ATLLoadedAppManager.java
@@ -2868,6 +2958,115 @@ index 99ddaf7..6d4aa03 100644
  					return loadGStub(packageName);
  				}
  				return null;
+diff --git a/src/api-impl/android/atl/ATLProvider.java b/src/api-impl/android/atl/ATLProvider.java
+index dabdd99..b11efdb 100644
+--- a/src/api-impl/android/atl/ATLProvider.java
++++ b/src/api-impl/android/atl/ATLProvider.java
+@@ -28,7 +28,7 @@ public final class ATLProvider {
+ 		this.triedLoading = true;
+ 	}
+ 
+-	public ContentProvider getContentProvider() {
++	public synchronized ContentProvider getContentProvider() {
+ 		if (this.triedLoading) {
+ 			return this.contentProvider;
+ 		}
+@@ -46,6 +46,6 @@ public final class ATLProvider {
+ 			// Catch all errors when loading a content provider to help the application boot up.
+ 			Slog.e(TAG, "Failed to load content provider " + this.provider.info.authority, t);
+ 		}
+-		return contentProvider;
++		return this.contentProvider;
+ 	}
+ }
+diff --git a/src/api-impl/android/content/ContentProvider.java b/src/api-impl/android/content/ContentProvider.java
+index 76c932a..e132b43 100644
+--- a/src/api-impl/android/content/ContentProvider.java
++++ b/src/api-impl/android/content/ContentProvider.java
+@@ -11,39 +11,60 @@ import android.database.Cursor;
+ import android.net.Uri;
+ import android.os.ParcelFileDescriptor;
+ import java.io.FileNotFoundException;
+-import java.util.HashMap;
+-import java.util.LinkedHashMap;
++import java.util.ArrayList;
++import java.util.Comparator;
++import java.util.HashSet;
++import java.util.List;
+ import java.util.Map;
+-import java.util.function.Predicate;
++import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
+ 
+ public abstract class ContentProvider {
+ 
+-	static final HashMap<String, ATLProvider> atl_providers = new HashMap<>();
++	private static final Map<String, ATLProvider> atl_providers = new ConcurrentHashMap<>();
++	private static final Set<String> startedProcesses = new HashSet<>();
+ 
+ 	@Export
+ 	static void createContentProviders() {
++		ATLLoadedApp app = ATLLoadedApp.getPrimaryApplication();
+ 		atl_providers.put("media", new ATLProvider(new ATLMediaContentProvider()));
+-		ATLLoadedApp primary = ATLLoadedApp.getPrimaryApplication();
+-		for (PackageParser.Provider provider_parsed : primary.pkg.providers) {
+-			String process_name = provider_parsed.info.processName;
+-			if (process_name != null && process_name.contains(":")) {
+-				/* NOTE: even if it doesn't contain `:`, if it's not null we probably
+-				 * need to check what it's requesting; `:` means it wants us to spawn
+-				 * a new process, which we currently don't support */
+-				System.out.println("not creating provider " + provider_parsed.className + ", it wants to be started in a new process (" + process_name + ")");
+-				continue;
++		atl_start_process_providers(app, app.pkg.applicationInfo.processName);
++	}
++
++	/** A private manifest process begins when ATL starts one of its activities. */
++	public static void atl_start_process_providers(ATLLoadedApp app, String requestedProcess) {
++		if (app != ATLLoadedApp.getPrimaryApplication())
++			return;
++		String defaultProcess = app.pkg.applicationInfo.processName;
++		if (defaultProcess == null)
++			defaultProcess = app.pkg.packageName;
++		String process = requestedProcess != null ? requestedProcess : defaultProcess;
++		synchronized (startedProcesses) {
++			if (!startedProcesses.add(process))
++				return;
++			List<PackageParser.Provider> local = new ArrayList<>();
++			for (PackageParser.Provider provider : app.pkg.providers) {
++				ProviderInfo info = provider.info;
++				String owner = info.processName != null ? info.processName : defaultProcess;
++				if (info.enabled && process.equals(owner) && info.authority != null)
++					local.add(provider);
+ 			}
+-			atl_providers.put(provider_parsed.info.authority,
+-			                  new ATLProvider(primary, provider_parsed));
+-		}
+-		// getContentProvider() initializes the content providers,
+-		// we also opportunistically remove the ones that failed to load
+-		atl_providers.values().removeIf(new Predicate<ATLProvider>() {
+-			@Override
+-			public boolean test(ATLProvider atlProvider) {
+-				return atlProvider.getContentProvider() == null;
++			local.sort(new Comparator<PackageParser.Provider>() {
++				@Override public int compare(PackageParser.Provider first, PackageParser.Provider second) {
++					return Integer.compare(second.info.initOrder, first.info.initOrder);
++				}
++			});
++			List<ATLProvider> startup = new ArrayList<>(local.size());
++			for (PackageParser.Provider provider : local) {
++				ATLProvider entry = new ATLProvider(app, provider);
++				for (String authority : provider.info.authority.split(";"))
++					atl_providers.put(authority, entry);
++				startup.add(entry);
+ 			}
+-		});
++			// A provider may resolve another authority from its onCreate callback.
++			for (ATLProvider entry : startup)
++				entry.getContentProvider();
++		}
+ 	}
+ 
+ 	static ContentProvider atl_get_content_provider(String authority) {
 diff --git a/src/api-impl/android/content/Context.java b/src/api-impl/android/content/Context.java
 index 01cca76..7562fc2 100644
 --- a/src/api-impl/android/content/Context.java
@@ -7155,10 +7354,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..b3f53d4
+index 0000000..9745e42
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1419 @@
+@@ -0,0 +1,1424 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7310,16 +7509,17 @@ index 0000000..b3f53d4
 +    char *live_path,*live_sha,*previous_path,*previous_sha,*reload_status;
 +} ClbbHost;
 +static void live_reject(ClbbHost *h,const char *reason);
-+static GtkWidget *game_surface(GtkWidget *root) {
++static GtkWidget *find_game_surface(GtkWidget *root) {
++    if (!gtk_widget_get_mapped(root)) return NULL;
 +    GtkWidget *best = NULL;
 +    int area = 0;
-+    if (SURFACE_VIEW_IS_WIDGET(root) && gtk_widget_get_mapped(root)) {
++    if (SURFACE_VIEW_IS_WIDGET(root)) {
 +        best = root;
 +        area = gtk_widget_get_width(root) * gtk_widget_get_height(root);
 +    }
 +    for (GtkWidget *child = gtk_widget_get_first_child(root); child;
 +         child = gtk_widget_get_next_sibling(child)) {
-+        GtkWidget *found = game_surface(child);
++        GtkWidget *found = find_game_surface(child);
 +        if (found) {
 +            int size =
 +                gtk_widget_get_width(found) * gtk_widget_get_height(found);
@@ -7330,6 +7530,10 @@ index 0000000..b3f53d4
 +        }
 +    }
 +    return best;
++}
++static GtkWidget *game_surface(GtkWidget *root) {
++    GtkWidget *only = surface_view_widget_unique(root);
++    return only ? only : find_game_surface(root);
 +}
 +static int touch(void *user, int action, int finger, double x, double y) {
 +    ClbbHost *h = user;

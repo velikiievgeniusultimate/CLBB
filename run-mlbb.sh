@@ -51,6 +51,8 @@ export ATL_SYSTEM_FONTS_DIR="$CLBB_STATE_ROOT/system/fonts"
 export ATL_SYSTEM_FONTS_CONFIG="$CLBB_STATE_ROOT/system/etc/fonts.xml"
 export NB_QEMU_LIBRARY_PATH="$CLBB_STATE_ROOT/data/base.apk_/lib:$CLBB_STATE_ROOT/data/base.apk_/files/libs:$CLBB_STATE_ROOT/data/native-plugin-aliases${NB_QEMU_EXTRA_LIBRARY_PATH:+:$NB_QEMU_EXTRA_LIBRARY_PATH}"
 export NB_QEMU_SYSROOT="$CLBB_STATE_ROOT/guest-root"
+# Use the ARMv8-A guest model measured with this arm64-v8a build of the game.
+export QEMU_CPU="${QEMU_CPU:-cortex-a72}"
 # Keep more translated game code available between loading stages.
 export CLBB_TCG_CACHE_MIB=512
 mkdir -p "$ANDROID_APP_DATA_DIR"

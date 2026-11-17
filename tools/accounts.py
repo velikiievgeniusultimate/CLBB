@@ -66,17 +66,12 @@ def owned(account):
 
 
 def running(account):
-    process = owned(account)
-    if process:
-        return True
     child = STARTING.get(account)
-    if not child:
-        return False
-    pid, expires = child
-    if time.monotonic() < expires and Path(f"/proc/{pid}").exists():
-        return True
-    STARTING.pop(account, None)
-    return False
+    if child is not None:
+        if child.poll() is None:
+            return True
+        STARTING.pop(account)
+    return bool(owned(account))
 
 
 def start(account):
@@ -89,10 +84,9 @@ def start(account):
         with (ROOT / "logs/account-launch.log").open("ab") as log:
             child = subprocess.Popen([str(WRAPPER)], env=env, stdin=subprocess.DEVNULL,
                                      stdout=log, stderr=log, start_new_session=True)
-        pid = child.pid
     else:
-        pid = instances.start(account)["supervisor_pid"]
-    STARTING[account] = (pid, time.monotonic() + 90)
+        child = instances.start_supervisor(account)
+    STARTING[account] = child
 
 
 def close(account):
@@ -109,7 +103,13 @@ def close(account):
         time.sleep(.05)
     if owned(account):
         raise ValueError("Текущее окно не закрылось.")
-    STARTING.pop(account, None)
+    child = STARTING.get(account)
+    if child is not None:
+        try:
+            child.wait(timeout=max(0, until - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            raise ValueError("Текущее окно ещё закрывается.") from None
+        STARTING.pop(account)
 
 
 def profile_label(text):

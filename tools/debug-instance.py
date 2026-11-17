@@ -111,7 +111,7 @@ def live(state):
  try:p=probe(state);p.identity();return p.pid
  except (FileNotFoundError,ProcessLookupError,RuntimeError):return None
 
-def start(name):
+def start_supervisor(name):
  state=prepare(name)
  if live(state):raise ValueError('This debug profile is already running')
  sync_runtime(state)
@@ -126,7 +126,11 @@ def start(name):
  with (state/'logs/supervisor.log').open('ab')as log:
   child=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
  write(state/'logs/supervisor.json',{'pid':child.pid,'started_ns':time.monotonic_ns(),'background_focus':True})
- return {'profile':name,'state':str(state),'supervisor_pid':child.pid,'account':'private persistent profile; primary login is never imported'}
+ return child
+
+def start(name):
+ child=start_supervisor(name)
+ return {'profile':name,'state':str(profile(name)),'supervisor_pid':child.pid,'account':'private persistent profile; primary login is never imported'}
 
 def window(name,show):
  import ctypes as C,ctypes.util
