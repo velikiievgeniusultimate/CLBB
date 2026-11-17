@@ -1,5 +1,33 @@
+diff --git a/accel/tcg/cpu-exec.c b/accel/tcg/cpu-exec.c
+index 3f09355..09e6871 100644
+--- a/accel/tcg/cpu-exec.c
++++ b/accel/tcg/cpu-exec.c
+@@ -366,6 +366,23 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
+     if (tb_next->cflags & CF_INVALID) {
+         goto out_unlock_next;
+     }
++#ifdef A64_USER_INDIRECT_CHAIN
++    uint64_t predicted = atomic_read(&tb->indirect_pc);
++    if (predicted != A64_TB_DIRECT_PC) {
++        if (tb_next->pc & 3) {
++            goto out_unlock_next;
++        }
++        if (predicted == A64_TB_UNTRAINED_PC) {
++            predicted = atomic_cmpxchg(&tb->indirect_pc,
++                                       A64_TB_UNTRAINED_PC, tb_next->pc);
++        }
++        /* A second CPU may have learned a different target first. Never
++         * relink this slot to a different guest PC, even after invalidation. */
++        if (predicted != A64_TB_UNTRAINED_PC && predicted != tb_next->pc) {
++            goto out_unlock_next;
++        }
++    }
++#endif
+     /* Atomically claim the jump destination slot only if it was NULL */
+     old = atomic_cmpxchg(&tb->jmp_dest[n], (uintptr_t)NULL, (uintptr_t)tb_next);
+     if (old) {
 diff --git a/accel/tcg/tcg-runtime.c b/accel/tcg/tcg-runtime.c
-index 446465a..2ab9c42 100644
+index 446465a..417821d 100644
 --- a/accel/tcg/tcg-runtime.c
 +++ b/accel/tcg/tcg-runtime.c
 @@ -145,7 +145,7 @@ uint64_t HELPER(ctpop_i64)(uint64_t arg)
@@ -11,7 +39,7 @@ index 446465a..2ab9c42 100644
  {
      CPUState *cpu = env_cpu(env);
      TranslationBlock *tb;
-@@ -164,6 +164,51 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env)
+@@ -164,6 +164,53 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env)
      return tb->tc.ptr;
  }
  
@@ -23,38 +51,40 @@ index 446465a..2ab9c42 100644
 +{
 +#if defined(CONFIG_USER_ONLY) && defined(TARGET_AARCH64) && !defined(CONFIG_DEBUG_TCG)
 +    CPUState *cpu = env_cpu(env);
-+    CPUArchState *state = (CPUArchState *)cpu->env_ptr;
 +    uint32_t cf_mask = curr_cflags();
-+    uint32_t flags = state->hflags;
++    uint32_t flags = env->hflags;
 +
 +    if (likely(FIELD_EX32(flags, TBFLAG_ANY, AARCH64_STATE))) {
-+        target_ulong pc = state->pc;
++        target_ulong pc = env->pc;
 +        TranslationBlock *tb;
 +        uint32_t hash;
 +
-+        if (cpu_isar_feature(aa64_bti, env_archcpu(state))) {
-+            flags = FIELD_DP32(flags, TBFLAG_A64, BTYPE, state->btype);
-+        }
-+        if (FIELD_EX32(flags, TBFLAG_ANY, SS_ACTIVE) &&
-+            (state->pstate & PSTATE_SS)) {
-+            flags = FIELD_DP32(flags, TBFLAG_ANY, PSTATE_SS, 1);
-+        }
 +        hash = tb_jmp_cache_hash_func(pc);
 +        tb = atomic_rcu_read(&cpu->tb_jmp_cache[hash]);
++        if (cpu_isar_feature(aa64_bti, env_archcpu(env))) {
++            flags = FIELD_DP32(flags, TBFLAG_A64, BTYPE, env->btype);
++        }
++        if (FIELD_EX32(flags, TBFLAG_ANY, SS_ACTIVE) &&
++            (env->pstate & PSTATE_SS)) {
++            flags = FIELD_DP32(flags, TBFLAG_ANY, PSTATE_SS, 1);
++        }
 +        cf_mask &= ~CF_CLUSTER_MASK;
 +        cf_mask |= cpu->cluster_index << CF_CLUSTER_SHIFT;
-+        if (likely(tb && tb->pc == pc && tb->cs_base == 0 &&
-+                   tb->flags == flags &&
-+                   tb->trace_vcpu_dstate == *cpu->trace_dstate &&
-+                   (tb_cflags(tb) & (CF_HASH_MASK | CF_INVALID)) == cf_mask)) {
-+            qemu_log_mask_and_addr(CPU_LOG_EXEC, pc,
-+                                  "Chain %d: %p ["
-+                                  TARGET_FMT_lx "/" TARGET_FMT_lx "/%#x] %s\n",
-+                                  cpu->cpu_index, tb->tc.ptr,
-+                                  (target_ulong)0, pc, flags,
-+                                  lookup_symbol(pc));
-+            return tb->tc.ptr;
++        if (unlikely(!tb || tb->pc != pc || tb->cs_base != 0 ||
++                     tb->flags != flags ||
++                     tb->trace_vcpu_dstate != *cpu->trace_dstate ||
++                     (tb_cflags(tb) & (CF_HASH_MASK | CF_INVALID)) != cf_mask)) {
++            tb = tb_htable_lookup(cpu, pc, 0, flags, cf_mask);
++            if (!tb) {
++                return tcg_ctx->code_gen_epilogue;
++            }
++            atomic_set(&cpu->tb_jmp_cache[hash], tb);
 +        }
++        qemu_log_mask_and_addr(CPU_LOG_EXEC, pc,
++                               "Chain %d: %p [" TARGET_FMT_lx "/" TARGET_FMT_lx "/%#x] %s\n",
++                               cpu->cpu_index, tb->tc.ptr, (target_ulong)0, pc, flags,
++                               lookup_symbol(pc));
++        return tb->tc.ptr;
 +    }
 +#endif
 +    return clbb_lookup_tb_ptr_slow(env);
@@ -64,7 +94,7 @@ index 446465a..2ab9c42 100644
  {
      cpu_loop_exit_atomic(env_cpu(env), GETPC());
 diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
-index 909059a..f175d0e 100644
+index 909059a..946171b 100644
 --- a/accel/tcg/translate-all.c
 +++ b/accel/tcg/translate-all.c
 @@ -1552,8 +1552,10 @@ static inline void tb_page_add(PageDesc *p, TranslationBlock *tb,
@@ -79,7 +109,17 @@ index 909059a..f175d0e 100644
          if (DEBUG_TB_INVALIDATE_GATE) {
              printf("protecting code page: 0x" TB_PAGE_ADDR_FMT "\n", page_addr);
          }
-@@ -2652,7 +2654,8 @@ int page_unprotect(target_ulong address, uintptr_t pc)
+@@ -1709,6 +1711,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
+     tb->trace_vcpu_dstate = *cpu->trace_dstate;
+     tcg_ctx->tb_cflags = cflags;
+  tb_overflow:
++#ifdef A64_USER_INDIRECT_CHAIN
++    tb->indirect_pc = A64_TB_DIRECT_PC;
++#endif
+ 
+ #ifdef CONFIG_PROFILER
+     /* includes aborted translations because of exceptions */
+@@ -2652,7 +2657,8 @@ int page_unprotect(target_ulong address, uintptr_t pc)
  #endif
              }
              mprotect((void *)g2h(host_start), qemu_host_page_size,
@@ -171,6 +211,36 @@ index 786a1be..44865ce 100644
  }
  
  static void cpu_common_reset(DeviceState *dev)
+diff --git a/include/exec/exec-all.h b/include/exec/exec-all.h
+index 350c4b4..0763da4 100644
+--- a/include/exec/exec-all.h
++++ b/include/exec/exec-all.h
+@@ -369,6 +369,12 @@ struct tb_tc {
+     size_t size;
+ };
+ 
++#if defined(CONFIG_USER_ONLY) && defined(TARGET_AARCH64) && defined(__x86_64__)
++#define A64_USER_INDIRECT_CHAIN 1
++#define A64_TB_DIRECT_PC UINT64_C(1)
++#define A64_TB_UNTRAINED_PC UINT64_MAX
++#endif
++
+ struct TranslationBlock {
+     target_ulong pc;   /* simulated PC corresponding to this block (EIP + CS base) */
+     target_ulong cs_base; /* CS base for this block */
+@@ -394,6 +400,12 @@ struct TranslationBlock {
+ 
+     struct tb_tc tc;
+ 
++#ifdef A64_USER_INDIRECT_CHAIN
++    /* Guest PC only. The normal TB jump and invalidation lists own the host
++     * link. Unaligned sentinels cannot be AArch64 branch targets. */
++    uint64_t indirect_pc;
++#endif
++
+     /* original tb when cflags has CF_NOCACHE */
+     struct TranslationBlock *orig_tb;
+     /* first and second physical page containing code. The lower bit
 diff --git a/include/hw/core/cpu.h b/include/hw/core/cpu.h
 index 5bf94d2..b55705e 100644
 --- a/include/hw/core/cpu.h
@@ -1381,6 +1451,66 @@ index b909630..5649d13 100644
  static uint64_t pauth_addpac(CPUARMState *env, uint64_t ptr, uint64_t modifier,
                               ARMPACKey *key, bool data)
  {
+diff --git a/target/arm/translate-a64.c b/target/arm/translate-a64.c
+index c40aa60..41d8cc4 100644
+--- a/target/arm/translate-a64.c
++++ b/target/arm/translate-a64.c
+@@ -2008,6 +2008,38 @@ static void disas_exc(DisasContext *s, uint32_t insn)
+     }
+ }
+ 
++#ifdef A64_USER_INDIRECT_CHAIN
++static void gen_indirect_chain(DisasContext *s)
++{
++    TranslationBlock *tb = s->base.tb;
++    TCGLabel *miss = gen_new_label();
++    TCGLabel *link = gen_new_label();
++    TCGv_ptr addr = tcg_const_ptr(&tb->indirect_pc);
++    TCGv_i64 predicted = tcg_temp_new_i64();
++
++    tb->indirect_pc = A64_TB_UNTRAINED_PC;
++    tcg_gen_ld_i64(predicted, addr, 0);
++    tcg_gen_brcond_i64(TCG_COND_NE, predicted, cpu_pc, miss);
++    tcg_temp_free_i64(predicted);
++    tcg_temp_free_ptr(addr);
++    tcg_gen_goto_tb(0);
++    gen_set_label(link);
++    tcg_gen_exit_tb(tb, 0);
++
++    /* Only the first target can claim the link. Reload on the cold path
++     * so a hot hit need not spill the prediction across a TCG label. */
++    gen_set_label(miss);
++    addr = tcg_const_ptr(&tb->indirect_pc);
++    predicted = tcg_temp_new_i64();
++    tcg_gen_ld_i64(predicted, addr, 0);
++    tcg_gen_brcondi_i64(TCG_COND_EQ, predicted, A64_TB_UNTRAINED_PC, link);
++    tcg_temp_free_i64(predicted);
++    tcg_temp_free_ptr(addr);
++    tcg_gen_lookup_and_goto_ptr();
++    s->base.is_jmp = DISAS_NORETURN;
++}
++#endif
++
+ /* Unconditional branch (register)
+  *  31           25 24   21 20   16 15   10 9    5 4     0
+  * +---------------+-------+-------+-------+------+-------+
+@@ -2195,6 +2227,16 @@ static void disas_uncond_b_reg(DisasContext *s, uint32_t insn)
+         break;
+     }
+ 
++#ifdef A64_USER_INDIRECT_CHAIN
++    /* These EL0 branches update the PC without changing translation flags. */
++    if (opc <= 2 && op3 == 0 && !dc_isar_feature(aa64_bti, s) &&
++        use_goto_tb(s, 0, 0) &&
++        !qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN | CPU_LOG_EXEC) &&
++        !(tb_cflags(s->base.tb) & (CF_NOCACHE | CF_COUNT_MASK | CF_USE_ICOUNT))) {
++        gen_indirect_chain(s);
++        return;
++    }
++#endif
+     s->base.is_jmp = DISAS_JUMP;
+ }
+ 
 diff --git a/target/arm/vfp_helper.c b/target/arm/vfp_helper.c
 index 930d6e7..fca81d7 100644
 --- a/target/arm/vfp_helper.c

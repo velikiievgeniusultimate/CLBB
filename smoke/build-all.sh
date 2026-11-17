@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/env.sh"
-for CHECK in smoke args signal attach varargs smc signal-return signal-nested proc yield attach-exit dns properties; do
+for CHECK in smoke args signal attach varargs indirect smc signal-return signal-nested proc yield attach-exit dns properties; do
     "$ROOT/smoke/build-guest-test.sh" "$CHECK"
 done
 # Deliberately unresolved relocation tests native-loader error propagation.

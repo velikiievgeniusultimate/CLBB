@@ -3,13 +3,14 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/env.sh"
 ulimit -c 0
-for CHECK in Threads Args Signal Attach Varargs Smc SignalReturn SignalNested Proc Yield AttachExit Dns LoadFailure Properties; do
+for CHECK in Threads Args Signal Attach Varargs Indirect Smc SignalReturn SignalNested Proc Yield AttachExit Dns LoadFailure Properties; do
     case "$CHECK" in
         Threads) LIB=smoke;;
         Args) LIB=args;;
         Signal) LIB=signal;;
         Attach) LIB=attach;;
         Varargs) LIB=varargs;;
+        Indirect) LIB=indirect;;
         Smc) LIB=smc;;
         SignalReturn) LIB=signal-return;;
         SignalNested) LIB=signal-nested;;

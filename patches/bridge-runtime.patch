@@ -620,7 +620,7 @@ index 56a3183..2d0e8cc 100644
    runtime_ = runtime;
  }
 diff --git a/libnb-qemu/Makefile b/libnb-qemu/Makefile
-index 78503cd..b8dc89e 100644
+index 78503cd..0b77454 100644
 --- a/libnb-qemu/Makefile
 +++ b/libnb-qemu/Makefile
 @@ -1,20 +1,46 @@
@@ -718,7 +718,7 @@ index 78503cd..b8dc89e 100644
 -$(BUILDDIR)/libnb-qemu.so: $(LIBNB_QEMU_OBJS) $(QEMU_STATIC_LIB)
 -	$(CXX) -g -o $@ -shared $(LIBNB_QEMU_OBJS) -Wl,--whole-archive $(QEMU_STATIC_LIB) -Wl,--no-whole-archive $(LIBQEMUUTIL) $(LDLIBS)
 +$(BUILDDIR)/libnb-qemu.so: $(LIBNB_QEMU_OBJS) $(QEMU_STATIC_LIB) $(LIBQEMUUTIL) $(CLBB_TRANSLATOR_RUST_OBJ) $(CLBB_EXECUTION_OBJ)
-+	$(CXX) -g -o $@ -shared $(LIBNB_QEMU_OBJS) $(CLBB_TRANSLATOR_RUST_OBJ) $(CLBB_EXECUTION_OBJ) -Wl,--whole-archive $(QEMU_STATIC_LIB) -Wl,--no-whole-archive $(LIBQEMUUTIL) $(LDLIBS)
++	$(CXX) -g -o $@ -shared -Wl,-soname,libnb-qemu.so $(LIBNB_QEMU_OBJS) $(CLBB_TRANSLATOR_RUST_OBJ) $(CLBB_EXECUTION_OBJ) -Wl,--whole-archive $(QEMU_STATIC_LIB) -Wl,--no-whole-archive $(LIBQEMUUTIL) $(LDLIBS)
  
  CFLAGS_THUNKS := $(CFLAGS) -fvisibility=hidden $(LOCAL_QEMU_CFLAGS) \
                   -DGL_GLEXT_PROTOTYPES -DEGL_EGLEXT_PROTOTYPES
