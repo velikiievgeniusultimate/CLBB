@@ -31,6 +31,86 @@ index 9bfc739a..2cd89171 100644
        mkdir(((std::string)xdg_cache_home + "/art/").c_str(), DEFFILEMODE | S_IXUSR | S_IXGRP | S_IXOTH);
        dalvik_cache_root = StringPrintf("%s/art/", xdg_cache_home);
      } else if(home_dir) {
+diff --git a/art/libdexfile/dex/dex_file_verifier.cc b/art/libdexfile/dex/dex_file_verifier.cc
+index 13e55bdd..51606992 100644
+--- a/art/libdexfile/dex/dex_file_verifier.cc
++++ b/art/libdexfile/dex/dex_file_verifier.cc
+@@ -936,10 +936,17 @@ bool DexFileVerifier::FindClassIndexAndDef(uint32_t index,
+     return false;
+   }
+ 
+-  // Now search for the class def. This is basically a specialized version of the DexFile code, as
+-  // we should not trust that this is a valid DexFile just yet.
+   const dex::ClassDef* class_def_begin =
+       reinterpret_cast<const dex::ClassDef*>(begin_ + header_->class_defs_off_);
++  if (!first_class_def_by_type_.empty()) {
++    uint32_t first = first_class_def_by_type_[class_type_index->index_];
++    if (first == 0u) {
++      return false;
++    }
++    *output_class_def = &class_def_begin[first - 1u];
++    return true;
++  }
++  // The class data may precede the definition section. Preserve its original lookup.
+   for (size_t i = 0; i < header_->class_defs_size_; ++i) {
+     const dex::ClassDef* class_def = class_def_begin + i;
+     if (class_def->class_idx_ == *class_type_index) {
+@@ -1961,7 +1968,22 @@ bool DexFileVerifier::CheckIntraIdSection(size_t offset, uint32_t count) {
+     return false;
+   }
+ 
+-  return CheckIntraSectionIterate<kType>(offset, count);
++  if (!CheckIntraSectionIterate<kType>(offset, count)) {
++    return false;
++  }
++  if (kType == DexFile::kDexTypeClassDefItem && count > 1u) {
++    // The complete fixed-width table is now bounds-checked. Index the first match
++    // only: duplicate and invalid type indices still get their normal diagnostics.
++    const auto* class_defs = reinterpret_cast<const dex::ClassDef*>(begin_ + offset);
++    first_class_def_by_type_.resize(header_->type_ids_size_, 0u);
++    for (uint32_t i = 0; i < count; ++i) {
++      const uint32_t type = class_defs[i].class_idx_.index_;
++      if (type < first_class_def_by_type_.size() && first_class_def_by_type_[type] == 0u) {
++        first_class_def_by_type_[type] = i + 1u;
++      }
++    }
++  }
++  return true;
+ }
+ 
+ template <DexFile::MapItemType kType>
+diff --git a/art/libdexfile/dex/dex_file_verifier.h b/art/libdexfile/dex/dex_file_verifier.h
+index b51a4172..d94f0c45 100644
+--- a/art/libdexfile/dex/dex_file_verifier.h
++++ b/art/libdexfile/dex/dex_file_verifier.h
+@@ -19,6 +19,7 @@
+ 
+ #include <limits>
+ #include <unordered_set>
++#include <vector>
+ 
+ #include "base/hash_map.h"
+ #include "base/safe_map.h"
+@@ -177,8 +178,6 @@ class DexFileVerifier {
+   // Retrieve class index and class def from the given member. index is the member index, which is
+   // taken as either a field or a method index (as designated by is_field). The result, if the
+   // member and declaring class could be found, is stored in class_type_index and class_def.
+-  // This is an expensive lookup, as we have to find the class def by type index, which is a
+-  // linear search. The output values should thus be cached by the caller.
+   bool FindClassIndexAndDef(uint32_t index,
+                             bool is_field,
+                             dex::TypeIndex* class_type_index,
+@@ -246,6 +245,10 @@ class DexFileVerifier {
+ 
+   std::string failure_reason_;
+ 
++  // First class definition for each type in the checked class_defs section, one-based.
++  // A zero entry is a type defined elsewhere. Empty until that section has been checked.
++  std::vector<uint32_t> first_class_def_by_type_;
++
+   // Set of type ids for which there are ClassDef elements in the dex file.
+   std::unordered_set<decltype(dex::ClassDef::class_idx_)> defined_classes_;
+ 
 diff --git a/art/runtime/Android.mk b/art/runtime/Android.mk
 index 9b13aaa8..bfc6972d 100644
 --- a/art/runtime/Android.mk
@@ -87,7 +167,7 @@ index 4d3ca300..70c97c60 100644
    }
  
 diff --git a/art/runtime/oat_file_assistant.cc b/art/runtime/oat_file_assistant.cc
-index 8645ef12..6544171f 100644
+index 8645ef12..d5a717e6 100644
 --- a/art/runtime/oat_file_assistant.cc
 +++ b/art/runtime/oat_file_assistant.cc
 @@ -44,6 +44,7 @@
@@ -98,7 +178,7 @@ index 8645ef12..6544171f 100644
  
  namespace art {
  
-@@ -204,10 +205,48 @@ bool OatFileAssistant::IsUpToDate() {
+@@ -204,10 +205,52 @@ bool OatFileAssistant::IsUpToDate() {
    return GetBestInfo().Status() == kOatUpToDate;
  }
  
@@ -146,10 +226,65 @@ index 8645ef12..6544171f 100644
 -  // framework-res.apk contains no dex files.
 -  bool is_framework_res = dex_location_.compare(dex_location_.size() - (sizeof("framework-res.apk")-1), sizeof("framework-res.apk")-1, "framework-res.apk") == 0;
 -  if (!IsUpToDate() && !is_framework_res) {
++  return GetBestOatFile(nullptr);
++}
++
++std::unique_ptr<OatFile> OatFileAssistant::GetBestOatFile(const ClassLoaderContext* context) {
 +  if (!IsUpToDate() && !IsResourceOnlyArchive(dex_location_.c_str(), zip_fd_)) {
      // Compile the dex file.
      std::vector<std::string> arg_vector;
  
+@@ -227,6 +270,25 @@ std::unique_ptr<OatFile> OatFileAssistant::GetBestOatFile() {
+ 
+     std::string command_line(android::base::Join(arg_vector, ' '));
+     LOG(INFO) << "Compiling dex file: " << command_line;
++    // The compiler runs separately. Preserve the usual fallback for anonymous
++    // dex and filenames the class-loader-context grammar cannot represent.
++    if (context != nullptr) {
++      const std::string spec = context->EncodeContextForDex2oat("");
++      bool representable = spec != OatFile::kSpecialSharedLibrary &&
++                           spec.find("IMC[") == std::string::npos;
++      if (representable) {
++        for (const DexFile* dex : context->FlattenOpenedDexFiles()) {
++          const std::string& path = dex->GetLocation();
++          if (path.empty() || path.front() != '/' || path.find_first_of(":;[]{}*#") != std::string::npos) {
++            representable = false;
++            break;
++          }
++        }
++      }
++      if (representable) {
++        arg_vector.push_back("--class-loader-context=" + spec);
++      }
++    }
+     std::string error_msg;
+     if (!Exec(arg_vector, &error_msg)) {
+       LOG(WARNING) << "Failed to compile dex file " << dex_location_ << ": " << error_msg;
+diff --git a/art/runtime/oat_file_assistant.h b/art/runtime/oat_file_assistant.h
+index 1f3f74f6..8ad74319 100644
+--- a/art/runtime/oat_file_assistant.h
++++ b/art/runtime/oat_file_assistant.h
+@@ -160,6 +160,7 @@ class OatFileAssistant {
+   // called, because access to the loaded oat file has been taken away from
+   // the OatFileAssistant object.
+   std::unique_ptr<OatFile> GetBestOatFile();
++  std::unique_ptr<OatFile> GetBestOatFile(const ClassLoaderContext* context);
+ 
+   // Returns a human readable description of the status of the code for the
+   // dex file. The returned description is for debugging purposes only.
+diff --git a/art/runtime/oat_file_manager.cc b/art/runtime/oat_file_manager.cc
+index 69870718..2884eb80 100644
+--- a/art/runtime/oat_file_manager.cc
++++ b/art/runtime/oat_file_manager.cc
+@@ -478,7 +478,7 @@ std::vector<std::unique_ptr<const DexFile>> OatFileManager::OpenDexFilesFromOat(
+                                       only_use_system_oat_files_);
+ 
+   // Get the oat file on disk.
+-  std::unique_ptr<const OatFile> oat_file(oat_file_assistant.GetBestOatFile().release());
++  std::unique_ptr<const OatFile> oat_file(oat_file_assistant.GetBestOatFile(context.get()).release());
+   VLOG(oat) << "OatFileAssistant(" << dex_location << ").GetBestOatFile()="
+             << reinterpret_cast<uintptr_t>(oat_file.get())
+             << " (executable=" << (oat_file != nullptr ? oat_file->IsExecutable() : false) << ")";
 diff --git a/art/runtime/thread.cc b/art/runtime/thread.cc
 index b0b29bc6..b74eda89 100644
 --- a/art/runtime/thread.cc
@@ -277,6 +412,33 @@ index b0b29bc6..b74eda89 100644
    } else {
      // the fetch_add has consumed the permit. immediately return.
      DCHECK_EQ(old_state, kPermitAvailable);
+diff --git a/libcore/luni/src/main/native/Register.cpp b/libcore/luni/src/main/native/Register.cpp
+index 3129a6f1..1e130b8c 100644
+--- a/libcore/luni/src/main/native/Register.cpp
++++ b/libcore/luni/src/main/native/Register.cpp
+@@ -56,17 +56,10 @@ jint JNI_OnLoad(JavaVM* vm, void*) {
+ 
+ // DalvikVM calls this on shutdown, do any global cleanup here.
+ // -- Very important if we restart multiple DalvikVMs in the same process to reset the state.
+-void JNI_OnUnload(JavaVM* vm, void*) {
+-    JNIEnv* env;
+-    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+-        ALOGE("JavaVM::GetEnv() failed");
+-        abort();
+-    }
++void JNI_OnUnload(JavaVM*, void*) {
++    // ART unloads boot libraries after the last managed thread has detached.
++    // ICU teardown only releases native state and does not require a JNIEnv.
+     ALOGV("libjavacore JNI_OnUnload");
+-
+-    ScopedLocalFrame localFrame(env);
+-
+-#define UNREGISTER(FN) extern void FN(JNIEnv*); FN(env)
+-    UNREGISTER(unregister_libcore_icu_ICU);
+-#undef UNREGISTER
++    extern void unregister_libcore_icu_ICU(JNIEnv*);
++    unregister_libcore_icu_ICU(nullptr);
+ }
 diff --git a/libcore/ojluni/src/main/native/Math.c b/libcore/ojluni/src/main/native/Math.c
 index 3191ade9..22d793eb 100644
 --- a/libcore/ojluni/src/main/native/Math.c
