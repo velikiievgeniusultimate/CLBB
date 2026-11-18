@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import fcntl,importlib.util,json,tempfile,unittest
+import fcntl,importlib.util,json,shlex,tempfile,unittest
 from unittest.mock import patch
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
@@ -32,3 +32,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
    with (p/'logs/clbb-launch.lock').open('a+b')as lock,patch.object(workflow,'ROOT',p):
     fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     with self.assertRaisesRegex(ValueError,'Close CLBB'):workflow.use_local(p/'unused')
+
+ def test_switching_the_runtime_preserves_the_shortcuts_account_and_network_policy(self):
+  with tempfile.TemporaryDirectory() as directory:
+   root = Path(directory)
+   wrapper = root / '.clbb-local-launch'
+   old, new = root / 'old runtime', root / 'new runtime'
+   with patch.object(workflow, 'ROOT', root):
+    workflow.write_local_launcher(wrapper, old)
+    default = wrapper.read_text()
+    self.assertIn('exec "$CLBB_ROOT/bin/clbb-launcher" "$@"', default)
+    routed = default.replace('set -eu\n', 'set -eu\nif [ "$#" -eq 0 ]; then exec python3 accounts.py desktop; fi\n')
+    routed = routed.replace('exec "$CLBB_ROOT', 'exec systemd-run --scope --slice=clbbdirect.slice "$CLBB_ROOT')
+    wrapper.write_text(routed)
+    workflow.write_local_launcher(wrapper, new)
+   self.assertEqual(wrapper.read_text(), routed.replace(shlex.quote(str(old)), shlex.quote(str(new))))
+   self.assertTrue(wrapper.stat().st_mode & 0o100)

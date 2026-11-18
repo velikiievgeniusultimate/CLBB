@@ -146,6 +146,27 @@ static GtkWidget *find_button(GtkWidget *root, const char *text) {
   }
   return NULL;
 }
+static GtkWidget *find_tile(GtkWidget *root, const char *slot) {
+  if (gtk_widget_has_css_class(root, "clbb-palette-tile") &&
+      !g_strcmp0(g_object_get_data(G_OBJECT(root), "clbb-slot"), slot))
+    return root;
+  for (GtkWidget *w = gtk_widget_get_first_child(root); w; w = gtk_widget_get_next_sibling(w)) {
+    GtkWidget *tile = find_tile(w, slot);
+    if (tile) return tile;
+  }
+  return NULL;
+}
+static void palette_tab(GtkWidget *root, const char *name) {
+  GtkWidget *button = find_button(root, name);
+  g_assert_nonnull(button);
+  g_signal_emit_by_name(button, "clicked");
+}
+static GtkWidget *editor_for(GtkWidget *control) {
+  while (control && !gtk_widget_has_css_class(control, "clbb-palette-editor"))
+    control = gtk_widget_get_parent(control);
+  g_assert_nonnull(control);
+  return control;
+}
 static GtkWidget *find_control(GtkWidget *root, const char *key) {
   const char *row_key = g_object_get_data(G_OBJECT(root), "clbb-settings-key");
   if (row_key && !strcmp(row_key, key))
@@ -174,7 +195,7 @@ int main(int argc, char **argv) {
   put(&p, "hotkeys.confine", "16777275");
   put(&p, "hotkeys.fullscreen", "16777274");
   put(&p, "common.bindings.attack.key", "32");
-  put(&p, "common.bindings.extra:2.key", "70");
+  put(&p, "common.bindings.spell:20020.key", "70");
   put(&p, "audio.volume", "72");
   put(&p, "audio.game_volume", "100");
   put(&p, "audio.voice_volume", "100");
@@ -243,22 +264,24 @@ int main(int argc, char **argv) {
     g_assert_nonnull(gtk_stack_get_child_by_name(GTK_STACK(stack), "controls"));
     g_assert_null(gtk_stack_get_child_by_name(GTK_STACK(stack), "hero"));
     GtkWidget *skill_row = find_control(clbb_settings_panel(s), "hero.bindings.skill:0.key");
-    GtkWidget *common_row = find_control(clbb_settings_panel(s), "common.bindings.extra:2.key");
+    GtkWidget *common_row = find_control(clbb_settings_panel(s), "common.bindings.spell:20020.key");
     GtkWidget *controls_page = gtk_stack_get_child_by_name(GTK_STACK(stack), "controls");
     g_assert_true(gtk_widget_is_ancestor(skill_row, controls_page));
     g_assert_true(gtk_widget_is_ancestor(common_row, controls_page));
-    GtkWidget *group = gtk_widget_get_ancestor(skill_row, GTK_TYPE_REVEALER);
-    g_assert_nonnull(group);
-    GtkWidget *heading = gtk_widget_get_first_child(gtk_widget_get_parent(group));
-    g_assert_false(gtk_revealer_get_reveal_child(GTK_REVEALER(group)));
+    GtkWidget *group = editor_for(skill_row);
+    g_assert_true(gtk_widget_get_visible(group));
+    palette_tab(controls_page, "Базовые");
+    g_assert_false(gtk_widget_get_visible(group));
     guint before_expand = p.writes;
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(heading), TRUE);
+    palette_tab(controls_page, "Навыки героя");
+    g_signal_emit_by_name(find_tile(controls_page, "skill:0"), "clicked");
     clbb_settings_refresh(s);
-    g_assert_true(gtk_revealer_get_reveal_child(GTK_REVEALER(group)));
+    g_assert_true(gtk_widget_get_visible(group));
     GtkWidget *capture_button = find_type(skill_row, GTK_TYPE_BUTTON);
     g_signal_emit_by_name(capture_button, "clicked");
     g_assert_true(clbb_settings_is_capturing(s));
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(heading), FALSE);
+    palette_tab(controls_page, "Базовые");
+    g_assert_false(gtk_widget_get_visible(group));
     g_assert_false(clbb_settings_is_capturing(s));
     g_assert_cmpuint(p.writes, ==, before_expand);
     // Changing one personal field must leave neighboring fields inherited.
@@ -275,10 +298,14 @@ int main(int argc, char **argv) {
     g_assert_false(gtk_widget_get_sensitive(reset));
     put(&p,"common.bindings.skill:0.key","81");
     clbb_settings_refresh(s);
-    GtkWidget *attack_reveal=gtk_widget_get_ancestor(find_control(clbb_settings_panel(s),"hero.bindings.attack.key"),GTK_TYPE_REVEALER);
-    g_assert_nonnull(attack_reveal);
-    g_assert_true(attack_reveal==gtk_widget_get_ancestor(find_control(clbb_settings_panel(s),"hero.bindings.attack:minion.key"),GTK_TYPE_REVEALER));
-    g_assert_true(attack_reveal==gtk_widget_get_ancestor(find_control(clbb_settings_panel(s),"hero.bindings.attack:tower.key"),GTK_TYPE_REVEALER));
+    const char *attacks[] = {"attack", "attack:minion", "attack:tower"};
+    for (guint n = 0; n < G_N_ELEMENTS(attacks); n++) {
+      GtkWidget *tile = find_tile(controls_page, attacks[n]);
+      g_assert_nonnull(tile);
+      g_signal_emit_by_name(tile, "clicked");
+      g_autofree char *key = g_strdup_printf("hero.bindings.%s.key", attacks[n]);
+      g_assert_true(gtk_widget_get_visible(editor_for(find_control(controls_page, key))));
+    }
     // Keyboard controls are mirrored, editable and visible only in keyboard mode.
     GtkWidget *mode_row=find_control(clbb_settings_panel(s),"movement.click_mode");
     GtkWidget *mode=find_type(mode_row,GTK_TYPE_DROP_DOWN);
@@ -304,17 +331,18 @@ int main(int argc, char **argv) {
     g_assert_nonnull(find_control(clbb_settings_panel(s),"common.bindings.skill:2:2531.stop_movement"));
     g_hash_table_remove(p.values,"preview.controls");clbb_settings_refresh(s);
     g_print("CLBB_KEYBOARD_CONFLICT_AND_FORM_UI_OK keyboard visibility, collision warning, nested form settings\n");
-    // Absent controls are removed, rather than left as disabled phantom rows.
+    // The palette keeps configurable skills and temporary items available outside a match.
     put(&p,"preview.controls","1\t25\nskill:0\tskill:0\tskill:0\t2510\t2510\t3\n");
     clbb_settings_refresh(s);
     g_assert_nonnull(find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key"));
     g_assert_null(find_control(clbb_settings_panel(s),"hero.bindings.extra:3.key"));
     g_assert_null(find_control(clbb_settings_panel(s),"hero.bindings.skill:3.key"));
     put(&p,"preview.controls","");clbb_settings_refresh(s);
-    g_assert_null(find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key"));
+    g_assert_nonnull(find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key"));
+    g_assert_nonnull(find_control(clbb_settings_panel(s),"hero.bindings.item:active.key"));
     g_hash_table_remove(p.values,"preview.controls");clbb_settings_refresh(s);
-    g_print("CLBB_HERO_LIVE_LAYOUT_OK present controls only, field inheritance, reset, stale data hides rows\n");
-    g_print("CLBB_COLLAPSIBLE_CONTROLS_OK merged page, initially collapsed, refresh preserves state, no settings writes\n");
+    g_print("CLBB_HERO_LIVE_LAYOUT_OK offline editing, field inheritance and reset\n");
+    g_print("CLBB_PALETTE_CONTROLS_OK category navigation, capture cancellation and selection\n");
     const char *volume_keys[]={"audio.volume","audio.game_volume","audio.voice_volume"};
     for (guint i=0;i<G_N_ELEMENTS(volume_keys);i++) {
       GtkWidget *row=find_control(clbb_settings_panel(s),volume_keys[i]);
@@ -426,9 +454,9 @@ int main(int argc, char **argv) {
     put(&p, "hero.name", "Кагура");
     clbb_settings_refresh(s);
     g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "W"));
-    g_assert(write_value(&p, "hero.bindings.extra:2.key", "86"));
+    g_assert(write_value(&p, "hero.bindings.spell:20020.key", "86"));
     clbb_settings_refresh(s);
-    g_assert(find_button(GTK_WIDGET(clbb_settings_panel(s)), "V"));
+    g_assert(find_button(find_control(controls_page, "hero.bindings.spell:20020.key"), "V"));
     GtkWidget *window = GTK_WIDGET(clbb_settings_panel(s));
     GtkWidget *update_open=find_button(window,"Обновить CLBB");
     g_assert(update_open);
@@ -450,8 +478,8 @@ int main(int argc, char **argv) {
     const char *stops[] = {"hero.bindings.skill:0.stop_movement",
                            "hero.bindings.skill:1.stop_movement",
                            "hero.bindings.skill:2.stop_movement",
-                           "common.bindings.extra:2.stop_movement",
-                           "hero.bindings.extra:2.stop_movement"};
+                           "common.bindings.spell:20020.stop_movement",
+                           "hero.bindings.spell:20020.stop_movement"};
     for (guint n = 0; n < G_N_ELEMENTS(stops); ++n) {
       GtkWidget *row = find_control(window, stops[n]);
       g_assert_nonnull(row);
@@ -466,10 +494,10 @@ int main(int argc, char **argv) {
         find_control(window, "common.bindings.extra:0.stop_movement"));
     g_assert_null(
         find_control(window, "common.bindings.shop:quick.stop_movement"));
-    g_assert(write_value(&p, "hero.bindings.extra:2.stop_movement.override", "false"));
+    g_assert(write_value(&p, "hero.bindings.spell:20020.stop_movement.override", "false"));
     clbb_settings_refresh(s);
     GtkWidget *spell_stop =
-        find_type(find_control(window, "hero.bindings.extra:2.stop_movement"),
+        find_type(find_control(window, "hero.bindings.spell:20020.stop_movement"),
                   GTK_TYPE_SWITCH);
     g_assert_true(gtk_widget_get_sensitive(spell_stop));
     GtkWidget *presets = find_control(window, "display.preset");
@@ -609,6 +637,12 @@ int main(int argc, char **argv) {
     g_assert_null(find_control(window, "hero.bindings.skill:2.key"));
     g_assert(write_value(&p, "hero.bindings.combo:0.key", "88"));
     g_assert_cmpstr(read_value(&p, "hero.bindings.combo:0.key"), ==, "88");
+    put(&p, "preview.controls", "");
+    clbb_settings_refresh(s);
+    g_assert_null(find_control(window, "hero.bindings.skill:2.key"));
+    g_assert_nonnull(find_control(window, "hero.bindings.combo:0.key"));
+    g_assert_nonnull(find_control(window, "hero.bindings.combo:1.key"));
+    g_hash_table_remove(p.values, "preview.controls");
     put(&p, "hero.id", "25");put(&p, "hero.linked_controls", "0");
     clbb_settings_refresh(s);
     g_assert_null(find_control(window, "hero.bindings.combo:0.key"));
@@ -644,18 +678,18 @@ int main(int argc, char **argv) {
     put(&p,"common.bindings.extra:2.cast_mode","3");
     put(&p,"preview.controls","1\t77\nextra:2\textra:2\textra:2:20030\t20030\t20030\t1\n");
     clbb_settings_refresh(s);
-    GtkWidget *inspire_mode=find_type(find_control(window,"common.bindings.extra:2:20030.cast_mode"),GTK_TYPE_DROP_DOWN);
+    GtkWidget *inspire_mode=find_type(find_control(window,"common.bindings.spell:20030.cast_mode"),GTK_TYPE_DROP_DOWN);
     g_assert_nonnull(inspire_mode);
     g_assert_cmpuint(g_list_model_get_n_items(gtk_drop_down_get_model(GTK_DROP_DOWN(inspire_mode))),==,2);
     gtk_drop_down_set_selected(GTK_DROP_DOWN(inspire_mode),1);
-    g_assert_cmpstr(read_value(&p,"common.bindings.extra:2:20030.cast_mode"),==,"1");
+    g_assert_cmpstr(read_value(&p,"common.bindings.spell:20030.cast_mode"),==,"1");
     g_assert_cmpstr(read_value(&p,"common.bindings.extra:2.cast_mode"),==,"3");
     g_hash_table_remove(p.values,"preview.controls");put(&p,"hero.id","25");clbb_settings_refresh(s);
     g_print("CLBB_INSPIRE_PLAIN_BUTTON_UI_OK two modes independent of aimed battle spells\n");
     put(&p,"hero.id","127");put(&p,"common.battle_spell_id","20190");
     put(&p,"preview.controls","1\t127\nextra:2\textra:2\textra:2:20190\t20190\t20190\t1\n");
     clbb_settings_refresh(s);
-    GtkWidget *vengeance_mode=find_type(find_control(window,"common.bindings.extra:2:20190.cast_mode"),GTK_TYPE_DROP_DOWN);
+    GtkWidget *vengeance_mode=find_type(find_control(window,"common.bindings.spell:20190.cast_mode"),GTK_TYPE_DROP_DOWN);
     g_assert_nonnull(vengeance_mode);
     g_assert_cmpuint(g_list_model_get_n_items(gtk_drop_down_get_model(GTK_DROP_DOWN(vengeance_mode))),==,2);
     g_print("CLBB_VENGEANCE_PLAIN_BUTTON_UI_OK separate two-mode spell\n");
@@ -664,7 +698,7 @@ int main(int argc, char **argv) {
     put(&p,"preview.controls","1\t25\nitem:active\titem:active\titem:active\t25790\t25790\t1\n");
     clbb_settings_refresh(s);
     g_assert_nonnull(find_control(window,"common.bindings.item:active.key"));
-    g_assert_null(find_control(window,"hero.bindings.item:active.key"));
+    g_assert_nonnull(find_control(window,"hero.bindings.item:active.key"));
     GtkWidget *item_mode=find_type(find_control(window,"common.bindings.item:active.cast_mode"),GTK_TYPE_DROP_DOWN);
     g_assert_nonnull(item_mode);
     g_assert_cmpuint(g_list_model_get_n_items(gtk_drop_down_get_model(GTK_DROP_DOWN(item_mode))),==,2);
@@ -684,9 +718,8 @@ int main(int argc, char **argv) {
             GTK_LIST_BOX(nav),
             gtk_list_box_get_row_at_index(GTK_LIST_BOX(nav), n));
     if (expand_first) {
-      GtkWidget *row=find_control(clbb_settings_panel(s),"hero.bindings.skill:0.key");
-      GtkWidget *reveal=gtk_widget_get_ancestor(row,GTK_TYPE_REVEALER);
-      gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_widget_get_first_child(gtk_widget_get_parent(reveal))),TRUE);
+      palette_tab(clbb_settings_panel(s), "Навыки героя");
+      g_signal_emit_by_name(find_tile(clbb_settings_panel(s), "skill:0"), "clicked");
     }
     g_signal_connect(clbb_settings_panel(s), "notify::visible",
                      G_CALLBACK(visible_changed), &p);

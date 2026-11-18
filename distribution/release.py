@@ -99,6 +99,29 @@ def use_local(directory):
         except BlockingIOError:raise ValueError('Close CLBB before switching the local runtime')
         _use_local(directory)
 
+def write_local_launcher(wrapper, target):
+    root_line = 'export CLBB_ROOT=' + shlex.quote(str(target))
+    state_line = 'export CLBB_STATE_ROOT=' + shlex.quote(str(ROOT))
+    launch = '"$CLBB_ROOT/bin/clbb-launcher"'
+    lines = ['#!/bin/sh', 'set -eu', root_line, state_line,
+             'export CLBB_MANAGED_INSTALL=0', 'exec ' + launch + ' "$@"']
+    if wrapper.is_file():
+        current = wrapper.read_text().splitlines()
+        exports = [i for i, line in enumerate(current) if line.startswith('export CLBB_ROOT=')]
+        # The workbench wrapper can also select an account and a host network route.
+        if len(exports) == 1 and state_line in current and any(launch in line for line in current):
+            current[exports[0]] = root_line
+            lines = current
+    with tempfile.NamedTemporaryFile('w', dir=wrapper.parent, delete=False) as output:
+        staging = Path(output.name)
+        try:
+            output.write('\n'.join(lines) + '\n')
+            output.flush()
+            staging.chmod(0o755)
+            staging.replace(wrapper)
+        finally:
+            staging.unlink(missing_ok=True)
+
 def _use_local(directory):
     directory,record,target=verify(directory)
     data=Path(os.environ.get('XDG_DATA_HOME')or Path.home()/'.local/share')
@@ -117,11 +140,7 @@ def _use_local(directory):
         directory,record,target=verify(stable)
     # Persistent Android data stays in the existing development profile; never packaged here.
     wrapper=ROOT/'.clbb-local-launch'
-    wrapper.write_text('#!/bin/sh\nset -eu\n'+
-        'export CLBB_ROOT='+shlex.quote(str(target))+'\n'+
-        'export CLBB_STATE_ROOT='+shlex.quote(str(ROOT))+'\n'+
-        'export CLBB_MANAGED_INSTALL=0\nexec "$CLBB_ROOT/bin/clbb-launcher" "$@"\n')
-    wrapper.chmod(0o755)
+    write_local_launcher(wrapper,target)
     data=Path(os.environ.get('XDG_DATA_HOME')or Path.home()/'.local/share')
     desktop=data/'applications/org.clbb.CLBB.desktop';desktop.parent.mkdir(parents=True,exist_ok=True)
     backup=ROOT/'logs/desktop-before-workbench.desktop'

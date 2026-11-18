@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import uuid
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("instances", ROOT / "tools/debug-instance.py")
@@ -25,6 +26,14 @@ REGISTRY = BASE / ".accounts.json"
 PRIMARY = "primary"
 WRAPPER = ROOT / ".clbb-local-launch"
 LOCK = threading.Lock()
+BOOT_ID = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+
+
+class Launch(NamedTuple):
+    child: subprocess.Popen
+    started_ns: int
+
+
 STARTING = {}
 
 
@@ -66,9 +75,9 @@ def owned(account):
 
 
 def running(account):
-    child = STARTING.get(account)
-    if child is not None:
-        if child.poll() is None:
+    launch = STARTING.get(account)
+    if launch is not None:
+        if launch.child.poll() is None:
             return True
         STARTING.pop(account)
     return bool(owned(account))
@@ -79,6 +88,7 @@ def start(account):
         return
     if sum(running(name) for name in names()) >= 2:
         raise ValueError("Уже открыты два окна CLBB.")
+    started_ns = time.monotonic_ns()
     if account == PRIMARY:
         env = dict(os.environ, CLBB_ACCOUNT_BYPASS="1")
         with (ROOT / "logs/account-launch.log").open("ab") as log:
@@ -86,7 +96,44 @@ def start(account):
                                      stdout=log, stderr=log, start_new_session=True)
     else:
         child = instances.start_supervisor(account)
-    STARTING[account] = child
+    STARTING[account] = Launch(child, started_ns)
+
+
+def desktop_close_requested(account, launch):
+    logs = (ROOT if account == PRIMARY else instances.profile(account)) / "logs"
+    try:
+        current = json.loads((logs / "current-atl-pid.json").read_text())
+        start, pid = current["start_monotonic_ns"], current["launcher_pid"]
+        if current["boot_id"] != BOOT_ID or start < launch.started_ns or pid <= 0:
+            return False
+        # The window close handler writes this line immediately before _exit.
+        # The previous run's marker must not turn a second startup click into a relaunch.
+        with (logs / f"qemu-launch-{start}-{pid}" / "runtime.log").open("rb") as log:
+            log.seek(max(0, log.seek(0, os.SEEK_END) - 4096))
+            marker = b"[CLBB_EXIT] desktop_close"
+            return any(line.lstrip(b"\0") == marker for line in log.read().splitlines())
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
+def launch_from_desktop():
+    with LOCK:
+        account = registry()["selected"]
+        previous = STARTING.get(account)
+        if (previous is None or previous.child.poll() is not None
+                or not desktop_close_requested(account, previous)):
+            start(account)
+            return
+
+    # The window is closing, but its supervisor still owns the launch. Wait
+    # outside the coordinator lock so the other profile stays usable.
+    try:
+        previous.child.wait(timeout=25)
+    except subprocess.TimeoutExpired:
+        raise ValueError("Предыдущее окно CLBB ещё завершает работу.") from None
+    with LOCK:
+        if registry()["selected"] == account:
+            start(account)
 
 
 def close(account):
@@ -103,10 +150,10 @@ def close(account):
         time.sleep(.05)
     if owned(account):
         raise ValueError("Текущее окно не закрылось.")
-    child = STARTING.get(account)
-    if child is not None:
+    launch = STARTING.get(account)
+    if launch is not None:
         try:
-            child.wait(timeout=max(0, until - time.monotonic()))
+            launch.child.wait(timeout=max(0, until - time.monotonic()))
         except subprocess.TimeoutExpired:
             raise ValueError("Текущее окно ещё закрывается.") from None
         STARTING.pop(account)
@@ -187,8 +234,7 @@ class Handler(socketserver.StreamRequestHandler):
             verb, _, target = request.decode().rstrip("\n").partition("\t")
             if verb == "desktop" and target == "":
                 # The host shortcut can only launch the already selected profile.
-                with LOCK:
-                    start(registry()["selected"])
+                launch_from_desktop()
                 reply = ""
             else:
                 with LOCK:

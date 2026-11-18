@@ -941,9 +941,12 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
         !strcmp(slot,"match:statistics")?"Статистика":action_title(slot,0,slot);
     palette_action(s,slot,slot,title,PALETTE_BASIC,0);
   }
-  for(int i=0;i<3;i++) {
-    g_autofree char *slot=g_strdup_printf("skill:%d",i);
-    palette_action(s,slot,slot,action_title(slot,0,slot),PALETTE_SKILLS,0);
+  /* Hirara uses two skills and two linked gestures, including in the offline picker. */
+  gboolean linked = hero == 133 || strstr(layout, "\ncombo:") != NULL;
+  int base_skills = linked ? 2 : 3;
+  for (int i = 0; i < base_skills; i++) {
+    g_autofree char *slot = g_strdup_printf("skill:%d", i);
+    palette_action(s, slot, slot, action_title(slot, 0, slot), PALETTE_SKILLS, 0);
   }
   g_auto(GStrv) lines=g_strsplit(layout,"\n",258);
   GHashTable *seen=g_hash_table_new_full(g_str_hash,g_str_equal,g_free,NULL);
@@ -953,6 +956,13 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
        (strcmp(cols[0],"skill:3")&&!g_str_has_prefix(cols[0],"combo:"))||
        !g_hash_table_add(seen,g_strdup(cols[0])))continue;
     palette_action(s,cols[0],cols[0],action_title(cols[0],atoi(cols[3]),cols[0]),PALETTE_SKILLS,atoi(cols[5]));
+  }
+  if (linked) {
+    for (int i = 0; i < 2; i++) {
+      g_autofree char *slot = g_strdup_printf("combo:%d", i);
+      if (!g_hash_table_contains(seen, slot))
+        palette_action(s, slot, slot, action_title(slot, 0, slot), PALETTE_SKILLS, 1);
+    }
   }
   g_hash_table_unref(seen);
   const int spells[]={20020,20030,20040,20050,20060,20070,20080,20100,20140,20150,20160,20190};
