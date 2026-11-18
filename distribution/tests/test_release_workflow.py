@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import fcntl,importlib.util,json,shlex,tempfile,unittest
+import fcntl,importlib.util,json,os,shlex,subprocess,tempfile,unittest
 from unittest.mock import patch
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
@@ -48,3 +48,41 @@ class ReleaseWorkflowTests(unittest.TestCase):
     workflow.write_local_launcher(wrapper, new)
    self.assertEqual(wrapper.read_text(), routed.replace(shlex.quote(str(old)), shlex.quote(str(new))))
    self.assertTrue(wrapper.stat().st_mode & 0o100)
+
+ def test_native_only_updates_keep_art_paths_but_changed_jars_get_new_paths(self):
+  with tempfile.TemporaryDirectory() as directory:
+   workbench = Path(directory)
+   def candidate(name, jar):
+    runtime = workbench/'candidates'/name/'runtime'
+    inputs = {'prefix/lib/art/libart.so': b'vm', 'prefix/bin/dex2oat': b'compiler',
+              'prefix/lib/java/dex/art/core-oj-hostdex.jar': jar,
+              'prefix/bin/android-translation-layer': name.encode()}
+    entries = {}
+    for path, content in inputs.items():
+     dest = runtime/path
+     dest.parent.mkdir(parents=True, exist_ok=True)
+     dest.write_bytes(content)
+     entries[path] = {'type': 'file', 'sha256': workflow.sha(dest)}
+    (runtime/'release.json').write_text(json.dumps({'files': entries}))
+    (runtime/'env.sh').write_bytes((ROOT.parent/'env.sh').read_bytes())
+    return runtime
+
+   def library_path(runtime):
+    env = dict(os.environ, CLBB_STATE_ROOT=str(workbench/'profile'), LD_LIBRARY_PATH='')
+    value = subprocess.check_output(['bash','-c','source "$1"; printf %s "$LD_LIBRARY_PATH"',
+                                     'test',str(runtime/'env.sh')], env=env, text=True)
+    return Path(value.split(':')[1])
+
+   first, second = candidate('first', b'bootstrap'), candidate('second', b'bootstrap')
+   self.assertEqual(library_path(first), first/'prefix/lib/art')
+   workflow.select_art_components(first, workbench)
+   workflow.select_art_components(second, workbench)
+   shared = library_path(first)
+   self.assertTrue(shared.is_relative_to(workbench/'art-components'))
+   self.assertEqual(library_path(second), shared)
+   updated = candidate('updated', b'new bytecode')
+   workflow.select_art_components(updated, workbench)
+   self.assertNotEqual(library_path(updated), shared)
+   self.assertEqual((shared/'../java/dex/art/core-oj-hostdex.jar').read_bytes(), b'bootstrap')
+   (second.parent/'.clbb-art-key').write_text('"not-a-key"\n')
+   self.assertEqual(library_path(second), second/'prefix/lib/art')

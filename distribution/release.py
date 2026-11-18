@@ -99,6 +99,48 @@ def use_local(directory):
         except BlockingIOError:raise ValueError('Close CLBB before switching the local runtime')
         _use_local(directory)
 
+def select_art_components(target, workbench):
+    # ART puts absolute library and jar locations into its on-disk compilation cache.
+    # Keep byte-identical inputs at one physical path across workbench updates.
+    manifest = json.loads((target/'release.json').read_text())['files']
+    entries = {name: entry for name, entry in manifest.items()
+               if name.startswith(('prefix/lib/art/', 'prefix/lib/java/')) or name == 'prefix/bin/dex2oat'}
+    hint = target.parent/'.clbb-art-key'
+    required = {'prefix/lib/art/libart.so', 'prefix/lib/java/dex/art/core-oj-hostdex.jar', 'prefix/bin/dex2oat'}
+    if not required.issubset(entries) or any(entry['type'] != 'file' for entry in entries.values()):
+        hint.unlink(missing_ok=True)
+        return
+
+    key = hashlib.sha256(json.dumps(entries, sort_keys=True).encode()).hexdigest()
+    pool = workbench/'art-components'
+    destination = pool/key
+    try:
+        pool.mkdir(parents=True, exist_ok=True)
+        if not destination.exists():
+            with tempfile.TemporaryDirectory(dir=pool) as scratch:
+                tree = Path(scratch)/'components'
+                for name in entries:
+                    output = tree/name
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        os.link(target/name, output)
+                    except OSError:
+                        shutil.copy2(target/name, output)
+                try:
+                    tree.rename(destination)
+                except OSError:
+                    if not destination.is_dir():
+                        raise
+        files = {str(path.relative_to(destination)) for path in destination.rglob('*')
+                 if path.is_file() or path.is_symlink()}
+        if files != entries.keys() or any((destination/name).is_symlink() or
+                sha(destination/name) != entry['sha256'] for name, entry in entries.items()):
+            raise ValueError('Shared ART components differ from the selected runtime')
+        write(hint, key)
+    except (OSError, ValueError) as error:
+        hint.unlink(missing_ok=True)
+        print(f'Using this runtime’s own ART libraries ({error})', file=sys.stderr)
+
 def write_local_launcher(wrapper, target):
     root_line = 'export CLBB_ROOT=' + shlex.quote(str(target))
     state_line = 'export CLBB_STATE_ROOT=' + shlex.quote(str(ROOT))
@@ -138,6 +180,7 @@ def _use_local(directory):
         _,stored=bundle(stable)
         if stored!=record:raise ValueError('Stored local candidate metadata differs')
         directory,record,target=verify(stable)
+    select_art_components(target, stable.parent.parent)
     # Persistent Android data stays in the existing development profile; never packaged here.
     wrapper=ROOT/'.clbb-local-launch'
     write_local_launcher(wrapper,target)
