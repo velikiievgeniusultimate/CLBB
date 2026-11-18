@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """CLBB release workbench: prepare once, test immutable artifacts, publish unchanged."""
-import argparse,fcntl,hashlib,json,os,shlex,shutil,subprocess,sys,tempfile,tarfile
+import argparse,fcntl,hashlib,json,os,shlex,shutil,stat,subprocess,sys,tempfile,tarfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 REPO='velikiievgeniusultimate/CLBB'
@@ -173,7 +173,8 @@ def write_workbench_desktop(wrapper, data):
     changed = not desktop.is_file() or desktop.read_text() != content
     if changed:
         desktop.write_text(content)
-    desktop.chmod(0o644)
+    if stat.S_IMODE(desktop.stat().st_mode) != 0o644:
+        desktop.chmod(0o644)
     desktop_icon=Path.home()/'Desktop/CLBB.desktop'
     if desktop_icon.is_file()and str(ROOT)in desktop_icon.read_text():
         saved=ROOT/'logs/desktop-icon-before-workbench.desktop'

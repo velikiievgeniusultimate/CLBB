@@ -101,9 +101,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
     wrapper, data = root/'.clbb-local-launch', home/'share'
     workflow.write_workbench_desktop(wrapper, data)
     entry = data/'applications/org.clbb.CLBB.desktop'
-    stats = [p.stat().st_mtime_ns for p in (entry, icon)]
+    stats = [(p.stat().st_mtime_ns, p.stat().st_ctime_ns) for p in (entry, icon)]
     self.assertEqual(icon.read_text(), entry.read_text())
     kde.assert_called_once()
     workflow.write_workbench_desktop(wrapper, data)
-    self.assertEqual(stats, [p.stat().st_mtime_ns for p in (entry, icon)])
+    self.assertEqual(stats, [(p.stat().st_mtime_ns, p.stat().st_ctime_ns) for p in (entry, icon)])
     kde.assert_called_once()
