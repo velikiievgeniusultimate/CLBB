@@ -649,7 +649,7 @@ index 56a3183..2d0e8cc 100644
    runtime_ = runtime;
  }
 diff --git a/libnb-qemu/Makefile b/libnb-qemu/Makefile
-index 78503cd..17e49ee 100644
+index 78503cd..2cbc1a2 100644
 --- a/libnb-qemu/Makefile
 +++ b/libnb-qemu/Makefile
 @@ -1,20 +1,47 @@

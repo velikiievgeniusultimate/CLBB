@@ -5351,7 +5351,7 @@ index 3fd5b65..85e98f6 100644
  	'android/widget/TimePicker.java',
  	'android/widget/Toast.java',
 diff --git a/src/libandroid/egl.c b/src/libandroid/egl.c
-index 30ba805..85cf3c8 100644
+index 30ba805..f9c079d 100644
 --- a/src/libandroid/egl.c
 +++ b/src/libandroid/egl.c
 @@ -8,7 +8,7 @@
@@ -5376,7 +5376,37 @@ index 30ba805..85cf3c8 100644
  
  static GHashTable *egl_surface_hashtable;
  
-@@ -189,8 +195,31 @@ EGLSurface bionic_eglCreatePbufferSurface(EGLDisplay display, EGLConfig config,
+@@ -92,15 +98,8 @@ void (*bionic_eglGetProcAddress(char const *procname))(void)
+ 	return eglGetProcAddress(procname);
+ }
+ 
+-EGLDisplay bionic_eglGetDisplay(EGLNativeDisplayType native_display)
++static EGLDisplay egl_display_for_gdk(GdkDisplay *display)
+ {
+-	/*
+-	 * On android, at least SDL passes 0 (EGL_DISPLAY_DEFAULT) to eglGetDisplay and uses the resulting display.
+-	 * We obviously want to make the app use the correct display, which may happen to be a different one
+-	 * than the "default" display (especially on Wayland)
+-	 */
+-	GdkDisplay *display = gtk_root_get_display(GTK_ROOT(window));
+-
+ 	if (GDK_IS_WAYLAND_DISPLAY(display)) {
+ 		struct wl_display *wl_display = gdk_wayland_display_get_wl_display(display);
+ 		return eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wl_display, NULL);
+@@ -115,6 +114,12 @@ EGLDisplay bionic_eglGetDisplay(EGLNativeDisplayType native_display)
+ 	}
+ }
+ 
++EGLDisplay bionic_eglGetDisplay(EGLNativeDisplayType native_display)
++{
++	/* Android apps ordinarily pass EGL_DEFAULT_DISPLAY. Use the game's actual display. */
++	return egl_display_for_gdk(gtk_root_get_display(GTK_ROOT(window)));
++}
++
+ EGLBoolean bionic_eglChooseConfig(EGLDisplay display, EGLint *attrib_list, EGLConfig *configs, EGLint config_size, EGLint *num_config)
+ {
+ 	GdkDisplay *gdk_display = gtk_root_get_display(GTK_ROOT(window));
+@@ -189,13 +194,40 @@ EGLSurface bionic_eglCreatePbufferSurface(EGLDisplay display, EGLConfig config,
  	}
  }
  
@@ -5409,7 +5439,16 @@ index 30ba805..85cf3c8 100644
  struct _ATLSurface {
  	GObject parent;
  	int width;
-@@ -206,12 +235,20 @@ struct _ATLSurface {
+ 	int height;
+ 	SurfaceViewWidget *surface_view_widget;
++	EGLDisplay image_display;
++	GdkGLContext *import_context; /* GTK thread, independent of the current native window */
++	gboolean import_error_reported;
++	GMutex image_mutex; /* protects EGLImages during import versus producer teardown */
+ 	int32_t framebuffer_format;
+ 	int32_t renderbuffer_format;
+ 	unsigned int renderbuffer_attachment;
+@@ -206,36 +238,177 @@ struct _ATLSurface {
  		GdkGLTextureBuilder *texture_builder;
  		uint32_t gl_texture;
  		uint32_t gl_framebuffer;
@@ -5426,40 +5465,128 @@ index 30ba805..85cf3c8 100644
 +	gboolean boot_capture_done;
  	GAsyncQueue *vsync;
  	GAsyncQueue *unused_buffers;
- 	gboolean destroyed;
+-	gboolean destroyed;
++	gint destroyed; /* atomic */
 +    GMutex profile_mutex;
 +    struct egl_profile_stats profile;
  };
  G_DECLARE_FINAL_TYPE(ATLSurface, atl_surface, ATL, SURFACE, GObject);
++G_DEFINE_TYPE(ATLSurface, atl_surface, G_TYPE_OBJECT)
++
++/* GTK may be rendering with its own context when this idle runs. Also retain
++ * a raw EGL binding if the caller made one current without going through GDK. */
++typedef struct {
++	GdkGLContext *gdk;
++	EGLDisplay display;
++	EGLContext context;
++	EGLSurface draw;
++	EGLSurface read;
++	EGLenum api;
++} SavedGLBinding;
++
++static SavedGLBinding save_gl_binding(void)
++{
++	GdkGLContext *current = gdk_gl_context_get_current();
++	return (SavedGLBinding) {
++		.gdk = current ? g_object_ref(current) : NULL,
++		.display = eglGetCurrentDisplay(),
++		.context = eglGetCurrentContext(),
++		.draw = eglGetCurrentSurface(EGL_DRAW),
++		.read = eglGetCurrentSurface(EGL_READ),
++		.api = eglQueryAPI(),
++	};
++}
++
++static void restore_gl_binding(SavedGLBinding *saved)
++{
++	if (saved->gdk) {
++		gdk_gl_context_make_current(saved->gdk);
++		g_object_unref(saved->gdk);
++	} else {
++		gdk_gl_context_clear_current();
++		eglBindAPI(saved->api);
++		if (saved->context != EGL_NO_CONTEXT)
++			eglMakeCurrent(saved->display, saved->draw, saved->read, saved->context);
++	}
++}
++
++/* The EGLImage belongs to its producer display. A reparent or monitor change
++ * need not recreate the context. If the widget moved to another display, GTK
++ * still receives a normal GdkTexture owned by its original import display. */
++static GdkDisplay *find_image_display(ATLSurface *surface)
++{
++	GdkDisplay *widget_display = gtk_widget_get_display(GTK_WIDGET(surface->surface_view_widget));
++	if (!gdk_display_is_closed(widget_display) && egl_display_for_gdk(widget_display) == surface->image_display)
++		return widget_display;
++
++	GdkDisplay *result = NULL;
++	GSList *displays = gdk_display_manager_list_displays(gdk_display_manager_get());
++	for (GSList *it = displays; it; it = it->next) {
++		GdkDisplay *display = it->data;
++		if (!gdk_display_is_closed(display) && egl_display_for_gdk(display) == surface->image_display) {
++			result = display;
++			break;
++		}
++	}
++	g_slist_free(displays);
++	return result;
++}
++
  static void atl_surface_dispose(GObject *object)
-@@ -219,7 +256,7 @@ static void atl_surface_dispose(GObject *object)
+ {
  	ATLSurface *atl_surface = ATL_SURFACE(object);
- 	GdkGLContext *gtk_gl_context = gdk_surface_create_gl_context(gtk_native_get_surface(gtk_widget_get_native(GTK_WIDGET(atl_surface->surface_view_widget))), NULL);
- 	gdk_gl_context_make_current(gtk_gl_context);
+-	GdkGLContext *gtk_gl_context = gdk_surface_create_gl_context(gtk_native_get_surface(gtk_widget_get_native(GTK_WIDGET(atl_surface->surface_view_widget))), NULL);
+-	gdk_gl_context_make_current(gtk_gl_context);
 -	for (int i = 0; i < NUM_BUFFERS; i++) {
++	GdkGLContext *context = atl_surface->import_context;
++	gboolean can_use_context = context && !gdk_display_is_closed(gdk_gl_context_get_display(context));
++	SavedGLBinding saved;
++	if (can_use_context) {
++		saved = save_gl_binding();
++		gdk_gl_context_make_current(context);
++	}
 +	for (int i = 0; i < atl_surface->num_buffers; i++) {
  		if (atl_surface->buffers[i].texture_builder) {
  			GLuint texture_id = gdk_gl_texture_builder_get_id(atl_surface->buffers[i].texture_builder);
- 			glDeleteTextures(1, &texture_id);
-@@ -229,14 +266,68 @@ static void atl_surface_dispose(GObject *object)
- 	g_async_queue_unref(atl_surface->unused_buffers);
- 	g_async_queue_unref(atl_surface->vsync);
- 	g_object_unref(atl_surface->surface_view_widget);
-+    g_mutex_clear(&atl_surface->profile_mutex);
+-			glDeleteTextures(1, &texture_id);
+-			g_object_unref(atl_surface->buffers[i].texture_builder);
++			if (can_use_context && gdk_gl_context_get_current() == context)
++				glDeleteTextures(1, &texture_id);
++			g_clear_object(&atl_surface->buffers[i].texture_builder);
+ 		}
+ 	}
+-	g_async_queue_unref(atl_surface->unused_buffers);
+-	g_async_queue_unref(atl_surface->vsync);
+-	g_object_unref(atl_surface->surface_view_widget);
++	if (can_use_context)
++		restore_gl_binding(&saved);
++	g_clear_object(&atl_surface->import_context);
++	g_clear_pointer(&atl_surface->unused_buffers, g_async_queue_unref);
++	g_clear_pointer(&atl_surface->vsync, g_async_queue_unref);
++	g_clear_object(&atl_surface->surface_view_widget);
++	G_OBJECT_CLASS(atl_surface_parent_class)->dispose(object);
++}
++
++static void atl_surface_finalize(GObject *object)
++{
++	ATLSurface *surface = ATL_SURFACE(object);
++	g_mutex_clear(&surface->profile_mutex);
++	g_mutex_clear(&surface->image_mutex);
++	G_OBJECT_CLASS(atl_surface_parent_class)->finalize(object);
  }
  static void atl_surface_class_init(ATLSurfaceClass *class)
  {
  	G_OBJECT_CLASS(class)->dispose = atl_surface_dispose;
- }
--static void atl_surface_init(ATLSurface *self) {}
++	G_OBJECT_CLASS(class)->finalize = atl_surface_finalize;
++}
 +static void atl_surface_init(ATLSurface *self) {
 +    g_mutex_init(&self->profile_mutex);
++	g_mutex_init(&self->image_mutex);
 +    self->num_buffers=3;
 +    const char *value=g_getenv("CLBB_EGL_BUFFERS");
 +    if(value && (!strcmp(value,"4") || !strcmp(value,"5")))self->num_buffers=atoi(value);
 +}
- G_DEFINE_TYPE(ATLSurface, atl_surface, G_TYPE_OBJECT)
- 
++
 +/* Both render producer and GTK may contribute. Reporting happens only on
 + * the producer, after releasing the profiling mutex; one line per second. */
 +static void egl_profile_swap(ATLSurface *surface, gint64 begin, gint64 paced,
@@ -5506,21 +5633,67 @@ index 30ba805..85cf3c8 100644
 +    egl_profile_add(&surface->profile.metrics[PROFILE_QUEUE], begin - queued);
 +    egl_profile_add(&surface->profile.metrics[PROFILE_HANDOFF], end - begin);
 +    g_mutex_unlock(&surface->profile_mutex);
-+}
-+
+ }
+-static void atl_surface_init(ATLSurface *self) {}
+-G_DEFINE_TYPE(ATLSurface, atl_surface, G_TYPE_OBJECT)
+ 
  /*
   * Android exports eglCreateImageKHR (with EGLAttrib) as a direct libEGL.so symbol,
-  * while Mesa exports the core EGL 1.5 function eglCreateImage as its linkable entry
-@@ -322,7 +413,7 @@ EGLBoolean bionic_eglDestroySurface(EGLDisplay display, EGLSurface surface)
+@@ -269,6 +442,7 @@ EGLSurface bionic_eglCreateWindowSurface(EGLDisplay display, EGLConfig config, s
+ 		surface = eglCreateWindowSurface(display, config, native_window->egl_window, attrib_list);
+ 	} else {
+ 		ATLSurface *atl_surface = g_object_new(atl_surface_get_type(), NULL);
++		atl_surface->image_display = display;
+ 		atl_surface->width = native_window->width;
+ 		atl_surface->height = native_window->height;
+ 		atl_surface->surface_view_widget = SURFACE_VIEW_WIDGET(g_object_ref(native_window->surface_view_widget));
+@@ -309,6 +483,21 @@ EGLSurface bionic_eglCreateWindowSurface(EGLDisplay display, EGLConfig config, s
+ 	return surface;
+ }
+ 
++static gboolean retire_surface_on_gtk(gpointer data)
++{
++	ATLSurface *surface = data;
++	SurfaceViewWidget *widget = surface->surface_view_widget;
++	if (widget && surface->vsync && widget->frame_callback_data == surface->vsync) {
++		widget->frame_callback = NULL;
++		widget->frame_callback_data = NULL;
++	}
++	/* Keep the last presented texture visible until GTK replaces it. Release
++	 * the reverse reference so the widget and that texture cannot form a cycle. */
++	g_clear_object(&surface->surface_view_widget);
++	g_object_unref(surface);
++	return G_SOURCE_REMOVE;
++}
++
+ EGLBoolean bionic_eglDestroySurface(EGLDisplay display, EGLSurface surface)
+ {
+ 	struct ANativeWindow *native_window = g_hash_table_lookup(egl_surface_hashtable, surface);
+@@ -321,8 +510,9 @@ EGLBoolean bionic_eglDestroySurface(EGLDisplay display, EGLSurface surface)
+ 		ret = eglDestroySurface(display, surface);
  	} else {
  		ATLSurface *atl_surface = surface;
- 		atl_surface->destroyed = TRUE;
+-		atl_surface->destroyed = TRUE;
 -		for (int i = 0; i < NUM_BUFFERS; i++) {
++		g_atomic_int_set(&atl_surface->destroyed, TRUE);
++		g_mutex_lock(&atl_surface->image_mutex);
 +		for (int i = 0; i < atl_surface->num_buffers; i++) {
  			if (atl_surface->buffers[i].egl_image)
  				eglDestroyImage(display, atl_surface->buffers[i].egl_image);
  			atl_surface->buffers[i].egl_image = 0;
-@@ -375,7 +466,7 @@ EGLBoolean bionic_eglMakeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface
+@@ -331,7 +521,10 @@ EGLBoolean bionic_eglDestroySurface(EGLDisplay display, EGLSurface surface)
+ 			if (atl_surface->buffers[i].gl_texture)
+ 				glDeleteTextures(1, &atl_surface->buffers[i].gl_texture);
+ 		}
+-		g_object_unref(atl_surface);
++		g_mutex_unlock(&atl_surface->image_mutex);
++		/* Transfer this reference to the GTK thread, even for an EGLSurface
++		 * destroyed before its first eglMakeCurrent or GTK handoff. */
++		g_idle_add_full(G_PRIORITY_DEFAULT, retire_surface_on_gtk, atl_surface, NULL);
+ 	}
+ 	if (ret) {
+ 		g_hash_table_remove(egl_surface_hashtable, surface);
+@@ -375,7 +568,7 @@ EGLBoolean bionic_eglMakeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface
  			glBindRenderbuffer(GL_RENDERBUFFER, previous_renderbuffer);
  		}
  
@@ -5529,7 +5702,30 @@ index 30ba805..85cf3c8 100644
  			atl_surface->buffers[i].surface = atl_surface;
  			glGenTextures(1, &atl_surface->buffers[i].gl_texture);
  			glBindTexture(GL_TEXTURE_2D, atl_surface->buffers[i].gl_texture);
-@@ -414,18 +505,224 @@ static void destroy_texture(void *data)
+@@ -404,55 +597,389 @@ EGLBoolean bionic_eglMakeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface
+ 	return ret;
+ }
+ 
+-/* runs on main thread */
++static gboolean unref_surface_on_gtk(gpointer data)
++{
++	g_object_unref(data);
++	return G_SOURCE_REMOVE;
++}
++
+ static void destroy_texture(void *data)
+ {
+ 	struct atl_surface_buffer *buffer = data;
+-	g_async_queue_push(buffer->surface->unused_buffers, buffer);
+-	g_object_unref(buffer->surface);
++	ATLSurface *surface = buffer->surface;
++	g_async_queue_push(surface->unused_buffers, buffer);
++	/* GDK permits the texture destroy callback to run on a worker thread. */
++	if (g_main_context_is_owner(g_main_context_default()))
++		g_object_unref(surface);
++	else
++		g_idle_add_full(G_PRIORITY_DEFAULT, unref_surface_on_gtk, surface, NULL);
+ }
  
  static void frame_callback(SurfaceViewWidget *surface_view_widget)
  {
@@ -5546,8 +5742,9 @@ index 30ba805..85cf3c8 100644
 +	GAsyncQueue *ticks = surface_view_widget->frame_callback_data;
 +	if (g_async_queue_length(ticks) <= 0)
 +		g_async_queue_push(ticks, GINT_TO_POINTER(1));
-+}
-+
+ }
+ 
+-static gboolean queue_texture(gpointer data)
 +/* Read the submitted buffer without changing the application's pack/FBO state. */
 +static void trace_swap(ATLSurface *surface)
 +{
@@ -5731,42 +5928,143 @@ index 30ba805..85cf3c8 100644
 +	paintable = gtk_widget_paintable_new(GTK_WIDGET(root));
 +	boot_capture_paintable(paintable, gtk_widget_get_width(GTK_WIDGET(root)), gtk_widget_get_height(GTK_WIDGET(root)), renderer, directory, "atl-root-widget.png");
 +	g_object_unref(paintable);
- }
- 
- static gboolean queue_texture(gpointer data)
++}
++
++static gboolean import_buffer_texture(struct atl_surface_buffer *buffer, GError **error)
  {
  	static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES = NULL;
 -	ATLSurface *atl_surface = data;
+-	if (atl_surface->destroyed) {
++	ATLSurface *surface = buffer->surface;
++	if (!surface->import_context) {
++		GdkDisplay *display = find_image_display(surface);
++		if (!display) {
++			g_set_error_literal(error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE, "EGL producer display is unavailable");
++			return FALSE;
++		}
++		GdkGLContext *context = gdk_display_create_gl_context(display, error);
++		if (!context)
++			return FALSE;
++		if (!gdk_gl_context_realize(context, error)) {
++			g_object_unref(context);
++			return FALSE;
++		}
++		surface->import_context = context;
++	}
++	GdkGLContext *context = surface->import_context;
++	if (gdk_display_is_closed(gdk_gl_context_get_display(context))) {
++		g_set_error_literal(error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE, "EGL producer display is closed");
++		return FALSE;
++	}
++	gdk_gl_context_make_current(context);
++	if (gdk_gl_context_get_current() != context) {
++		g_set_error_literal(error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE, "Could not bind the GTK import context");
++		return FALSE;
++	}
++	if (!glEGLImageTargetTexture2DOES)
++		glEGLImageTargetTexture2DOES = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress("glEGLImageTargetTexture2DOES");
++	if (!glEGLImageTargetTexture2DOES) {
++		g_set_error_literal(error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE, "EGLImage texture import is unavailable");
++		return FALSE;
++	}
++
++	GLuint texture = 0;
++	GLint previous_texture;
++	glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous_texture);
++	glGetError(); /* The context can also be used by GDK to download textures. */
++	g_mutex_lock(&surface->image_mutex);
++	if (g_atomic_int_get(&surface->destroyed)) {
++		g_mutex_unlock(&surface->image_mutex);
++		return FALSE;
++	}
++	if (buffer->egl_image == EGL_NO_IMAGE) {
++		g_mutex_unlock(&surface->image_mutex);
++		g_set_error_literal(error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE, "Missing EGLImage for this buffer");
++		return FALSE;
++	}
++	glGenTextures(1, &texture);
++	glBindTexture(GL_TEXTURE_2D, texture);
++	glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, buffer->egl_image);
++	GLenum status = glGetError();
++	glBindTexture(GL_TEXTURE_2D, previous_texture);
++	if (status == GL_NO_ERROR && texture) {
++		eglDestroyImage(surface->image_display, buffer->egl_image);
++		buffer->egl_image = EGL_NO_IMAGE;
++	}
++	g_mutex_unlock(&surface->image_mutex);
++	if (status != GL_NO_ERROR || !texture) {
++		if (texture)
++			glDeleteTextures(1, &texture);
++		g_set_error(error, GDK_GL_ERROR, GDK_GL_ERROR_NOT_AVAILABLE, "EGLImage texture import failed (GL 0x%x)", status);
++		return FALSE;
++	}
++	buffer->texture_builder = gdk_gl_texture_builder_new();
++	gdk_gl_texture_builder_set_context(buffer->texture_builder, context);
++	gdk_gl_texture_builder_set_id(buffer->texture_builder, texture);
++	gdk_gl_texture_builder_set_format(buffer->texture_builder, GDK_MEMORY_R8G8B8A8_PREMULTIPLIED);
++	gdk_gl_texture_builder_set_width(buffer->texture_builder, surface->width);
++	gdk_gl_texture_builder_set_height(buffer->texture_builder, surface->height);
++	return TRUE;
++}
++
++static gboolean queue_texture(gpointer data)
++{
 +	struct atl_surface_buffer *buffer = data;
 +	ATLSurface *atl_surface = buffer->surface;
 +    gboolean profile = egl_profile_enabled();
 +    gint64 profile_begin = profile ? g_get_monotonic_time() : 0;
- 	if (atl_surface->destroyed) {
++	if (g_atomic_int_get(&atl_surface->destroyed)) {
  		g_object_unref(atl_surface);
  		return G_SOURCE_REMOVE;
  	}
 -	struct atl_surface_buffer *buffer = atl_surface->front_buffer;
 +	if (getenv("ATL_BOOT_TRACE") && atl_surface->traced_queues < 8) {
++		g_mutex_lock(&atl_surface->image_mutex);
++		EGLImage image = buffer->egl_image;
++		g_mutex_unlock(&atl_surface->image_mutex);
 +		fprintf(stderr, "[ATL EGL queue] frame=%u surface=%p buffer=%p fbo=%u image=%p imported=%d widget=%dx%d mapped=%d\n",
 +		        ++atl_surface->traced_queues, atl_surface, buffer, buffer->gl_framebuffer,
-+		        buffer->egl_image, buffer->texture_builder != NULL,
++		        image, buffer->texture_builder != NULL,
 +		        gtk_widget_get_width(GTK_WIDGET(atl_surface->surface_view_widget)),
 +		        gtk_widget_get_height(GTK_WIDGET(atl_surface->surface_view_widget)),
 +		        gtk_widget_get_mapped(GTK_WIDGET(atl_surface->surface_view_widget)));
 +	}
  	if (!buffer->texture_builder) {
- 		GLuint texture_id;
- 		GdkGLContext *gtk_gl_context = gdk_surface_create_gl_context(gtk_native_get_surface(gtk_widget_get_native(GTK_WIDGET(atl_surface->surface_view_widget))), NULL);
-@@ -435,6 +732,8 @@ static gboolean queue_texture(gpointer data)
- 		if (!glEGLImageTargetTexture2DOES)
- 			glEGLImageTargetTexture2DOES = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress("glEGLImageTargetTexture2DOES");
- 		glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, buffer->egl_image);
+-		GLuint texture_id;
+-		GdkGLContext *gtk_gl_context = gdk_surface_create_gl_context(gtk_native_get_surface(gtk_widget_get_native(GTK_WIDGET(atl_surface->surface_view_widget))), NULL);
+-		gdk_gl_context_make_current(gtk_gl_context);
+-		glGenTextures(1, &texture_id);
+-		glBindTexture(GL_TEXTURE_2D, texture_id);
+-		if (!glEGLImageTargetTexture2DOES)
+-			glEGLImageTargetTexture2DOES = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress("glEGLImageTargetTexture2DOES");
+-		glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, buffer->egl_image);
+-		glBindTexture(GL_TEXTURE_2D, 0);
+-		eglDestroyImage(eglGetCurrentDisplay(), buffer->egl_image);
+-		buffer->egl_image = NULL;
+-		buffer->texture_builder = gdk_gl_texture_builder_new();
+-		gdk_gl_texture_builder_set_context(buffer->texture_builder, gtk_gl_context);
+-		gdk_gl_texture_builder_set_id(buffer->texture_builder, texture_id);
+-		gdk_gl_texture_builder_set_format(buffer->texture_builder, GDK_MEMORY_R8G8B8A8_PREMULTIPLIED);
+-		gdk_gl_texture_builder_set_width(buffer->texture_builder, atl_surface->width);
+-		gdk_gl_texture_builder_set_height(buffer->texture_builder, atl_surface->height);
+-		gdk_gl_context_clear_current();
++		GError *error = NULL;
++		SavedGLBinding saved = save_gl_binding();
++		gboolean imported = import_buffer_texture(buffer, &error);
++		restore_gl_binding(&saved);
++		if (!imported) {
++			if (error && !atl_surface->import_error_reported) {
++				g_warning("ATL could not present an EGL buffer: %s", error->message);
++				atl_surface->import_error_reported = TRUE;
++			}
++			g_clear_error(&error);
++			destroy_texture(buffer);
++			return G_SOURCE_REMOVE;
++		}
++		atl_surface->import_error_reported = FALSE;
 +		if (getenv("ATL_BOOT_TRACE") && atl_surface->traced_queues <= 8)
-+			fprintf(stderr, "[ATL EGL import] buffer=%p texture-id=%u gl-error=0x%x\n", buffer, texture_id, glGetError());
- 		glBindTexture(GL_TEXTURE_2D, 0);
- 		eglDestroyImage(eglGetCurrentDisplay(), buffer->egl_image);
- 		buffer->egl_image = NULL;
-@@ -448,11 +747,53 @@ static gboolean queue_texture(gpointer data)
++			fprintf(stderr, "[ATL EGL import] buffer=%p texture-id=%u gl-error=0x0 context=%p\n",
++			        buffer, gdk_gl_texture_builder_get_id(buffer->texture_builder), atl_surface->import_context);
  	}
  	atl_surface->surface_view_widget->frame_callback_data = atl_surface->vsync;
  	atl_surface->surface_view_widget->frame_callback = frame_callback;
@@ -5821,11 +6119,10 @@ index 30ba805..85cf3c8 100644
  EGLBoolean bionic_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
  {
  	if (getenv("ATL_DIRECT_EGL"))
-@@ -462,19 +803,49 @@ EGLBoolean bionic_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
+@@ -462,19 +989,49 @@ EGLBoolean bionic_eglSwapBuffers(EGLDisplay display, EGLSurface surface)
  		return eglSwapBuffers(display, surface);
  	}
  	ATLSurface *atl_surface = surface;
--
 +	GLuint previous_framebuffer = atl_surface->back_buffer ? atl_surface->back_buffer->gl_framebuffer : 0;
 +	if (clbb_boot_event && atl_surface->submitted_frames == 0) clbb_boot_event("egl.first_swap.begin");
 +    gboolean profile = egl_profile_enabled();
@@ -5833,7 +6130,7 @@ index 30ba805..85cf3c8 100644
 +	if (clbb_frame_pacing_wait) clbb_frame_pacing_wait();
 +    gint64 profile_paced = profile ? g_get_monotonic_time() : 0;
 +    gint64 profile_vsync_us = 0;
-+
+ 
 +	trace_swap(atl_surface);
 +	if (getenv("ATL_EGL_SYNC_DIAGNOSTIC"))
 +		glFinish();
@@ -5879,7 +6176,7 @@ index 30ba805..85cf3c8 100644
  
  	return EGL_TRUE;
  }
-@@ -514,6 +885,21 @@ void bionic_glBindFramebuffer(GLenum target, GLuint framebuffer)
+@@ -514,6 +1071,21 @@ void bionic_glBindFramebuffer(GLenum target, GLuint framebuffer)
  {
  	if (getenv("ATL_DIRECT_EGL") || framebuffer != 0)
  		return glBindFramebuffer(target, framebuffer);

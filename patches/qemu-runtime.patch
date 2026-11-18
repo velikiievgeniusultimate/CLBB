@@ -27,7 +27,7 @@ index 3f09355..09e6871 100644
      old = atomic_cmpxchg(&tb->jmp_dest[n], (uintptr_t)NULL, (uintptr_t)tb_next);
      if (old) {
 diff --git a/accel/tcg/tcg-runtime.c b/accel/tcg/tcg-runtime.c
-index 446465a..417821d 100644
+index 446465a..8974cfe 100644
 --- a/accel/tcg/tcg-runtime.c
 +++ b/accel/tcg/tcg-runtime.c
 @@ -145,7 +145,7 @@ uint64_t HELPER(ctpop_i64)(uint64_t arg)
@@ -39,7 +39,7 @@ index 446465a..417821d 100644
  {
      CPUState *cpu = env_cpu(env);
      TranslationBlock *tb;
-@@ -164,6 +164,53 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env)
+@@ -164,6 +164,42 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env)
      return tb->tc.ptr;
  }
  
@@ -51,40 +51,29 @@ index 446465a..417821d 100644
 +{
 +#if defined(CONFIG_USER_ONLY) && defined(TARGET_AARCH64) && !defined(CONFIG_DEBUG_TCG)
 +    CPUState *cpu = env_cpu(env);
-+    uint32_t cf_mask = curr_cflags();
 +    uint32_t flags = env->hflags;
++    uint32_t state_bits = R_TBFLAG_ANY_AARCH64_STATE_MASK |
++                          R_TBFLAG_ANY_SS_ACTIVE_MASK;
++    uint32_t common_cflags = CF_PARALLEL |
++        ((uint32_t)UNASSIGNED_CLUSTER_INDEX << CF_CLUSTER_SHIFT);
++    target_ulong pc = env->pc;
++    TranslationBlock *tb;
 +
-+    if (likely(FIELD_EX32(flags, TBFLAG_ANY, AARCH64_STATE))) {
-+        target_ulong pc = env->pc;
-+        TranslationBlock *tb;
-+        uint32_t hash;
-+
-+        hash = tb_jmp_cache_hash_func(pc);
-+        tb = atomic_rcu_read(&cpu->tb_jmp_cache[hash]);
-+        if (cpu_isar_feature(aa64_bti, env_archcpu(env))) {
-+            flags = FIELD_DP32(flags, TBFLAG_A64, BTYPE, env->btype);
++    /* Predict a normal multi-threaded EL0 run. Validate each part of the
++     * prediction; icount, atomic step, debug, BTI and cluster changes all
++     * keep the full architectural lookup. No executable pointers are kept. */
++    if (likely((flags & state_bits) == R_TBFLAG_ANY_AARCH64_STATE_MASK &&
++               parallel_cpus && !use_icount &&
++               cpu->cluster_index == UNASSIGNED_CLUSTER_INDEX &&
++               !cpu_isar_feature(aa64_bti, env_archcpu(env)) &&
++               !qemu_loglevel_mask(CPU_LOG_EXEC))) {
++        tb = atomic_rcu_read(&cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)]);
++        if (likely(tb && tb->pc == pc && tb->cs_base == 0 &&
++                   tb->flags == flags &&
++                   tb->trace_vcpu_dstate == *cpu->trace_dstate &&
++                   (tb_cflags(tb) & (CF_HASH_MASK | CF_INVALID)) == common_cflags)) {
++            return tb->tc.ptr;
 +        }
-+        if (FIELD_EX32(flags, TBFLAG_ANY, SS_ACTIVE) &&
-+            (env->pstate & PSTATE_SS)) {
-+            flags = FIELD_DP32(flags, TBFLAG_ANY, PSTATE_SS, 1);
-+        }
-+        cf_mask &= ~CF_CLUSTER_MASK;
-+        cf_mask |= cpu->cluster_index << CF_CLUSTER_SHIFT;
-+        if (unlikely(!tb || tb->pc != pc || tb->cs_base != 0 ||
-+                     tb->flags != flags ||
-+                     tb->trace_vcpu_dstate != *cpu->trace_dstate ||
-+                     (tb_cflags(tb) & (CF_HASH_MASK | CF_INVALID)) != cf_mask)) {
-+            tb = tb_htable_lookup(cpu, pc, 0, flags, cf_mask);
-+            if (!tb) {
-+                return tcg_ctx->code_gen_epilogue;
-+            }
-+            atomic_set(&cpu->tb_jmp_cache[hash], tb);
-+        }
-+        qemu_log_mask_and_addr(CPU_LOG_EXEC, pc,
-+                               "Chain %d: %p [" TARGET_FMT_lx "/" TARGET_FMT_lx "/%#x] %s\n",
-+                               cpu->cpu_index, tb->tc.ptr, (target_ulong)0, pc, flags,
-+                               lookup_symbol(pc));
-+        return tb->tc.ptr;
 +    }
 +#endif
 +    return clbb_lookup_tb_ptr_slow(env);
@@ -94,7 +83,7 @@ index 446465a..417821d 100644
  {
      cpu_loop_exit_atomic(env_cpu(env), GETPC());
 diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
-index 909059a..946171b 100644
+index 909059a..13b2501 100644
 --- a/accel/tcg/translate-all.c
 +++ b/accel/tcg/translate-all.c
 @@ -1552,8 +1552,10 @@ static inline void tb_page_add(PageDesc *p, TranslationBlock *tb,
@@ -109,7 +98,27 @@ index 909059a..946171b 100644
          if (DEBUG_TB_INVALIDATE_GATE) {
              printf("protecting code page: 0x" TB_PAGE_ADDR_FMT "\n", page_addr);
          }
-@@ -1709,6 +1711,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
+@@ -1655,6 +1657,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
+ {
+     CPUArchState *env = cpu->env_ptr;
+     TranslationBlock *tb, *existing_tb;
++#ifdef A64_USER_SPLIT_TB
++    void *previous_highwater;
++#endif
+     tb_page_addr_t phys_pc, phys_page2;
+     target_ulong virt_page2;
+     tcg_insn_unit *gen_code_buf;
+@@ -1689,6 +1694,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
+     }
+ 
+  buffer_overflow:
++#ifdef A64_USER_SPLIT_TB
++    previous_highwater = tcg_ctx->code_gen_highwater;
++#endif
+     tb = tcg_tb_alloc(tcg_ctx);
+     if (unlikely(!tb)) {
+         /* flush must be done */
+@@ -1709,6 +1717,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
      tb->trace_vcpu_dstate = *cpu->trace_dstate;
      tcg_ctx->tb_cflags = cflags;
   tb_overflow:
@@ -119,7 +128,23 @@ index 909059a..946171b 100644
  
  #ifdef CONFIG_PROFILER
      /* includes aborted translations because of exceptions */
-@@ -2652,7 +2657,8 @@ int page_unprotect(target_ulong address, uintptr_t pc)
+@@ -1854,10 +1865,15 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
+     existing_tb = tb_link_page(tb, phys_pc, phys_page2);
+     /* if the TB already exists, discard what we just translated */
+     if (unlikely(existing_tb != tb)) {
++#ifdef A64_USER_SPLIT_TB
++        atomic_set(&tcg_ctx->code_gen_ptr, gen_code_buf);
++        atomic_set(&tcg_ctx->code_gen_highwater, previous_highwater);
++#else
+         uintptr_t orig_aligned = (uintptr_t)gen_code_buf;
+ 
+         orig_aligned -= ROUND_UP(sizeof(*tb), qemu_icache_linesize);
+         atomic_set(&tcg_ctx->code_gen_ptr, (void *)orig_aligned);
++#endif
+         return existing_tb;
+     }
+     tcg_tb_insert(tb);
+@@ -2652,7 +2668,8 @@ int page_unprotect(target_ulong address, uintptr_t pc)
  #endif
              }
              mprotect((void *)g2h(host_start), qemu_host_page_size,
@@ -212,14 +237,15 @@ index 786a1be..44865ce 100644
  
  static void cpu_common_reset(DeviceState *dev)
 diff --git a/include/exec/exec-all.h b/include/exec/exec-all.h
-index 350c4b4..0763da4 100644
+index 350c4b4..ec78e41 100644
 --- a/include/exec/exec-all.h
 +++ b/include/exec/exec-all.h
-@@ -369,6 +369,12 @@ struct tb_tc {
+@@ -369,6 +369,13 @@ struct tb_tc {
      size_t size;
  };
  
 +#if defined(CONFIG_USER_ONLY) && defined(TARGET_AARCH64) && defined(__x86_64__)
++#define A64_USER_SPLIT_TB 1
 +#define A64_USER_INDIRECT_CHAIN 1
 +#define A64_TB_DIRECT_PC UINT64_C(1)
 +#define A64_TB_UNTRAINED_PC UINT64_MAX
@@ -228,7 +254,7 @@ index 350c4b4..0763da4 100644
  struct TranslationBlock {
      target_ulong pc;   /* simulated PC corresponding to this block (EIP + CS base) */
      target_ulong cs_base; /* CS base for this block */
-@@ -394,6 +400,12 @@ struct TranslationBlock {
+@@ -394,6 +401,12 @@ struct TranslationBlock {
  
      struct tb_tc tc;
  
@@ -255,6 +281,43 @@ index 5bf94d2..b55705e 100644
  /**
   * parse_cpu_option:
   * @cpu_option: The -cpu option including optional parameters.
+diff --git a/include/tcg/tcg-opc.h b/include/tcg/tcg-opc.h
+index 9288a04..5cd38bd 100644
+--- a/include/tcg/tcg-opc.h
++++ b/include/tcg/tcg-opc.h
+@@ -210,6 +210,11 @@ DEF(qemu_ld_i64, DATA64_ARGS, TLADDR_ARGS, 1,
+ DEF(qemu_st_i64, 0, TLADDR_ARGS + DATA64_ARGS, 1,
+     TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
+ 
++#ifdef TCG_TARGET_HAS_user_cmpxchg
++DEF(user_cmpxchg_i32, 1, 3, 1, TCG_OPF_SIDE_EFFECTS)
++DEF(user_cmpxchg_i64, 1, 3, 1, TCG_OPF_SIDE_EFFECTS | TCG_OPF_64BIT)
++#endif
++
+ /* Host vector support.  */
+ 
+ #define IMPLVEC  TCG_OPF_VECTOR | IMPL(TCG_TARGET_MAYBE_vec)
+diff --git a/include/tcg/tcg.h b/include/tcg/tcg.h
+index c48bd76..fb44be8 100644
+--- a/include/tcg/tcg.h
++++ b/include/tcg/tcg.h
+@@ -504,11 +504,12 @@ typedef struct TCGTemp {
+     intptr_t mem_offset;
+     const char *name;
+ 
+-    /* Pass-specific information that can be stored for a temporary.
+-       One word worth of integer data, and one pointer to data
+-       allocated separately.  */
++    /* Scratch state, reinitialized by each compiler pass. */
+     uintptr_t state;
+-    void *state_ptr;
++    union {
++        void *state_ptr;
++        TCGRegSet liveness_pref;
++    };
+ } TCGTemp;
+ 
+ typedef struct TCGContext TCGContext;
 diff --git a/linux-user/aarch64/cpu_loop.c b/linux-user/aarch64/cpu_loop.c
 index a5565c3..d6218ae 100644
 --- a/linux-user/aarch64/cpu_loop.c
@@ -1452,7 +1515,7 @@ index b909630..5649d13 100644
                               ARMPACKey *key, bool data)
  {
 diff --git a/target/arm/translate-a64.c b/target/arm/translate-a64.c
-index c40aa60..41d8cc4 100644
+index c40aa60..f038124 100644
 --- a/target/arm/translate-a64.c
 +++ b/target/arm/translate-a64.c
 @@ -2008,6 +2008,38 @@ static void disas_exc(DisasContext *s, uint32_t insn)
@@ -1511,6 +1574,65 @@ index c40aa60..41d8cc4 100644
      s->base.is_jmp = DISAS_JUMP;
  }
  
+@@ -2547,6 +2589,7 @@ static void disas_ldst_excl(DisasContext *s, uint32_t insn)
+         clean_addr = clean_data_tbi(s, cpu_reg_sp(s, rn));
+         do_gpr_st(s, cpu_reg(s, rt), clean_addr, size, true, rt,
+                   disas_ldst_compute_iss_sf(size, false, 0), is_lasr);
++        gen_arm_rcsc_release_after();
+         return;
+ 
+     case 0xc: /* LDLAR */
+@@ -3365,6 +3408,7 @@ static void disas_ldst_ldapr_stlr(DisasContext *s, uint32_t insn)
+         /* Store-Release semantics */
+         tcg_gen_mb(TCG_MO_ALL | TCG_BAR_STRL);
+         do_gpr_st(s, cpu_reg(s, rt), clean_addr, size, true, rt, iss_sf, true);
++        gen_arm_rcsc_release_after();
+     } else {
+         /*
+          * Load-AcquirePC semantics; we implement as the slightly more
+diff --git a/target/arm/translate.c b/target/arm/translate.c
+index 7b84791..f19f33b 100644
+--- a/target/arm/translate.c
++++ b/target/arm/translate.c
+@@ -9291,6 +9291,7 @@ static bool op_stl(DisasContext *s, arg_STL *a, MemOp mop)
+     tmp = load_reg(s, a->rt);
+     tcg_gen_mb(TCG_MO_ALL | TCG_BAR_STRL);
+     gen_aa32_st_i32(s, tmp, addr, get_mem_index(s), mop | s->be_data);
++    gen_arm_rcsc_release_after();
+     disas_set_da_iss(s, mop, a->rt | ISSIsAcqRel | ISSIsWrite);
+ 
+     tcg_temp_free_i32(tmp);
+@@ -9451,7 +9452,7 @@ static bool op_lda(DisasContext *s, arg_LDA *a, MemOp mop)
+     tcg_temp_free_i32(addr);
+ 
+     store_reg(s, a->rt, tmp);
+-    tcg_gen_mb(TCG_MO_ALL | TCG_BAR_STRL);
++    tcg_gen_mb(TCG_MO_ALL | TCG_BAR_LDAQ);
+     return true;
+ }
+ 
+diff --git a/target/arm/translate.h b/target/arm/translate.h
+index f1b0c41..fc268b3 100644
+--- a/target/arm/translate.h
++++ b/target/arm/translate.h
+@@ -4,6 +4,17 @@
+ #include "exec/translator.h"
+ #include "internals.h"
+ 
++/* A store-release orders a later RCsc acquire, even in another TB and
++ * at a different address. Keep the existing pre-store and post-load
++ * barriers, including for guest pointers mapped by native drivers. */
++static inline void gen_arm_rcsc_release_after(void)
++{
++#if defined(CONFIG_LINUX_USER) && defined(__x86_64__) && \
++    !defined(CONFIG_TCG_INTERPRETER)
++    tcg_gen_mb(TCG_MO_ALL | TCG_BAR_SC);
++#endif
++}
++
+ 
+ /* internal defines */
+ typedef struct DisasContext {
 diff --git a/target/arm/vfp_helper.c b/target/arm/vfp_helper.c
 index 930d6e7..fca81d7 100644
 --- a/target/arm/vfp_helper.c
@@ -1548,11 +1670,217 @@ index 930d6e7..fca81d7 100644
      return estimate;
  }
  
+diff --git a/tcg/i386/tcg-target.h b/tcg/i386/tcg-target.h
+index bfb3f5f..0041394 100644
+--- a/tcg/i386/tcg-target.h
++++ b/tcg/i386/tcg-target.h
+@@ -133,6 +133,9 @@ extern bool have_avx2;
+ #define TCG_TARGET_HAS_muluh_i32        0
+ #define TCG_TARGET_HAS_mulsh_i32        0
+ #define TCG_TARGET_HAS_goto_ptr         1
++#if defined(__x86_64__) && defined(CONFIG_LINUX_USER) && defined(TARGET_AARCH64) && !defined(CONFIG_DEBUG_TCG)
++#define CLBB_X86_A64_LOOKUP 1
++#endif
+ #define TCG_TARGET_HAS_direct_jump      1
+ 
+ #if TCG_TARGET_REG_BITS == 64
+@@ -229,6 +232,11 @@ static inline void tb_target_set_jmp_target(uintptr_t tc_ptr,
+ 
+ #define TCG_TARGET_HAS_MEMORY_BSWAP  1
+ 
++#if TCG_TARGET_REG_BITS == 64 && defined(CONFIG_LINUX_USER) && \
++    defined(TARGET_AARCH64) && !defined(CONFIG_PLUGIN)
++#define TCG_TARGET_HAS_user_cmpxchg 1
++#endif
++
+ #ifdef CONFIG_SOFTMMU
+ #define TCG_TARGET_NEED_LDST_LABELS
+ #endif
 diff --git a/tcg/i386/tcg-target.inc.c b/tcg/i386/tcg-target.inc.c
-index ec083bd..0caa4b1 100644
+index ec083bd..f501ef5 100644
 --- a/tcg/i386/tcg-target.inc.c
 +++ b/tcg/i386/tcg-target.inc.c
-@@ -2413,13 +2413,18 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
+@@ -23,6 +23,9 @@
+  */
+ 
+ #include "../tcg-pool.inc.c"
++#ifdef CLBB_X86_A64_LOOKUP
++#include "exec/helper-proto.h"
++#endif
+ 
+ #ifdef CONFIG_DEBUG_TCG
+ static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
+@@ -2252,6 +2255,142 @@ static void tcg_out_qemu_st(TCGContext *s, const TCGArg *args, bool is64)
+ #endif
+ }
+ 
++#ifdef CLBB_X86_A64_LOOKUP
++/* A library may be mapped outside the signed RIP-relative range of the
++ * translation cache. Emit a full pointer only in that case. */
++static void tcg_out_a64_global(TCGContext *s, TCGReg dst,
++                               const void *address, bool byte)
++{
++    intptr_t delta = (intptr_t)address - (intptr_t)s->code_ptr;
++    int opc = byte ? OPC_MOVZBL : OPC_MOVL_GvEv;
++
++    if (delta >= INT32_MIN + 16 && delta <= INT32_MAX - 16) {
++        tcg_out_modrm_offset(s, opc, dst, -1, (intptr_t)address);
++    } else {
++        tcg_out_movi(s, TCG_TYPE_PTR, dst, (uintptr_t)address);
++        tcg_out_modrm_offset(s, opc, dst, dst, 0);
++    }
++}
++
++/* This routine lives beside the process-wide TCG prologue, outside the
++ * recyclable TB regions. It is called from each indirect exit, preserving
++ * that site's own indirect branch predictor and a balanced CALL/RET. */
++static tcg_insn_unit *a64_lookup_entry;
++
++static void tcg_out_a64_lookup_prologue(TCGContext *s)
++{
++    TCGLabel fallback = { .has_value = 1, .u.value_ptr = s->code_ptr };
++    TCGLabel *slow = &fallback;
++    const TCGReg env = TCG_AREG0, tb = TCG_REG_RAX, pc = TCG_REG_RDX;
++    const TCGReg flags = TCG_REG_RCX, tmp = TCG_REG_R8;
++    const intptr_t cpu_ofs = offsetof(ARMCPU, parent_obj) -
++                             (intptr_t)offsetof(ARMCPU, env);
++    uint32_t state_mask = R_TBFLAG_ANY_AARCH64_STATE_MASK |
++                          R_TBFLAG_ANY_SS_ACTIVE_MASK;
++    uint32_t expected = CF_PARALLEL |
++                        ((uint32_t)UNASSIGNED_CLUSTER_INDEX << CF_CLUSTER_SHIFT);
++
++    /* Cold tailcall: the helper sees the original TB's real return address.
++     * A null lookup still returns the standard code_gen_epilogue pointer. */
++    tcg_out_mov(s, TCG_TYPE_PTR, tcg_target_call_iarg_regs[0], env);
++    tcg_out_jmp(s, (tcg_insn_unit *)helper_lookup_tb_ptr);
++    a64_lookup_entry = s->code_ptr;
++
++    /* This is a BB exit: architectural registers have already been synced.
++     * On x86-64 an aligned load with an address dependency implements the
++     * acquire/dependency ordering used by atomic_rcu_read on the slot. */
++    tcg_out_ld(s, TCG_TYPE_I64, pc, env, offsetof(CPUARMState, pc));
++    tcg_out_mov(s, TCG_TYPE_I64, tb, pc);
++    tcg_out_shifti(s, SHIFT_SHR | P_REXW, tb, TB_JMP_CACHE_BITS);
++    tgen_arithr(s, ARITH_XOR, tb, pc);
++    tgen_arithi(s, ARITH_AND, tb, TB_JMP_CACHE_SIZE - 1, 0);
++    tcg_out_modrm_sib_offset(s, OPC_MOVL_GvEv | P_REXW, tb, env, tb, 3,
++                             cpu_ofs + offsetof(CPUState, tb_jmp_cache));
++    tcg_out_brcond64(s, TCG_COND_EQ, tb, 0, 1, slow, 0);
++    tcg_out_modrm_offset(s, OPC_CMP_GvEv | P_REXW, pc, tb,
++                         offsetof(TranslationBlock, pc));
++    tcg_out_jxx(s, JCC_JNE, slow, 0);
++    tcg_out_ld(s, TCG_TYPE_I64, tmp, tb, offsetof(TranslationBlock, cs_base));
++    tcg_out_brcond64(s, TCG_COND_NE, tmp, 0, 1, slow, 0);
++
++    tcg_out_ld(s, TCG_TYPE_I32, flags, env, offsetof(CPUARMState, hflags));
++    tcg_out_modrm_offset(s, OPC_CMP_GvEv, flags, tb,
++                         offsetof(TranslationBlock, flags));
++    tcg_out_jxx(s, JCC_JNE, slow, 0);
++    tgen_arithi(s, ARITH_AND, flags, state_mask, 0);
++    tcg_out_brcond32(s, TCG_COND_NE, flags, R_TBFLAG_ANY_AARCH64_STATE_MASK,
++                     1, slow, 0);
++
++    /* For BTI or single stepping the destination key needs additional bits.
++     * Recompute those in the ordinary helper. Do the same for non-default
++     * clusters, serial atomic sections, icount or execution tracing. */
++    QEMU_BUILD_BUG_ON(R_ID_AA64PFR1_BT_MASK > UINT32_MAX);
++    tcg_out_ld(s, TCG_TYPE_I32, tmp, env, offsetof(ARMCPU, isar.id_aa64pfr1) -
++                                          (intptr_t)offsetof(ARMCPU, env));
++    tgen_arithi(s, ARITH_AND, tmp, R_ID_AA64PFR1_BT_MASK, 0);
++    tcg_out_brcond32(s, TCG_COND_NE, tmp, 0, 1, slow, 0);
++    tcg_out_ld(s, TCG_TYPE_I32, tmp, env, cpu_ofs + offsetof(CPUState, cluster_index));
++    tcg_out_brcond32(s, TCG_COND_NE, tmp, UNASSIGNED_CLUSTER_INDEX, 1, slow, 0);
++
++    tcg_out_a64_global(s, tmp, &parallel_cpus, true);
++    tcg_out_brcond32(s, TCG_COND_EQ, tmp, 0, 1, slow, 0);
++    tcg_out_a64_global(s, tmp, &use_icount, false);
++    tcg_out_brcond32(s, TCG_COND_NE, tmp, 0, 1, slow, 0);
++    tcg_out_a64_global(s, tmp, &qemu_loglevel, false);
++    tgen_arithi(s, ARITH_AND, tmp, CPU_LOG_EXEC, 0);
++    tcg_out_brcond32(s, TCG_COND_NE, tmp, 0, 1, slow, 0);
++
++    QEMU_BUILD_BUG_ON(sizeof(*((CPUState *)0)->trace_dstate) != 8);
++    tcg_out_ld(s, TCG_TYPE_I32, tmp, tb, offsetof(TranslationBlock, trace_vcpu_dstate));
++    tcg_out_modrm_offset(s, OPC_CMP_GvEv | P_REXW, tmp, env,
++                         cpu_ofs + offsetof(CPUState, trace_dstate));
++    tcg_out_jxx(s, JCC_JNE, slow, 0);
++    tcg_out_ld(s, TCG_TYPE_I32, tmp, tb, offsetof(TranslationBlock, cflags));
++    tgen_arithi(s, ARITH_AND, tmp, CF_HASH_MASK | CF_INVALID, 0);
++    tcg_out_brcond32(s, TCG_COND_NE, tmp, expected, 1, slow, 0);
++    tcg_out_ld(s, TCG_TYPE_PTR, TCG_REG_RAX, tb, offsetof(TranslationBlock, tc.ptr));
++    tcg_out_opc(s, OPC_RET, 0, 0, 0);
++}
++#endif
++
++#ifdef TCG_TARGET_HAS_user_cmpxchg
++static void tcg_out_user_cmpxchg(TCGContext *s, const TCGArg *args)
++{
++    TCGReg addr = args[2], src = args[3];
++    MemOp size = args[4];
++    int opcode;
++
++    tcg_debug_assert(args[0] == TCG_REG_EAX && args[1] == TCG_REG_EAX);
++    if (size != MO_8) {
++        TCGLabel *aligned = gen_new_label();
++
++        /* Match atomic_mmu_lookup's alignment fault. This call never
++         * returns; its return address identifies this exact guest insn. */
++        tcg_out_modrm(s, 0xf6 | P_REXB_RM, 0, addr); /* testb imm8, r/m8 */
++        tcg_out8(s, (1 << size) - 1);
++        tcg_out_jxx(s, JCC_JE, aligned, 1);
++        tcg_out_mov(s, TCG_TYPE_PTR, tcg_target_call_iarg_regs[0], TCG_AREG0);
++        tcg_out_call(s, (tcg_insn_unit *)helper_exit_atomic);
++        tcg_out_label(s, aligned, s->code_ptr);
++    }
++
++    opcode = size == MO_8 ? (0xb0 | P_EXT | P_REXB_R) : (0xb1 | P_EXT);
++    if (size == MO_16) {
++        opcode |= P_DATA16;
++    } else if (size == MO_64) {
++        opcode |= P_REXW;
++    }
++    tcg_out8(s, 0xf0); /* LOCK */
++    tcg_out_modrm_sib_offset(s, opcode | x86_guest_base_seg, src, addr,
++                             x86_guest_base_index, 0, x86_guest_base_offset);
++    if (size == MO_8) {
++        tcg_out_ext8u(s, TCG_REG_EAX, TCG_REG_EAX);
++    } else if (size == MO_16) {
++        tcg_out_ext16u(s, TCG_REG_EAX, TCG_REG_EAX);
++    }
++}
++#endif
++
+ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
+                               const TCGArg *args, const int *const_args)
+ {
+@@ -2268,6 +2407,13 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
+         case glue(glue(INDEX_op_, x), _i32)
+ #endif
+ 
++#ifdef CLBB_X86_A64_LOOKUP
++    if (opc == INDEX_op_x86_a64_lookup) {
++        tcg_out_call(s, a64_lookup_entry);
++        tcg_out_modrm(s, OPC_GRP5, EXT5_JMPN_Ev, TCG_REG_RAX);
++        return;
++    }
++#endif
+     /* Hoist the loads of the most common arguments.  */
+     a0 = args[0];
+     a1 = args[1];
+@@ -2275,6 +2421,12 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
+     const_a2 = const_args[2];
+ 
+     switch (opc) {
++#ifdef TCG_TARGET_HAS_user_cmpxchg
++    case INDEX_op_user_cmpxchg_i32:
++    case INDEX_op_user_cmpxchg_i64:
++        tcg_out_user_cmpxchg(s, args);
++        break;
++#endif
+     case INDEX_op_exit_tb:
+         /* Reuse the zeroing that exists for goto_ptr.  */
+         if (a0 == 0) {
+@@ -2413,13 +2565,18 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
              int32_t val;
              val = a2;
              if (val == (int8_t)val) {
@@ -1573,7 +1901,23 @@ index ec083bd..0caa4b1 100644
              tcg_out_modrm(s, OPC_IMUL_GvEv + rexw, a0, a2);
          }
          break;
-@@ -3033,11 +3038,11 @@ static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
+@@ -3003,6 +3160,15 @@ static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
+     static const TCGTargetOpDef x_r = { .args_ct_str = { "x", "r" } };
+ 
+     switch (op) {
++#ifdef TCG_TARGET_HAS_user_cmpxchg
++    case INDEX_op_user_cmpxchg_i32:
++    case INDEX_op_user_cmpxchg_i64: {
++        static const TCGTargetOpDef cmpxchg = {
++            .args_ct_str = { "a", "0", "r", "r" }
++        };
++        return &cmpxchg;
++    }
++#endif
+     case INDEX_op_goto_ptr:
+         return &r;
+ 
+@@ -3033,11 +3199,11 @@ static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
  
      case INDEX_op_add_i32:
      case INDEX_op_add_i64:
@@ -1587,11 +1931,267 @@ index ec083bd..0caa4b1 100644
      case INDEX_op_or_i32:
      case INDEX_op_or_i64:
      case INDEX_op_xor_i32:
+@@ -3182,14 +3348,30 @@ static const TCGTargetOpDef *tcg_target_op_def(TCGOpcode op)
+         }
+ 
+     case INDEX_op_qemu_ld_i32:
++#if defined(CONFIG_USER_ONLY) && TCG_TARGET_REG_BITS == 64
++        return &r_r;
++#endif
+         return TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &r_L : &r_L_L;
+     case INDEX_op_qemu_st_i32:
++#if defined(CONFIG_USER_ONLY) && TCG_TARGET_REG_BITS == 64
++        if (have_movbe) {
++            return &r_r;
++        }
++#endif
+         return TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &L_L : &L_L_L;
+     case INDEX_op_qemu_ld_i64:
++#if defined(CONFIG_USER_ONLY) && TCG_TARGET_REG_BITS == 64
++        return &r_r;
++#endif
+         return (TCG_TARGET_REG_BITS == 64 ? &r_L
+                 : TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &r_r_L
+                 : &r_r_L_L);
+     case INDEX_op_qemu_st_i64:
++#if defined(CONFIG_USER_ONLY) && TCG_TARGET_REG_BITS == 64
++        if (have_movbe) {
++            return &r_r;
++        }
++#endif
+         return (TCG_TARGET_REG_BITS == 64 ? &L_L
+                 : TARGET_LONG_BITS <= TCG_TARGET_REG_BITS ? &L_L_L
+                 : &L_L_L_L);
+@@ -3767,6 +3949,9 @@ static void tcg_target_qemu_prologue(TCGContext *s)
+         tcg_out_pop(s, tcg_target_callee_save_regs[i]);
+     }
+     tcg_out_opc(s, OPC_RET, 0, 0, 0);
++#ifdef CLBB_X86_A64_LOOKUP
++    tcg_out_a64_lookup_prologue(s);
++#endif
+ }
+ 
+ static void tcg_out_nop_fill(tcg_insn_unit *p, int count)
+@@ -3824,6 +4009,18 @@ static void tcg_target_init(TCGContext *s)
+     }
+ #endif /* CONFIG_CPUID_H */
+ 
++#if defined(CONFIG_USER_ONLY) && TCG_TARGET_REG_BITS == 64
++    /* Direct user-space loads modify only their destination.  Stores
++     * require a scratch register only for byte swaps without MOVBE.
++     * Keep SIDE_EFFECTS for precise faults and guest-state writeback. */
++    tcg_op_defs[INDEX_op_qemu_ld_i32].flags &= ~TCG_OPF_CALL_CLOBBER;
++    tcg_op_defs[INDEX_op_qemu_ld_i64].flags &= ~TCG_OPF_CALL_CLOBBER;
++    if (have_movbe) {
++        tcg_op_defs[INDEX_op_qemu_st_i32].flags &= ~TCG_OPF_CALL_CLOBBER;
++        tcg_op_defs[INDEX_op_qemu_st_i64].flags &= ~TCG_OPF_CALL_CLOBBER;
++    }
++#endif
++
+     tcg_target_available_regs[TCG_TYPE_I32] = ALL_GENERAL_REGS;
+     if (TCG_TARGET_REG_BITS == 64) {
+         tcg_target_available_regs[TCG_TYPE_I64] = ALL_GENERAL_REGS;
+diff --git a/tcg/i386/tcg-target.opc.h b/tcg/i386/tcg-target.opc.h
+index 1312941..cbfdc7c 100644
+--- a/tcg/i386/tcg-target.opc.h
++++ b/tcg/i386/tcg-target.opc.h
+@@ -33,3 +33,7 @@ DEF(x86_psrldq_vec, 1, 1, 1, IMPLVEC)
+ DEF(x86_vperm2i128_vec, 1, 2, 1, IMPLVEC)
+ DEF(x86_punpckl_vec, 1, 2, 0, IMPLVEC)
+ DEF(x86_punpckh_vec, 1, 2, 0, IMPLVEC)
++
++#ifdef CLBB_X86_A64_LOOKUP
++DEF(x86_a64_lookup, 0, 0, 0, TCG_OPF_BB_EXIT | TCG_OPF_BB_END)
++#endif
+diff --git a/tcg/optimize.c b/tcg/optimize.c
+index 53aa8e5..912d1b0 100644
+--- a/tcg/optimize.c
++++ b/tcg/optimize.c
+@@ -1519,6 +1519,10 @@ void tcg_optimize(TCGContext *s)
+                     break;
+                 }
+                 /* fallthru */
++#ifdef TCG_TARGET_HAS_user_cmpxchg
++            case INDEX_op_user_cmpxchg_i32:
++            case INDEX_op_user_cmpxchg_i64:
++#endif
+             case INDEX_op_qemu_ld_i32:
+             case INDEX_op_qemu_ld_i64:
+             case INDEX_op_qemu_st_i32:
+diff --git a/tcg/tcg-op.c b/tcg/tcg-op.c
+index e2e25eb..cec44bb 100644
+--- a/tcg/tcg-op.c
++++ b/tcg/tcg-op.c
+@@ -2708,13 +2708,15 @@ void tcg_gen_goto_tb(unsigned idx)
+ void tcg_gen_lookup_and_goto_ptr(void)
+ {
+     if (TCG_TARGET_HAS_goto_ptr && !qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
+-        TCGv_ptr ptr;
+-
+         plugin_gen_disable_mem_helpers();
+-        ptr = tcg_temp_new_ptr();
++#ifdef CLBB_X86_A64_LOOKUP
++        tcg_emit_op(INDEX_op_x86_a64_lookup);
++#else
++        TCGv_ptr ptr = tcg_temp_new_ptr();
+         gen_helper_lookup_tb_ptr(ptr, cpu_env);
+         tcg_gen_op1i(INDEX_op_goto_ptr, tcgv_ptr_arg(ptr));
+         tcg_temp_free_ptr(ptr);
++#endif
+     } else {
+         tcg_gen_exit_tb(NULL, 0);
+     }
+@@ -3072,11 +3074,34 @@ static void * const table_cmpxchg[16] = {
+     WITH_ATOMIC64([MO_64 | MO_BE] = gen_helper_atomic_cmpxchgq_be)
+ };
+ 
++#ifdef TCG_TARGET_HAS_user_cmpxchg
++static bool use_direct_user_cmpxchg(MemOp memop)
++{
++    /* Use the same per-vCPU tracing key as ordinary translated memory ops.
++     * Instrumented TBs retain the helper's pair of RMW memory events. */
++    return (tcg_ctx->tb_cflags & CF_PARALLEL) && !(memop & MO_BSWAP) &&
++           is_a64(tcg_ctx->cpu->env_ptr) &&
++           !trace_event_get_vcpu_state(tcg_ctx->cpu, TRACE_GUEST_MEM_BEFORE_EXEC);
++}
++#endif
++
+ void tcg_gen_atomic_cmpxchg_i32(TCGv_i32 retv, TCGv addr, TCGv_i32 cmpv,
+                                 TCGv_i32 newv, TCGArg idx, MemOp memop)
+ {
+     memop = tcg_canonicalize_memop(memop, 0, 0);
+ 
++#ifdef TCG_TARGET_HAS_user_cmpxchg
++    if (use_direct_user_cmpxchg(memop)) {
++        tcg_gen_op5(INDEX_op_user_cmpxchg_i32, tcgv_i32_arg(retv),
++                    tcgv_i32_arg(cmpv), tcgv_i64_arg(addr),
++                    tcgv_i32_arg(newv), memop & MO_SIZE);
++        if (memop & MO_SIGN) {
++            tcg_gen_ext_i32(retv, retv, memop);
++        }
++        return;
++    }
++#endif
++
+     if (!(tcg_ctx->tb_cflags & CF_PARALLEL)) {
+         TCGv_i32 t1 = tcg_temp_new_i32();
+         TCGv_i32 t2 = tcg_temp_new_i32();
+@@ -3142,6 +3167,15 @@ void tcg_gen_atomic_cmpxchg_i64(TCGv_i64 retv, TCGv addr, TCGv_i64 cmpv,
+ #ifdef CONFIG_ATOMIC64
+         gen_atomic_cx_i64 gen;
+ 
++#ifdef TCG_TARGET_HAS_user_cmpxchg
++        if (use_direct_user_cmpxchg(memop)) {
++            tcg_gen_op5(INDEX_op_user_cmpxchg_i64, tcgv_i64_arg(retv),
++                        tcgv_i64_arg(cmpv), tcgv_i64_arg(addr),
++                        tcgv_i64_arg(newv), MO_64);
++            return;
++        }
++#endif
++
+         gen = table_cmpxchg[memop & (MO_SIZE | MO_BSWAP)];
+         tcg_debug_assert(gen != NULL);
+ 
 diff --git a/tcg/tcg.c b/tcg/tcg.c
-index dd4b3d7..f2ebf21 100644
+index dd4b3d7..b1b3d1e 100644
 --- a/tcg/tcg.c
 +++ b/tcg/tcg.c
-@@ -4334,7 +4334,8 @@ struct jit_descriptor {
+@@ -821,6 +821,10 @@ size_t tcg_code_size(void)
+         size_t size;
+ 
+         size = atomic_read(&s->code_gen_ptr) - s->code_gen_buffer;
++#ifdef A64_USER_SPLIT_TB
++        size += (s->code_gen_buffer + s->code_gen_buffer_size - TCG_HIGHWATER)
++                - atomic_read(&s->code_gen_highwater);
++#endif
+         g_assert(size <= s->code_gen_buffer_size);
+         total += size;
+     }
+@@ -1013,8 +1017,7 @@ void tcg_context_init(TCGContext *s)
+ }
+ 
+ /*
+- * Allocate TBs right before their corresponding translated code, making
+- * sure that TBs and code are on different cache lines.
++ * Keep TB metadata on separate cache lines from executable code.
+  */
+ TranslationBlock *tcg_tb_alloc(TCGContext *s)
+ {
+@@ -1023,15 +1026,28 @@ TranslationBlock *tcg_tb_alloc(TCGContext *s)
+     void *next;
+ 
+  retry:
++#ifdef A64_USER_SPLIT_TB
++    /* linux-user serializes translation under mmap_lock. Pack headers down
++     * from the end of the same budgeted region and code up from its start.
++     * TCG_HIGHWATER is reserved for the final opcode before the limit check. */
++    uintptr_t header_limit = (uintptr_t)s->code_gen_highwater + TCG_HIGHWATER;
++    tb = (void *)((header_limit - sizeof(*tb)) & -align);
++    next = (void *)ROUND_UP((uintptr_t)s->code_gen_ptr, CODE_GEN_ALIGN);
++    if (unlikely(next + TCG_HIGHWATER > (void *)tb)) {
++#else
+     tb = (void *)ROUND_UP((uintptr_t)s->code_gen_ptr, align);
+     next = (void *)ROUND_UP((uintptr_t)(tb + 1), align);
+ 
+     if (unlikely(next > s->code_gen_highwater)) {
++#endif
+         if (tcg_region_alloc(s)) {
+             return NULL;
+         }
+         goto retry;
+     }
++#ifdef A64_USER_SPLIT_TB
++    atomic_set(&s->code_gen_highwater, (void *)tb - TCG_HIGHWATER);
++#endif
+     atomic_set(&s->code_gen_ptr, next);
+     s->data_gen_ptr = NULL;
+     return tb;
+@@ -1414,6 +1430,10 @@ bool tcg_op_supported(TCGOpcode op)
+     case INDEX_op_insn_start:
+     case INDEX_op_exit_tb:
+     case INDEX_op_goto_tb:
++#ifdef TCG_TARGET_HAS_user_cmpxchg
++    case INDEX_op_user_cmpxchg_i32:
++    case INDEX_op_user_cmpxchg_i64:
++#endif
+     case INDEX_op_qemu_ld_i32:
+     case INDEX_op_qemu_st_i32:
+     case INDEX_op_qemu_ld_i64:
+@@ -2416,6 +2436,9 @@ static void reachable_code_pass(TCGContext *s)
+         case INDEX_op_br:
+         case INDEX_op_exit_tb:
+         case INDEX_op_goto_ptr:
++#ifdef CLBB_X86_A64_LOOKUP
++        case INDEX_op_x86_a64_lookup:
++#endif
+             /* Unconditional branches; everything following is dead.  */
+             dead = true;
+             break;
+@@ -2452,7 +2475,7 @@ static void reachable_code_pass(TCGContext *s)
+ /* For liveness_pass_1, the register preferences for a given temp.  */
+ static inline TCGRegSet *la_temp_pref(TCGTemp *ts)
+ {
+-    return ts->state_ptr;
++    return &ts->liveness_pref;
+ }
+ 
+ /* For liveness_pass_1, reset the preferences for a given temp to the
+@@ -2554,14 +2577,8 @@ static void liveness_pass_1(TCGContext *s)
+     int nb_globals = s->nb_globals;
+     int nb_temps = s->nb_temps;
+     TCGOp *op, *op_prev;
+-    TCGRegSet *prefs;
+     int i;
+ 
+-    prefs = tcg_malloc(sizeof(TCGRegSet) * nb_temps);
+-    for (i = 0; i < nb_temps; ++i) {
+-        s->temps[i].state_ptr = prefs + i;
+-    }
+-
+     /* ??? Should be redundant with the exit_tb that ends the TB.  */
+     la_func_end(s, nb_globals, nb_temps);
+ 
+@@ -4334,7 +4351,8 @@ struct jit_descriptor {
      struct jit_code_entry *first_entry;
  };
  
@@ -1601,7 +2201,7 @@ index dd4b3d7..f2ebf21 100644
  void __jit_debug_register_code(void)
  {
      asm("");
-@@ -4342,7 +4343,7 @@ void __jit_debug_register_code(void)
+@@ -4342,7 +4360,7 @@ void __jit_debug_register_code(void)
  
  /* Must statically initialize the version, because GDB may check
     the version before we can set it.  */

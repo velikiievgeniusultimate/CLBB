@@ -35,7 +35,15 @@ pub fn summarize(reason:&str,errors:&str)->String {
     if text.contains("illegal instruction")||text.contains("sigill")||exit.contains("signal: 4 ("){return "Нативное падение процесса по сигналу SIGILL. Причину нужно определить по точному журналу и стеку этого запуска; сам сигнал не доказывает несовместимость CPU.".into();}
     if text.contains("segmentation")||text.contains("sigsegv"){return "Нативное падение процесса (SIGSEGV). Отправьте технический отчёт для разбора.".into();}
     if text.contains("display")&&(text.contains("required")||text.contains("cannot open")){return "Нет доступного X11/XWayland-дисплея. Запускайте CLBB из графической сессии.".into();}
-    if text.contains("egl")||text.contains("opengl")||text.contains("libgl error"){return "Ошибка графического контекста или драйвера OpenGL/EGL. Подробности сохранены в отчёте.".into();}
+    if text.lines().any(|line| line.contains("error parsing option")) {
+        return "ATL не удалось разобрать параметры запуска. Подробности сохранены в отчёте.".into();
+    }
+    let graphics_error = text.lines().any(|line| {
+        (line.contains("egl") || line.contains("opengl") || line.contains("libgl"))
+            && ["error", "failed", "cannot", "fatal", "egl_bad_"]
+                .iter().any(|message| line.contains(message))
+    });
+    if graphics_error {return "Ошибка графического контекста или драйвера OpenGL/EGL. Подробности сохранены в отчёте.".into();}
     format!("CLBB завершился с ошибкой: {}",reason.chars().take(300).collect::<String>())
 }
 pub fn report(root:&Path,state:&Path,reason:&str,kind:&str,evidence:&Evidence)->io::Result<PathBuf>{
@@ -95,6 +103,14 @@ pub fn show(path:&Path)->io::Result<()> {
 
 #[cfg(test)]
 mod termination_tests {
+    #[test]
+    fn linked_graphics_libraries_do_not_diagnose_a_graphics_failure() {
+        let linked = "libEGL.so.1 => /usr/lib/libEGL.so.1 (0x1234)";
+        assert!(super::summarize("exit 1", linked).contains("exit 1"));
+        assert!(super::summarize("exit 1", &format!("Error parsing option -X\n{linked}")).contains("параметры запуска"));
+        assert!(super::summarize("exit 1", "eglInitialize failed: EGL_BAD_DISPLAY").contains("графического"));
+    }
+
     #[test]
     fn killed_process_is_not_misreported_as_a_graphics_failure() {
         let summary=super::summarize("CLBB runtime exited: signal: 9 (SIGKILL)","EGL failed during cleanup");
