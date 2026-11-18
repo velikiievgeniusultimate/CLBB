@@ -14,6 +14,7 @@ case "${1:-}" in
     *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
 esac
 [[ $# -le 1 ]] || { printf '%s\n' 'Too many arguments.' >&2; exit 2; }
+CLBB_BUILD_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 source "$CLBB_BUILD_ROOT/env.sh"
 fail() { printf 'build-runtime: %s\n' "$*" >&2; exit 1; }
 [[ "$CLBB_ATL_ROOT" == "$CLBB_BUILD_ROOT" ]] || fail 'env.sh points at another checkout; update it first.'
@@ -173,10 +174,15 @@ bash "$CLBB_BUILD_ROOT/tools/check-clone-signal-mask.sh"
 bash "$CLBB_BUILD_ROOT/execution-core/check.sh"
 python3 "$CLBB_BUILD_ROOT/tools/translator-rust-audit/check.py"
 python3 "$CLBB_BUILD_ROOT/tools/pauth-audit/audit.py"
+CLBB_HOST_QEMU_OPT='-O3 -fno-semantic-interposition -fno-plt -flto'
+CLBB_LOCAL_PROFILE="$(XDG_CACHE_HOME="$CLBB_BUILD_CACHE_HOME" python3 "$CLBB_BUILD_ROOT/tools/qemu-build-profile.py" locate)"
+if [[ -n "$CLBB_LOCAL_PROFILE" && "$CLBB_LOCAL_PROFILE" != *[[:space:]]* ]]; then
+    CLBB_HOST_QEMU_OPT+=" -fprofile-use=$CLBB_LOCAL_PROFILE -fprofile-correction -Wno-missing-profile"
+fi
 # The upstream Makefile concatenates PREFIX and LIBDIR: the slash is required.
 make -C "$CLBB_NB_DIR" -j "$CLBB_BUILD_JOBS" \
     PREFIX="$CLBB_ATL_PREFIX/" LIBDIR=lib CLBB_NATIVE_BRIDGE_DNS=1 \
-    NB_QEMU_OPT='-O3 -fno-semantic-interposition -fno-plt -flto' \
+    NB_QEMU_OPT="$CLBB_HOST_QEMU_OPT" \
     NB_BRIDGE_OPT='-O2 -fno-strict-aliasing -fno-omit-frame-pointer' \
     NB_GUEST_OPT='-O2 -fno-strict-aliasing' \
     BIONIC_OPT='-O2 -fno-strict-aliasing -fno-builtin -mno-outline-atomics' \

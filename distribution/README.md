@@ -63,6 +63,11 @@ APK остаётся проприетарным, не входит в исход
 `build-from-source.sh --install-deps` подготавливает исходное дерево и локальный
 prefix по upstream-инструкциям. Первичный native bootstrap не является лёгкой
 операцией; для изменения готового runtime используйте `build-runtime.sh`.
+Если на этом ПК собран профиль GCC по запуску, его можно установить командой
+`python3 tools/qemu-build-profile.py install COUNTERS TRAINING_CORE TRAINING_BRIDGE`.
+Аргументы указывают папку файлов `.gcda` и две исходные папки сборки QEMU и моста.
+`build-runtime.sh` применяет совместимый профиль при пересборке. При смене компилятора
+или исходников сборка автоматически возвращается к обычной оптимизации.
 Образцы установки и обновления проходят изолированные проверки без реального аккаунта.
 
 Рабочая копия исходников и запускаемый пакет теперь различаются явно. Ярлык
@@ -151,7 +156,13 @@ CLBB licensing does not grant game rights or imply MOONTON service approval.
 
 `build-from-source.sh --install-deps` prepares pinned sources and a local prefix
 following upstream build instructions. Native bootstrap is substantial. Use
-`build-runtime.sh` for an existing prepared runtime. Maintainers must commit the
+`build-runtime.sh` for an existing prepared runtime.
+A local GCC startup sample can be installed with
+`python3 tools/qemu-build-profile.py install COUNTERS TRAINING_CORE TRAINING_BRIDGE`.
+Pass the `.gcda` directory and the original QEMU and bridge build directories.
+Rebuilds use the matching profile and fall back to ordinary optimization when
+the compiler or source changes.
+Maintainers must commit the
 exact sources, export patches and notices, build runtime and source companions,
 and produce SHA256 sums with basenames from the output directory. Upload every
 asset to a draft release before publishing it. Preserve corresponding sources
