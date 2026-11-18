@@ -27,6 +27,8 @@ def main():
         raise SystemExit('Usage: prepare-runtime.py ROOT [--print-android-id]')
     root = Path(sys.argv[1]).resolve()
     state = Path(os.environ.get('CLBB_STATE_ROOT', root))
+    # Packaged files are immutable, including with a different host Python version.
+    sys.dont_write_bytecode = True
     sys.path.insert(0, str(root / 'distribution'))
     if len(sys.argv) == 2:
         prepare_runtime(root, state)

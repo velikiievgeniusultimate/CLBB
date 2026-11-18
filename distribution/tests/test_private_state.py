@@ -45,6 +45,7 @@ class PrivateStateTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((state/'seen').read_text(), value)
             self.assertNotIn(value.encode(), result.stdout + result.stderr)
+            self.assertFalse(any(runtime.rglob('*.pyc')))
             self.assertEqual((result.stdout + result.stderr).count(b'runtime prepared'), 2)
             (state/'seen').unlink()
             (state/'device/android-id').write_text('invalid')
