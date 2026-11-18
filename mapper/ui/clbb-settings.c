@@ -1712,11 +1712,15 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_widget_add_css_class(sidebar, "clbb-sidebar");
   gtk_widget_set_size_request(sidebar, 185, -1);
   gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar), GTK_SELECTION_SINGLE);
-  const char *items[] = {"Основное", "Герой", "Звук",
-                         "Горячие клавиши", "Аккаунты"};
+  const char *items[] = {"Основное", "Герой", "Звук", "Горячие клавиши"};
   for (guint i = 0; i < G_N_ELEMENTS(items); ++i)
     gtk_list_box_append(GTK_LIST_BOX(sidebar),
                         label(items[i], "clbb-nav-label"));
+  const char *accounts_socket = g_getenv("CLBB_ACCOUNTS_SOCKET");
+  gboolean show_accounts = g_strcmp0(g_getenv("CLBB_MANAGED_INSTALL"), "1") != 0 ||
+                           (accounts_socket && *accounts_socket);
+  if (show_accounts)
+    gtk_list_box_append(GTK_LIST_BOX(sidebar), label("Аккаунты", "clbb-nav-label"));
   GtkWidget *sidebar_scroll = gtk_scrolled_window_new();
   gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sidebar_scroll),
                                  GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
@@ -1853,7 +1857,8 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_box_append(GTK_BOX(card), wrap_label("По метке сохраняются 5 секунд до и 5 после: ввод, координаты, камера и результаты применения. Без меток окно хранится только в памяти. По умолчанию Ctrl+S; можно назначить Ctrl, Shift, Alt с клавишей. Автометки отмечают подозрения, а не доказывают ошибку. Активные фрагменты — до 256 МиБ; старые переносятся в archive.", "clbb-muted"));
   s->debug_status = wrap_label("Запись выключена", "clbb-muted");
   gtk_box_append(GTK_BOX(card), s->debug_status);
-  accounts_page(s);
+  if (show_accounts)
+    accounts_page(s);
   GtkWidget *footer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
   gtk_widget_add_css_class(footer, "clbb-footer");
   s->capture_hint = wrap_label(
@@ -2072,10 +2077,10 @@ void clbb_settings_destroy(ClbbSettings *s) {
     return;
   clbb_settings_hide(s);
   g_object_set_data(G_OBJECT(s->panel),"clbb-accounts-owner",NULL);
-  g_ptr_array_unref(s->account_ids);
-  g_ptr_array_unref(s->account_labels);
+  g_clear_pointer(&s->account_ids, g_ptr_array_unref);
+  g_clear_pointer(&s->account_labels, g_ptr_array_unref);
   g_free(s->account_rename_id);
-  g_array_unref(s->account_flags);
+  g_clear_pointer(&s->account_flags, g_array_unref);
   g_free(s->hero_layout);
   g_free(s->palette_selected);
   g_free(s->palette_hero_name);

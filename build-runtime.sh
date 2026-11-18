@@ -55,6 +55,8 @@ executables = {prefix + '/bin/' + name for name in
                ('android-translation-layer', 'dalvikvm', 'dalvikvm32', 'dalvikvm64')}
 mapped_files = {prefix + '/lib/libnb-qemu.so', prefix + '/lib/libclbb_dns_adapter.so',
                 prefix + '/lib/art/libart.so', prefix + '/lib/libclbb_webkit_launch_adapter.so',
+                prefix + '/lib/art/libartbase.so', prefix + '/lib/art/libdexfile.so',
+                prefix + '/lib/java/dex/art/natives/libjavacore.so',
                 prefix + '/lib/libclbb_mapper.so', prefix + '/lib/libOpenSLES.so.1.0.1'}
 scripts = {str(p.resolve()) for p in Path(root).glob('probe-*.sh')}
 scripts.add(root + '/run-mlbb.sh')
@@ -159,10 +161,12 @@ DESTDIR= meson install -C "$CLBB_BUILD_ROOT/src/libopensles-standalone/build" --
 
 printf '%s\n' 'Building patched ART shared runtime incrementally...'
 # Use the file target: the phony libart target also builds the static runtime.
-make -C "$CLBB_ART_DIR" -j "$CLBB_BUILD_JOBS" out/host/linux-x86/lib64/libart.so out/host/linux-x86/lib64/libartbase.so
+make -C "$CLBB_ART_DIR" -j "$CLBB_BUILD_JOBS" out/host/linux-x86/lib64/{libart,libartbase,libdexfile,libjavacore}.so
 check_runtime_idle
-install -m 0755 "$CLBB_ART_DIR/out/host/linux-x86/lib64/"{libart,libartbase}.so \
+install -m 0755 "$CLBB_ART_DIR/out/host/linux-x86/lib64/"{libart,libartbase,libdexfile}.so \
     "$CLBB_ATL_PREFIX/lib/art/"
+install -m 0755 "$CLBB_ART_DIR/out/host/linux-x86/lib64/libjavacore.so" \
+    "$CLBB_ATL_PREFIX/lib/java/dex/art/natives/"
 
 printf '%s\n' 'Building QEMU, host bridge and guest bionic...'
 python3 "$CLBB_BUILD_ROOT/tools/check-fd-trans.py"
