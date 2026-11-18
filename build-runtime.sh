@@ -159,10 +159,10 @@ DESTDIR= meson install -C "$CLBB_BUILD_ROOT/src/libopensles-standalone/build" --
 
 printf '%s\n' 'Building patched ART shared runtime incrementally...'
 # Use the file target: the phony libart target also builds the static runtime.
-make -C "$CLBB_ART_DIR" -j "$CLBB_BUILD_JOBS" out/host/linux-x86/lib64/libart.so
+make -C "$CLBB_ART_DIR" -j "$CLBB_BUILD_JOBS" out/host/linux-x86/lib64/libart.so out/host/linux-x86/lib64/libartbase.so
 check_runtime_idle
-install -m 0755 "$CLBB_ART_DIR/out/host/linux-x86/lib64/libart.so" \
-    "$CLBB_ATL_PREFIX/lib/art/libart.so"
+install -m 0755 "$CLBB_ART_DIR/out/host/linux-x86/lib64/"{libart,libartbase}.so \
+    "$CLBB_ATL_PREFIX/lib/art/"
 
 printf '%s\n' 'Building QEMU, host bridge and guest bionic...'
 python3 "$CLBB_BUILD_ROOT/tools/check-fd-trans.py"

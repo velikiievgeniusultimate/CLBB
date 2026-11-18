@@ -1,3 +1,36 @@
+diff --git a/art/libartbase/base/file_utils.cc b/art/libartbase/base/file_utils.cc
+index 9bfc739a..2cd89171 100644
+--- a/art/libartbase/base/file_utils.cc
++++ b/art/libartbase/base/file_utils.cc
+@@ -239,9 +239,13 @@ void GetDalvikCache(const char* subdir, const bool create_if_absent, std::string
+   std::string dalvik_cache_root;
+   if (android_data.empty()) {
+     *have_android_data = false;
++    const char* scoped_cache = getenv("CLBB_ART_CACHE_DIR");
+     const char* xdg_cache_home = getenv("XDG_CACHE_HOME");
+     const char* home_dir = getenv("HOME");
+-    if (xdg_cache_home) {
++    if (scoped_cache && scoped_cache[0] == '/') {
++      dalvik_cache_root = scoped_cache;
++      *is_global_cache = false;
++    } else if (xdg_cache_home) {
+       mkdir(((std::string)xdg_cache_home + "/art/").c_str(), DEFFILEMODE | S_IXUSR | S_IXGRP | S_IXOTH);
+       dalvik_cache_root = StringPrintf("%s/art/", xdg_cache_home);
+       *is_global_cache = false;
+@@ -278,9 +282,12 @@ std::string GetDalvikCache(const char* subdir) {
+   std::string android_data = GetAndroidDataSafe(&error_msg);
+   std::string dalvik_cache_root;
+   if (android_data.empty()) {
++    const char* scoped_cache = getenv("CLBB_ART_CACHE_DIR");
+     const char* xdg_cache_home = getenv("XDG_CACHE_HOME");
+     const char* home_dir = getenv("HOME");
+-    if (xdg_cache_home) {
++    if (scoped_cache && scoped_cache[0] == '/') {
++      dalvik_cache_root = scoped_cache;
++    } else if (xdg_cache_home) {
+       mkdir(((std::string)xdg_cache_home + "/art/").c_str(), DEFFILEMODE | S_IXUSR | S_IXGRP | S_IXOTH);
+       dalvik_cache_root = StringPrintf("%s/art/", xdg_cache_home);
+     } else if(home_dir) {
 diff --git a/art/runtime/Android.mk b/art/runtime/Android.mk
 index 9b13aaa8..bfc6972d 100644
 --- a/art/runtime/Android.mk

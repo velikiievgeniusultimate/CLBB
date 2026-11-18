@@ -67,25 +67,31 @@ class ReleaseWorkflowTests(unittest.TestCase):
     (runtime/'env.sh').write_bytes((ROOT.parent/'env.sh').read_bytes())
     return runtime
 
-   def library_path(runtime):
-    env = dict(os.environ, CLBB_STATE_ROOT=str(workbench/'profile'), LD_LIBRARY_PATH='')
-    value = subprocess.check_output(['bash','-c','source "$1"; printf %s "$LD_LIBRARY_PATH"',
-                                     'test',str(runtime/'env.sh')], env=env, text=True)
-    return Path(value.split(':')[1])
+   def paths(runtime, profile='profile'):
+    env = dict(os.environ, CLBB_STATE_ROOT=str(workbench/profile), LD_LIBRARY_PATH='',
+               CLBB_ART_CACHE_DIR='/previous-profile')
+    values = subprocess.check_output(['bash','-c',
+      'source "$1"; printf "%s\\n" "$LD_LIBRARY_PATH" "${CLBB_ART_CACHE_DIR-}"',
+      'test',str(runtime/'env.sh')], env=env, text=True).splitlines()
+    return Path(values[0].split(':')[1]), values[1]
 
    first, second = candidate('first', b'bootstrap'), candidate('second', b'bootstrap')
-   self.assertEqual(library_path(first), first/'prefix/lib/art')
+   self.assertEqual(paths(first), (first/'prefix/lib/art', ''))
    workflow.select_art_components(first, workbench)
    workflow.select_art_components(second, workbench)
-   shared = library_path(first)
+   shared, cache = paths(first)
    self.assertTrue(shared.is_relative_to(workbench/'art-components'))
-   self.assertEqual(library_path(second), shared)
+   self.assertTrue(Path(cache).is_relative_to(workbench/'profile/cache'))
+   self.assertEqual(paths(second), (shared, cache))
+   self.assertNotEqual(paths(first, 'secondary')[1], cache)
    updated = candidate('updated', b'new bytecode')
    workflow.select_art_components(updated, workbench)
-   self.assertNotEqual(library_path(updated), shared)
+   new_shared, new_cache = paths(updated)
+   self.assertNotEqual(new_shared, shared)
+   self.assertNotEqual(new_cache, cache)
    self.assertEqual((shared/'../java/dex/art/core-oj-hostdex.jar').read_bytes(), b'bootstrap')
    (second.parent/'.clbb-art-key').write_text('"not-a-key"\n')
-   self.assertEqual(library_path(second), second/'prefix/lib/art')
+   self.assertEqual(paths(second), (second/'prefix/lib/art', ''))
 
  def test_runtime_switch_reindexes_kde_only_when_the_application_entry_changes(self):
   with tempfile.TemporaryDirectory() as directory:
