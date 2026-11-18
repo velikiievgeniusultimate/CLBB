@@ -86,3 +86,24 @@ class ReleaseWorkflowTests(unittest.TestCase):
    self.assertEqual((shared/'../java/dex/art/core-oj-hostdex.jar').read_bytes(), b'bootstrap')
    (second.parent/'.clbb-art-key').write_text('"not-a-key"\n')
    self.assertEqual(library_path(second), second/'prefix/lib/art')
+
+ def test_runtime_switch_reindexes_kde_only_when_the_application_entry_changes(self):
+  with tempfile.TemporaryDirectory() as directory:
+   home = Path(directory)
+   root = home/'workbench'
+   (root/'logs').mkdir(parents=True)
+   (home/'Desktop').mkdir()
+   icon = home/'Desktop/CLBB.desktop'
+   icon.write_text(f'Exec="{root}/.clbb-local-launch"\n')
+   with patch.object(workflow, 'ROOT', root), patch.object(Path, 'home', return_value=home), \
+        patch.object(workflow.shutil, 'which', return_value='/usr/bin/kbuildsycoca6'), \
+        patch.object(workflow.subprocess, 'run') as kde:
+    wrapper, data = root/'.clbb-local-launch', home/'share'
+    workflow.write_workbench_desktop(wrapper, data)
+    entry = data/'applications/org.clbb.CLBB.desktop'
+    stats = [p.stat().st_mtime_ns for p in (entry, icon)]
+    self.assertEqual(icon.read_text(), entry.read_text())
+    kde.assert_called_once()
+    workflow.write_workbench_desktop(wrapper, data)
+    self.assertEqual(stats, [p.stat().st_mtime_ns for p in (entry, icon)])
+    kde.assert_called_once()

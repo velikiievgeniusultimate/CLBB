@@ -164,6 +164,30 @@ def write_local_launcher(wrapper, target):
         finally:
             staging.unlink(missing_ok=True)
 
+def write_workbench_desktop(wrapper, data):
+    desktop=data/'applications/org.clbb.CLBB.desktop';desktop.parent.mkdir(parents=True,exist_ok=True)
+    backup=ROOT/'logs/desktop-before-workbench.desktop'
+    if desktop.exists()and not backup.exists():backup.parent.mkdir(exist_ok=True);shutil.copy2(desktop,backup)
+    exe=str(wrapper).replace('\\','\\\\').replace('"','\\"').replace('$','\\$').replace('`','\\`').replace('%','%%')
+    content = '[Desktop Entry]\nType=Application\nName=CLBB\nComment=Computer Legends Bang Bang\nExec="'+exe+'"\nTerminal=false\nIcon=applications-games\nCategories=Game;\nStartupNotify=false\n'
+    changed = not desktop.is_file() or desktop.read_text() != content
+    if changed:
+        desktop.write_text(content)
+    desktop.chmod(0o644)
+    desktop_icon=Path.home()/'Desktop/CLBB.desktop'
+    if desktop_icon.is_file()and str(ROOT)in desktop_icon.read_text():
+        saved=ROOT/'logs/desktop-icon-before-workbench.desktop'
+        if not saved.exists():shutil.copy2(desktop_icon,saved)
+        if desktop_icon.read_text() != content:
+            desktop_icon.write_text(content)
+    if not changed:
+        return
+    for tool in ['kbuildsycoca6','kbuildsycoca5']:
+        if shutil.which(tool):
+            try:subprocess.run([tool,'--noincremental'],capture_output=True,timeout=30)
+            except (OSError,subprocess.TimeoutExpired):pass
+            break
+
 def _use_local(directory):
     directory,record,target=verify(directory)
     data=Path(os.environ.get('XDG_DATA_HOME')or Path.home()/'.local/share')
@@ -184,23 +208,7 @@ def _use_local(directory):
     # Persistent Android data stays in the existing development profile; never packaged here.
     wrapper=ROOT/'.clbb-local-launch'
     write_local_launcher(wrapper,target)
-    data=Path(os.environ.get('XDG_DATA_HOME')or Path.home()/'.local/share')
-    desktop=data/'applications/org.clbb.CLBB.desktop';desktop.parent.mkdir(parents=True,exist_ok=True)
-    backup=ROOT/'logs/desktop-before-workbench.desktop'
-    if desktop.exists()and not backup.exists():backup.parent.mkdir(exist_ok=True);shutil.copy2(desktop,backup)
-    exe=str(wrapper).replace('\\','\\\\').replace('"','\\"').replace('$','\\$').replace('`','\\`').replace('%','%%')
-    desktop.write_text('[Desktop Entry]\nType=Application\nName=CLBB\nComment=Computer Legends Bang Bang\nExec="'+exe+'"\nTerminal=false\nIcon=applications-games\nCategories=Game;\nStartupNotify=false\n')
-    desktop.chmod(0o644)
-    desktop_icon=Path.home()/'Desktop/CLBB.desktop'
-    if desktop_icon.is_file()and str(ROOT)in desktop_icon.read_text():
-        saved=ROOT/'logs/desktop-icon-before-workbench.desktop'
-        if not saved.exists():shutil.copy2(desktop_icon,saved)
-        desktop_icon.write_text(desktop.read_text())
-    for tool in ['kbuildsycoca6','kbuildsycoca5']:
-        if shutil.which(tool):
-            try:subprocess.run([tool,'--noincremental'],capture_output=True,timeout=30)
-            except (OSError,subprocess.TimeoutExpired):pass
-            break
+    write_workbench_desktop(wrapper,data)
     write(ROOT/'.clbb-local-runtime.json',{'directory':str(directory),'version':record['version'],
         'source_commit':record.get('source_commit')or record.get('published_source_commit'),'state':str(ROOT),'runtime_sha256':record['assets'][record['runtime']]})
     print('Local shortcut switched; account/game files untouched. Already running games need restart.')
