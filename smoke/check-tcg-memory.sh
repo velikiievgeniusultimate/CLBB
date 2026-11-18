@@ -14,9 +14,11 @@ javac --release 8 -Xlint:-options -d "$out/classes" "$root/smoke/CLBBArmLseContr
 dx --dex --output="$out/test.jar" "$out/classes"
 ulimit -c 0
 python3 "$root/smoke/arm-tcg-flag-vectors.py" "$out/vectors.inc"
-for fixture in arm-tcg-atomics arm-tcg-recycle arm-tcg-links arm-tcg-direct arm-tcg-pairs arm-tcg-flags; do
+python3 "$root/smoke/arm-tcg-condition-vectors.py" "$out"
+for fixture in arm-tcg-{atomics,recycle,links,direct,pairs,flags,forward,conditions}; do
     sources=("$root/smoke/$fixture.c")
     if [[ -f "$root/smoke/$fixture.S" ]]; then sources+=("$root/smoke/$fixture.S"); fi
+    if [[ -f "$out/$fixture.S" ]]; then sources+=("$out/$fixture.S"); fi
     clang -target aarch64-pc-linux -march=armv8-a -mno-outline-atomics -fuse-ld=lld \
      -shared -fPIC -O2 -Wall -Wextra -Werror -std=gnu11 -nostdinc -nostdlib -D__ANDROID__ \
      -I"$out" -I"$(clang -print-resource-dir)/include" -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/linux" \
