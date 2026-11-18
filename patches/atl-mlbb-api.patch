@@ -295,7 +295,7 @@ index 427cede..e3346ea 100644
  		gtk_window_set_default_size(gtk_window, width, height);
  }
 diff --git a/src/api-impl-jni/app/android_app_Activity.c b/src/api-impl-jni/app/android_app_Activity.c
-index 8881ddb..1ba9320 100644
+index 8881ddb..f79f344 100644
 --- a/src/api-impl-jni/app/android_app_Activity.c
 +++ b/src/api-impl-jni/app/android_app_Activity.c
 @@ -14,6 +14,17 @@ extern GtkWindow *window;
@@ -546,6 +546,15 @@ index 8881ddb..1ba9320 100644
  	gtk_stack_add_child(stack, decor_view);
  
  	activity_update_current(env);
+@@ -345,7 +481,7 @@ JNIEXPORT void JNICALL Java_android_app_Activity_nativeFileChooser(JNIEnv *env,
+ 
+ JNIEXPORT jboolean JNICALL Java_android_app_Activity_isInMultiWindowMode(JNIEnv *env, jobject this)
+ {
+-	return !gtk_window_is_maximized(window);
++	return GTK_IS_WINDOW(window) && !gtk_window_is_maximized(window);
+ }
+ 
+ JNIEXPORT jboolean JNICALL Java_android_app_Activity_isTaskRoot(JNIEnv *env, jobject this)
 diff --git a/src/api-impl-jni/app/android_app_Activity.h b/src/api-impl-jni/app/android_app_Activity.h
 index fc12333..52f029e 100644
 --- a/src/api-impl-jni/app/android_app_Activity.h
@@ -1733,7 +1742,7 @@ index 7aa5fe4..50f09fd 100644
 +	atl_exec_restart();
 +}
 diff --git a/src/api-impl-jni/views/android_view_View.c b/src/api-impl-jni/views/android_view_View.c
-index 17c76b1..91958e0 100644
+index 17c76b1..94eec95 100644
 --- a/src/api-impl-jni/views/android_view_View.c
 +++ b/src/api-impl-jni/views/android_view_View.c
 @@ -1,10 +1,12 @@
@@ -1830,9 +1839,9 @@ index 17c76b1..91958e0 100644
 +    if(capture_input && motion_event)_SET_LONG_FIELD(motion_event,"clbbDebugPacketId",debug_packet);
 +    if(capture_input && num_pointers<=MAX_POINTERS)
 +        clbb_input_motion_host(debug_packet,0,action,num_pointers,debug_ids,debug_coords,timestamp,touch_sequence_down_ms,-1,event!=NULL);
-+
  
 -	ret = view_dispatch_motionevent(env, wrapper, phase, motion_event, event, action);
+ 
 +	if (event) {
 +        ret = view_dispatch_motionevent(env, wrapper, phase, motion_event, event, action);
 +    } else {
@@ -1841,7 +1850,7 @@ index 17c76b1..91958e0 100644
 +        ret = J__View__dispatchTouchEvent(env, wrapper->jobj, motion_event);
 +        if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionDescribe(env); ret = false; }
 +    }
- 
++
 +    if(capture_input && num_pointers<=MAX_POINTERS)
 +        clbb_input_motion_host(debug_packet,1,action,num_pointers,debug_ids,debug_coords,timestamp,touch_sequence_down_ms,ret,event!=NULL);
  	(*env)->DeleteLocalRef(env, motion_event);
@@ -2023,15 +2032,33 @@ index 17c76b1..91958e0 100644
  
  	if (scroll_unit == GDK_SCROLL_UNIT_SURFACE) {
  		dx /= MAGIC_SCROLL_FACTOR;
-@@ -896,6 +1077,8 @@ JNIEXPORT void JNICALL Java_android_view_View_nativeSetFullscreen(JNIEnv *env, j
+@@ -895,7 +1076,12 @@ JNIEXPORT void JNICALL Java_android_view_View_native_1drawContent(JNIEnv *env, j
+ JNIEXPORT void JNICALL Java_android_view_View_nativeSetFullscreen(JNIEnv *env, jobject this, jlong widget_ptr, jboolean fullscreen)
  {
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
- 	GtkWindow *window = GTK_WINDOW(gtk_widget_get_native(widget));
-+	if (window && g_object_get_data(G_OBJECT(window), "atl-user-fullscreen-choice"))
+-	GtkWindow *window = GTK_WINDOW(gtk_widget_get_native(widget));
++	GtkRoot *root = widget ? gtk_widget_get_root(widget) : NULL;
++	if (!GTK_IS_WINDOW(root))
++		return;
++	GtkWindow *window = GTK_WINDOW(root);
++	if (g_object_get_data(G_OBJECT(window), "atl-user-fullscreen-choice"))
 +		return;
  	if (fullscreen) {
  		if (gtk_window_is_maximized(window)) {
  			gtk_window_fullscreen(window);
+@@ -903,8 +1089,12 @@ JNIEXPORT void JNICALL Java_android_view_View_nativeSetFullscreen(JNIEnv *env, j
+ 			if (ATL_IS_ANDROID_LAYOUT(gtk_widget_get_layout_manager(widget))) {
+ 				AndroidLayout *layout = ATL_ANDROID_LAYOUT(gtk_widget_get_layout_manager(widget));
+ 				GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(window));
++				if (!surface)
++					return;
+ 				GdkDisplay *display = gdk_surface_get_display(surface);
+ 				GdkMonitor *monitor = gdk_display_get_monitor_at_surface(display, surface);
++				if (!monitor)
++					return;
+ 				GdkRectangle geometry;
+ 				gdk_monitor_get_geometry(monitor, &geometry);
+ 				// check if fullscreen is slightly larger than the window, if so, we can safely mock the new size
 diff --git a/src/api-impl-jni/views/android_view_ViewTreeObserver.c b/src/api-impl-jni/views/android_view_ViewTreeObserver.c
 index 199fbf4..2c05233 100644
 --- a/src/api-impl-jni/views/android_view_ViewTreeObserver.c
@@ -2924,6 +2951,19 @@ index 91d2a62..1f6de91 100644
  	public int commit() {
  		return 0;
  	}
+diff --git a/src/api-impl/android/app/SharedPreferencesImpl.java b/src/api-impl/android/app/SharedPreferencesImpl.java
+index d2f55bf..1a3d365 100644
+--- a/src/api-impl/android/app/SharedPreferencesImpl.java
++++ b/src/api-impl/android/app/SharedPreferencesImpl.java
+@@ -420,7 +420,7 @@ public final class SharedPreferencesImpl implements SharedPreferences {
+ 					for (Map.Entry<String, Object> e : mModified.entrySet()) {
+ 						String k = e.getKey();
+ 						Object v = e.getValue();
+-						if (v == this) { // magic value for a removal mutation
++						if (v == this || v == null) { // remove(), putString(key, null) or putStringSet(key, null)
+ 							if (!mMap.containsKey(k)) {
+ 								continue;
+ 							}
 diff --git a/src/api-impl/android/atl/ATLLoadedApp.java b/src/api-impl/android/atl/ATLLoadedApp.java
 index 6ca40db..603317c 100644
 --- a/src/api-impl/android/atl/ATLLoadedApp.java

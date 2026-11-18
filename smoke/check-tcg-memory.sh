@@ -13,12 +13,13 @@ guest="$CLBB_ATL_PREFIX/share/libnb-qemu-guest"
 javac --release 8 -Xlint:-options -d "$out/classes" "$root/smoke/CLBBArmLseContract.java"
 dx --dex --output="$out/test.jar" "$out/classes"
 ulimit -c 0
-for fixture in arm-tcg-atomics arm-tcg-recycle arm-tcg-links arm-tcg-direct arm-tcg-pairs; do
+python3 "$root/smoke/arm-tcg-flag-vectors.py" "$out/vectors.inc"
+for fixture in arm-tcg-atomics arm-tcg-recycle arm-tcg-links arm-tcg-direct arm-tcg-pairs arm-tcg-flags; do
     sources=("$root/smoke/$fixture.c")
-    if [[ $fixture == arm-tcg-pairs ]]; then sources+=("$root/smoke/$fixture.S"); fi
+    if [[ -f "$root/smoke/$fixture.S" ]]; then sources+=("$root/smoke/$fixture.S"); fi
     clang -target aarch64-pc-linux -march=armv8-a -mno-outline-atomics -fuse-ld=lld \
      -shared -fPIC -O2 -Wall -Wextra -Werror -std=gnu11 -nostdinc -nostdlib -D__ANDROID__ \
-     -I"$(clang -print-resource-dir)/include" -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/linux" \
+     -I"$out" -I"$(clang -print-resource-dir)/include" -I"$JAVA_HOME/include" -I"$JAVA_HOME/include/linux" \
      -I"$bionic/include" -I"$bionic/kernel/android/uapi" -I"$bionic/kernel/uapi" \
      -I"$bionic/kernel/uapi/asm-arm64" -L"$guest" -Wl,-z,defs \
      -o "$out/$fixture.so" "${sources[@]}" -lc -ldl
