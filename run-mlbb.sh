@@ -45,8 +45,8 @@ export ATL_SKIP_NATIVES_EXTRACTION=1
 export ATL_START_WINDOWED=1
 export CLBB_FAST_WINDOW_CLOSE=1
 unset ATL_FORCE_FULLSCREEN
-export CLBB_ANDROID_ID="$(python3 "$CLBB_LAUNCH_ROOT/distribution/device_identity.py" "$CLBB_STATE_ROOT")"
-python3 "$CLBB_LAUNCH_ROOT/prepare-runtime.py" "$CLBB_LAUNCH_ROOT"
+CLBB_ANDROID_ID="$(python3 "$CLBB_LAUNCH_ROOT/prepare-runtime.py" "$CLBB_LAUNCH_ROOT" --print-android-id)"
+export CLBB_ANDROID_ID
 export ATL_SYSTEM_FONTS_DIR="$CLBB_STATE_ROOT/system/fonts"
 export ATL_SYSTEM_FONTS_CONFIG="$CLBB_STATE_ROOT/system/etc/fonts.xml"
 export NB_QEMU_LIBRARY_PATH="$CLBB_STATE_ROOT/data/base.apk_/lib:$CLBB_STATE_ROOT/data/base.apk_/files/libs:$CLBB_STATE_ROOT/data/native-plugin-aliases${NB_QEMU_EXTRA_LIBRARY_PATH:+:$NB_QEMU_EXTRA_LIBRARY_PATH}"
