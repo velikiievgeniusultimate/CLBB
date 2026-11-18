@@ -56,6 +56,7 @@ python3 "$ROOT/smoke/check-resource-only-dex.py"
 python3 "$ROOT/smoke/check-tcg-cache-size.py"
 python3 "$ROOT/tools/check-fd-trans.py"
 "$ROOT/tools/tb-state-audit/check.sh"
+python3 "$ROOT/smoke/check-jit-descriptors.py" "$CLBB_ATL_PREFIX/lib/art/libart.so" "$CLBB_ATL_PREFIX/lib/libnb-qemu.so"
 bash "$ROOT/tools/pauth-audit/check-guest-simd.sh"
 bash "$ROOT/smoke/check-libc-contract.sh" --run
 python3 "$ROOT/tools/check-guest-build-contract.py"

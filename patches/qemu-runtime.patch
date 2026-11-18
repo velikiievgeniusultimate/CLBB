@@ -1587,6 +1587,29 @@ index ec083bd..0caa4b1 100644
      case INDEX_op_or_i32:
      case INDEX_op_or_i64:
      case INDEX_op_xor_i32:
+diff --git a/tcg/tcg.c b/tcg/tcg.c
+index dd4b3d7..f2ebf21 100644
+--- a/tcg/tcg.c
++++ b/tcg/tcg.c
+@@ -4334,7 +4334,8 @@ struct jit_descriptor {
+     struct jit_code_entry *first_entry;
+ };
+ 
+-void __jit_debug_register_code(void) __attribute__((noinline));
++/* ART exposes its own, extended GDB descriptor in the same process. */
++void __jit_debug_register_code(void) __attribute__((noinline, visibility("protected")));
+ void __jit_debug_register_code(void)
+ {
+     asm("");
+@@ -4342,7 +4343,7 @@ void __jit_debug_register_code(void)
+ 
+ /* Must statically initialize the version, because GDB may check
+    the version before we can set it.  */
+-struct jit_descriptor __jit_debug_descriptor = { 1, 0, 0, 0 };
++struct jit_descriptor __jit_debug_descriptor __attribute__((visibility("protected"))) = { 1, 0, 0, 0 };
+ 
+ /* End GDB interface.  */
+ 
 diff --git a/util/rcu.c b/util/rcu.c
 index cad4440..bbb1b22 100644
 --- a/util/rcu.c

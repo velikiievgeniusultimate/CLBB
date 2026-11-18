@@ -176,7 +176,7 @@ python3 "$CLBB_BUILD_ROOT/tools/pauth-audit/audit.py"
 # The upstream Makefile concatenates PREFIX and LIBDIR: the slash is required.
 make -C "$CLBB_NB_DIR" -j "$CLBB_BUILD_JOBS" \
     PREFIX="$CLBB_ATL_PREFIX/" LIBDIR=lib CLBB_NATIVE_BRIDGE_DNS=1 \
-    NB_QEMU_OPT='-O3 -fno-semantic-interposition -fno-plt' \
+    NB_QEMU_OPT='-O3 -fno-semantic-interposition -fno-plt -flto' \
     NB_BRIDGE_OPT='-O2 -fno-strict-aliasing -fno-omit-frame-pointer' \
     NB_GUEST_OPT='-O2 -fno-strict-aliasing' \
     BIONIC_OPT='-O2 -fno-strict-aliasing -fno-builtin -mno-outline-atomics' \
