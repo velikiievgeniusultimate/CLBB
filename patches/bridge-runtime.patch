@@ -1,8 +1,37 @@
 diff --git a/Makefile b/Makefile
-index fbd7368..b0bcfa8 100644
+index fbd7368..77462eb 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -43,13 +43,16 @@ install:
+@@ -19,16 +19,23 @@ export QEMU_BUILDDIR := $(TOPDIR)/qemu/_build/
+ export QEMU_STATIC_LIB := $(QEMU_BUILDDIR)/$(TARGETARCH_FULL)-linux-user/qemu-$(TARGETARCH_FULL).a
+ export LIBQEMUUTIL := $(QEMU_BUILDDIR)/libqemuutil.a
+ 
+-default:
+-	# build qemu
+-	mkdir -p $(QEMU_BUILDDIR)
+-	cd $(QEMU_BUILDDIR) && ../configure --disable-werror --target-list=aarch64-linux-user --disable-system
+-	$(MAKE) -C $(QEMU_BUILDDIR)
++default: qemu-core
+ 	# build bridge
+ 	$(MAKE) -C $(TOPDIR)/libnb-qemu/
+ 	$(MAKE) -C $(TOPDIR)/libnb-qemu-guest/bionic/ BUILDDIR=$(BUILDDIR)/bionic
+ 	$(MAKE) -C $(TOPDIR)/libnb-qemu-guest/ BIONIC_BUILDDDIR=$(BUILDDIR)/bionic
+ 
++.PHONY: qemu-core
++qemu-core:
++	mkdir -p "$(QEMU_BUILDDIR)"
++	cd "$(QEMU_BUILDDIR)" && CFLAGS="$(strip $(CFLAGS) $(NB_QEMU_OPT))" ../configure --disable-werror --target-list=aarch64-linux-user --disable-system
++	@cd "$(QEMU_BUILDDIR)" && grep -E '^(CC|CFLAGS|QEMU_CFLAGS)=' config-host.mak > .clbb-compiler-flags.tmp
++	@cd "$(QEMU_BUILDDIR)" && if ! cmp -s .clbb-compiler-flags.tmp .clbb-compiler-flags; then \
++		if test -f "$(QEMU_STATIC_LIB)" || test -f "$(LIBQEMUUTIL)"; then $(MAKE) clean || exit 1; fi; \
++		mv .clbb-compiler-flags.tmp .clbb-compiler-flags; \
++	else rm -f .clbb-compiler-flags.tmp; fi
++	$(MAKE) -C "$(QEMU_BUILDDIR)"
++
+ install:
+ 	install -Dt $(INSTALL_PREFIX)/$(LIBDIR)/ $(BUILDDIR)/libnb-qemu/libnb-qemu.so
+ 	install -Dt $(INSTALL_DIR_HOST_THUNKS) $(BUILDDIR)/libnb-qemu/libnb-qemu-android.so \
+@@ -43,13 +50,16 @@ install:
  	                                  $(TOPDIR)/libnb-qemu-guest/bionic/prebuilts/linker64 \
  	                                  $(BUILDDIR)/libnb-qemu-guest/libandroid.so \
  	                                  $(BUILDDIR)/libnb-qemu-guest/libEGL.so \
@@ -620,10 +649,10 @@ index 56a3183..2d0e8cc 100644
    runtime_ = runtime;
  }
 diff --git a/libnb-qemu/Makefile b/libnb-qemu/Makefile
-index 78503cd..0b77454 100644
+index 78503cd..7deb34b 100644
 --- a/libnb-qemu/Makefile
 +++ b/libnb-qemu/Makefile
-@@ -1,20 +1,46 @@
+@@ -1,20 +1,47 @@
  CURRDIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
  BUILDDIR := $(BUILDDIR)/libnb-qemu
 +.DEFAULT_GOAL := host-libs
@@ -667,13 +696,14 @@ index 78503cd..0b77454 100644
 +NB_BRIDGE_OPT ?=
 +NB_BRIDGE_LOG_NDEBUG ?= 0
 +CFLAGS := -g -fPIC $(NB_BRIDGE_OPT) -DLOG_NDEBUG=$(NB_BRIDGE_LOG_NDEBUG) `pkgconf --cflags glib-2.0 capstone`
++NB_CORE_CFLAGS := $(CFLAGS) $(NB_QEMU_OPT)
  DEFINES := -DHAVE_SYS_UIO_H
 -INCLUDES := -I$(CURRDIR)/_includes \
 +INCLUDES := -I$(abspath $(CURRDIR)/../../../execution-core) -I$(CURRDIR)/_includes \
  	    -I$(CURRDIR) \
  	    -I$(CURRDIR)/../qemu/_build \
              -I$(CURRDIR)/../qemu/_build/aarch64-linux-user/ \
-@@ -25,8 +51,22 @@ INCLUDES := -I$(CURRDIR)/_includes \
+@@ -25,8 +52,22 @@ INCLUDES := -I$(CURRDIR)/_includes \
              -I$(CURRDIR)/../qemu/linux-user/$(TARGETARCH_FULL)/ \
              -I$(CURRDIR)/../qemu/target/$(TARGETARCH)/
  
@@ -685,7 +715,7 @@ index 78503cd..0b77454 100644
 +.PHONY: nb-bridge-flags-force
 +$(NB_BRIDGE_FLAG_STAMP): nb-bridge-flags-force
 +	@mkdir -p "$(@D)"
-+	@printf '%s\n' 'CC=$(CC)' 'CXX=$(CXX)' 'CFLAGS=$(CFLAGS)' 'THUNK_FLAGS=$(CFLAGS_THUNKS)' 'DEFINES=$(DEFINES)' 'INCLUDES=$(INCLUDES)' 'DEPENDENCIES=MMD-MP-v1' > "$@.tmp"
++	@printf '%s\n' 'CC=$(CC)' 'CXX=$(CXX)' 'CORE_CFLAGS=$(NB_CORE_CFLAGS)' 'THUNK_FLAGS=$(CFLAGS_THUNKS)' 'DEFINES=$(DEFINES)' 'INCLUDES=$(INCLUDES)' 'DEPENDENCIES=MMD-MP-v1' > "$@.tmp"
 +	@if ! cmp -s "$@.tmp" "$@"; then mv "$@.tmp" "$@"; else rm -f "$@.tmp"; fi
 +
 +$(LIBNB_QEMU_OBJS): $(NB_BRIDGE_FLAG_STAMP)
@@ -698,12 +728,12 @@ index 78503cd..0b77454 100644
  
  host-libs: $(BUILDDIR)/libnb-qemu.so \
             $(BUILDDIR)/libnb-qemu-android.so $(BUILDDIR)/libnb-qemu-EGL.so \
-@@ -36,18 +76,20 @@ host-libs: $(BUILDDIR)/libnb-qemu.so \
+@@ -36,18 +77,19 @@ host-libs: $(BUILDDIR)/libnb-qemu.so \
  define rules=
  $(filter %.$(1).o,$(LIBNB_QEMU_OBJS)): $(BUILDDIR)/%.$(1).o: $(CURRDIR)/%.$(1)
  	mkdir -p $$(@D)
 -	$(CC) -c $(CFLAGS) $(DEFINES) $(INCLUDES) -o $$@ $$<
-+	$(CC) -c -MMD -MP -MF $$@.d $(CFLAGS) $(DEFINES) $(INCLUDES) -o $$@ $$<
++	$(CC) -c -MMD -MP -MF $$@.d $(NB_CORE_CFLAGS) $(DEFINES) $(INCLUDES) -o $$@ $$<
  endef
  
  EXTS := c cpp
@@ -712,8 +742,9 @@ index 78503cd..0b77454 100644
 +-include $(LIBNB_QEMU_OBJS:%=%.d)
 +
  $(QEMU_STATIC_LIB):
- 	mkdir $(QEMU_BUILDDIR)
- 	sh -c "cd $(QEMU_BUILDDIR) && ../configure --disable-werror --target-list=aarch64-linux-user --disable-system && make"
+-	mkdir $(QEMU_BUILDDIR)
+-	sh -c "cd $(QEMU_BUILDDIR) && ../configure --disable-werror --target-list=aarch64-linux-user --disable-system && make"
++	$(MAKE) -C "$(TOPDIR)" qemu-core
  
 -$(BUILDDIR)/libnb-qemu.so: $(LIBNB_QEMU_OBJS) $(QEMU_STATIC_LIB)
 -	$(CXX) -g -o $@ -shared $(LIBNB_QEMU_OBJS) -Wl,--whole-archive $(QEMU_STATIC_LIB) -Wl,--no-whole-archive $(LIBQEMUUTIL) $(LDLIBS)
