@@ -801,7 +801,7 @@ index 446201c..f98c4e4 100644
  }
  
 diff --git a/libnb-qemu/QemuAndroid.c b/libnb-qemu/QemuAndroid.c
-index 59f9f3b..7b7177b 100644
+index 59f9f3b..9cc67fb 100644
 --- a/libnb-qemu/QemuAndroid.c
 +++ b/libnb-qemu/QemuAndroid.c
 @@ -18,6 +18,9 @@
@@ -849,7 +849,49 @@ index 59f9f3b..7b7177b 100644
      int result = qemu_main(sizeof(argv)/sizeof(char*), argv, NULL);
      free(sysroot_path_arg);
      free(entry_point_path);
-@@ -132,6 +153,11 @@ void qemu_android_register_syscall_handler(qemu_android_syscall_handler_t func)
+@@ -73,22 +94,30 @@ intptr_t qemu_android_lookup_symbol(const char *name)
+ 
+ intptr_t qemu_android_malloc(size_t size)
+ {
+-    intptr_t guest_addr;
+-
+-    guest_addr = target_mmap(0, size + sizeof(size), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++    if (size > SIZE_MAX - sizeof(size))
++        return 0;
++    size_t mapped_size = size + sizeof(size);
++    if ((abi_ulong)mapped_size != mapped_size)
++        return 0;
++    intptr_t guest_addr = target_mmap(0, mapped_size, PROT_READ | PROT_WRITE,
++                                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+     if (guest_addr == -1)
+-      return 0;
+-    copy_to_user(guest_addr, &size, sizeof(size));
+-    return guest_addr + sizeof(size);
++        return 0;
++    if (copy_to_user(guest_addr, &mapped_size, sizeof(mapped_size)) != 0) {
++        target_munmap(guest_addr, mapped_size);
++        return 0;
++    }
++    return guest_addr + sizeof(mapped_size);
+ }
+ 
+ void qemu_android_free(intptr_t addr)
+ {
+-    size_t size;
+-    intptr_t guest_addr = addr - sizeof(size);
+-
+-    if (copy_from_user(&size, guest_addr, sizeof(size)) == 0) {
+-        target_munmap(guest_addr, size);
++    size_t mapped_size;
++    if (addr != 0) {
++        intptr_t guest_addr = addr - sizeof(mapped_size);
++        if (copy_from_user(&mapped_size, guest_addr, sizeof(mapped_size)) == 0) {
++            target_munmap(guest_addr, mapped_size);
++        }
+     }
+ }
+ 
+@@ -132,6 +161,11 @@ void qemu_android_register_syscall_handler(qemu_android_syscall_handler_t func)
      syscall_handler = func;
  }
  
@@ -861,7 +903,7 @@ index 59f9f3b..7b7177b 100644
  void qemu_android_register_svc_handler(qemu_android_svc_handler_t func)
  {
      svc_handler = func;
-@@ -153,6 +179,12 @@ static void qemu_android_call_internal(CPUState *cpu, intptr_t addr, intptr_t ar
+@@ -153,6 +187,12 @@ static void qemu_android_call_internal(CPUState *cpu, intptr_t addr, intptr_t ar
  {
      CPUArchState *env = cpu->env_ptr;
  
@@ -874,7 +916,7 @@ index 59f9f3b..7b7177b 100644
      intptr_t saved_lr = LR_REG;
      intptr_t saved_pc = PC_REG;
  #ifndef __LP64__
-@@ -200,6 +232,8 @@ static void qemu_android_call_internal(CPUState *cpu, intptr_t addr, intptr_t ar
+@@ -200,6 +240,8 @@ static void qemu_android_call_internal(CPUState *cpu, intptr_t addr, intptr_t ar
          SP_REG += stack_size;
      }
  
@@ -883,7 +925,7 @@ index 59f9f3b..7b7177b 100644
      LR_REG = saved_lr;
      PC_REG = saved_pc;
  #ifndef __LP64__
-@@ -366,20 +400,52 @@ void qemu_android_delete_cpu(void *_cpu)
+@@ -366,20 +408,52 @@ void qemu_android_delete_cpu(void *_cpu)
  
          dealloc_result = (abi_long *) qemu_android_get_memory(tp, sizeof(abi_long) * 2);
          ALOGV("CPU thread deallocation result: stack=%08x, size=%08x", dealloc_result[0], dealloc_result[1]);
