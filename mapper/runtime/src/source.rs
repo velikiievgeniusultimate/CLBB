@@ -299,6 +299,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Alice's orb changes Q to an ordinary teleport to the orb's current
         // position. The initial projectile still uses directional aiming.
         || (hero==4 && slot=="skill:0" && base==410 && active==411)
+        // Karina returns to the mark from her targeted ultimate with a tap.
+        || (hero==8 && slot=="skill:2" && base==830 && active==860)
         // Chou's follow-up follows the target selected by the initial kick;
         // its HookLine indicator does not take a second aiming direction.
         || (hero==26 && slot=="skill:2" && base==2630 && active==2632)
@@ -2709,6 +2711,17 @@ mod tests {
         for(hero,slot,base,active)in [(44,"skill:1",4420,4420),(44,"skill:1",4420,4425),
             (44,"skill:0",4420,4426),(44,"skill:2",4420,4426),(44,"skill:1",4410,4426),
             (77,"skill:1",4420,4426),(25,"skill:1",4420,4426)] {
+            assert!(!verified_button_only_form(hero,slot,base,active));
+        }
+    }
+    #[test]
+    fn karina_mark_return_is_plain_only_in_its_native_recast_form() {
+        assert!(verified_button_only_form(8,"skill:2",830,860));
+        for (hero,slot,base,active) in [
+            (8,"skill:2",830,830), (8,"skill:2",830,859),
+            (8,"skill:0",810,860), (8,"skill:1",820,860),
+            (8,"skill:1",830,860), (9,"skill:2",830,860),
+        ] {
             assert!(!verified_button_only_form(hero,slot,base,active));
         }
     }
