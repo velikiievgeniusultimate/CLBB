@@ -640,7 +640,7 @@ impl UiPlan {
                 None
             };
             let timer = r.field(button, "m_CdCoolDown").ok();
-            let cast_lock = if kind == "skill" {
+            let cast_lock = if matches!(kind, "skill" | "item") {
                 crate::control_audit::cast_lock_address(r, button)
             } else {
                 None
@@ -944,6 +944,13 @@ impl UiPlan {
                     button.skill_charges.and_then(|[count,max]| {
                         charge_pool_empty(integer(r, consumed, count).ok()?, integer(r, consumed, max).ok()?, capacity)
                     }).and_then(|empty| if empty { Some(true) } else { timer_blocked })
+                } else if button.slot == "item:active" && skill == 25790 && variant == 23442 {
+                    // Conceal's locked icon can still have an idle cooldown timer.
+                    match optional_flag(r, consumed, button.cast_lock).value {
+                        1 => Some(true),
+                        0 => timer_blocked,
+                        _ => None,
+                    }
                 } else { timer_blocked };
                 // Freya's Sacred Orbs use the button's native cast lock.
                 // The cooldown timer can be ready while the orb cost is unpaid.
@@ -1733,6 +1740,12 @@ impl<M: Memory> Source<M> {
                 || (entry.slot.as_str()=="ally:johnson" && entry.skill_id.int()==303260) {
                 control_types.insert(entry.slot.owned(),1);
             }
+        }
+        if ui.cooldown_state.buttons.iter().take(ui.cooldown_state.count.min(32) as usize).any(|b| {
+            b.slot.as_str() == "extra:2" && b.base_skill_id.int() == 20160
+                && matches!(b.active_skill_id.int(), 20160 | 20245)
+        }) {
+            control_types.insert("extra:2".into(), 1);
         }
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill" || b.kind.as_str()=="extra") {
             let choice_family=(hero==14 && entry.slot.as_str()=="skill:3" && entry.skill_id.int()==1469)

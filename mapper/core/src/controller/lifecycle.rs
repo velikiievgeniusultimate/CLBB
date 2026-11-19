@@ -18,6 +18,7 @@ impl Controller {
             && (0..4).contains(&b.index)
             && b.slot == format!("upgrade:{}", b.index))
             || (b.kind == "quick_buy" && b.slot == "shop:quick")
+            || Self::is_arrival(b)
             || (b.kind == "attack"
                 && ["attack", "attack:minion", "attack:tower"].contains(&b.slot.as_str())
                 && !self.aimed_attack(b))
@@ -25,6 +26,21 @@ impl Controller {
     }
     pub(crate) fn is_retribution(b: &Button) -> bool {
         b.kind == "extra" && b.slot == "extra:2" && matches!(b.skillId, 20020 | 20150)
+    }
+    pub(crate) fn is_arrival(b: &Button) -> bool {
+        b.kind == "extra" && b.slot == "extra:2" && b.skillId == 20160
+    }
+    pub(crate) fn request_arrival_cancel(&mut self, host: &mut impl Host, key: i32) {
+        let Some(mut button) = self.find_button("extra:2").filter(|b| {
+            b.available && Self::is_arrival(b) && self.cooldownSeen_
+                && self.cooldown_block(b, 0).is_empty() && self.cooldown_variant(b) == 20245
+        }).cloned() else { return };
+        if self.auxiliaryTaps_.iter().any(|tap| tap.cooldownSlot == button.slot) {
+            return;
+        }
+        button.castMode = 1;
+        button.key = key;
+        self.begin_auxiliary_tap(host, &button);
     }
     pub(crate) fn measured_direction_skill_id(&self, b: &Button) -> i32 {
         if b.aimType == 2 {

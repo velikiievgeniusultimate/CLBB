@@ -85,7 +85,7 @@ mod tests {
         fn release_resolver(&mut self, _: u64) {}
         fn navigation(&mut self, _: Point, p: Point, _: bool) -> Result<Vec<Point>, String> { Ok(vec![p]) }
         fn binding(&mut self, _: i32, b: &Button, _: &str) -> Binding {
-            Binding { key: if b.slot=="extra:1" || b.slot=="item:active" || b.slot=="ally:mathilda" || b.slot=="ally:johnson" {68} else if b.kind == "attack" { self.attack_key } else { 81 },
+            Binding { key: if b.slot=="extra:1" || b.slot=="item:active" || b.slot=="ally:mathilda" || b.slot=="ally:johnson" {68} else if b.slot=="extra:2" {70} else if b.kind == "attack" { self.attack_key } else { 81 },
                 aim_type: if b.kind=="attack" { self.attack_aim } else {2},
                 cast_mode: match b.kind.as_str() { "attack" => self.attack_mode, "item" => self.item_mode, _ => 0 },
                 stop_movement: false }
@@ -183,6 +183,48 @@ mod tests {
             ready: flag(true), on_cooldown: flag(item_cooldown), ..Default::default()
         };
         f
+    }
+
+    #[test]
+    fn arrival_cancel_taps_only_the_fresh_native_channel_button() {
+        for cancel_key in [70, 84] {
+            let (mut c, mut h) = setup(Some(false));
+            let mut f = item_frame(60, false, false);
+            let b = &mut f.ui.buttons[2];
+            b.slot = text("extra:2");
+            b.kind = text("extra");
+            b.skill_id = n(20160.);
+            let point = Point::new(0.9, 0.55);
+            let row = &mut f.ui.cooldown_state.buttons[0];
+            row.slot = b.slot;
+            row.base_skill_id = b.skill_id;
+            row.active_skill_id = n(20160.);
+            send(&mut c, &mut h, f);
+            key(&mut c, &mut h, 61, 84, true);
+            key(&mut c, &mut h, 62, 84, false);
+            assert!(c.auxiliaryTaps_.is_empty());
+
+            f.ui.cooldown_state.buttons[0].active_skill_id = n(20245.);
+            f.ui.cooldown_state.token = text("foreign-match");
+            send(&mut c, &mut h, f);
+            key(&mut c, &mut h, 63, 84, true);
+            key(&mut c, &mut h, 64, 84, false);
+            assert!(c.auxiliaryTaps_.is_empty());
+
+            f.ui.cooldown_state.token = f.token;
+            f.time_ns = n((T + 65 * MS) as f64);
+            f.ui.time_ns = f.time_ns;
+            send(&mut c, &mut h, f);
+            key(&mut c, &mut h, 66, cancel_key, true);
+            let tap = &c.auxiliaryTaps_[0];
+            assert_eq!(h.active[&tap.id], point);
+            assert_eq!(tap.cooldownVariant, 20245);
+            assert_eq!(tap.until, T + 82 * MS);
+            c.apply_input(&mut h, Input::Timer(Timer::Auxiliary), T + 83 * MS);
+            assert!(c.auxiliaryTaps_.is_empty());
+            assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [c.movementTouch_]);
+            key(&mut c, &mut h, 84, cancel_key, false);
+        }
     }
 
     #[test]

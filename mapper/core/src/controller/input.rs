@@ -47,7 +47,13 @@ impl Controller {
             if pressed && !auto_repeat {
                 self.clear_queued_skills(host, "explicit_user_cancel");
                 self.deferredItem_ = None;
-                if !self.request_auxiliary_cancel(host) {self.request_skill_cancel(host)}
+                if !self.request_auxiliary_cancel(host) {
+                    if self.skillTouch_ >= 0 {
+                        self.request_skill_cancel(host);
+                    } else {
+                        self.request_arrival_cancel(host, key);
+                    }
+                }
             }
             return true;
         }
@@ -195,7 +201,9 @@ impl Controller {
                 if self.tap_only(&b) {
                     if pressed && !auto_repeat {
                         self.auxiliaryHeldKeys_.insert(key);
-                        if !self.defer_item_for_attack(host, &b) {
+                        if Self::is_arrival(&b) && self.cooldown_variant(&b) == 20245 {
+                            self.request_arrival_cancel(host, key);
+                        } else if !self.defer_item_for_attack(host, &b) {
                             self.begin_auxiliary(host, &b)
                         }
                     }
