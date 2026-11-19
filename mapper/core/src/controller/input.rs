@@ -46,6 +46,7 @@ impl Controller {
         if key != 0 && key == self.cancelKey_ {
             if pressed && !auto_repeat {
                 self.clear_queued_skills(host, "explicit_user_cancel");
+                self.deferredItem_ = None;
                 if !self.request_auxiliary_cancel(host) {self.request_skill_cancel(host)}
             }
             return true;
@@ -194,7 +195,9 @@ impl Controller {
                 if self.tap_only(&b) {
                     if pressed && !auto_repeat {
                         self.auxiliaryHeldKeys_.insert(key);
-                        self.begin_auxiliary(host, &b)
+                        if !self.defer_item_for_attack(host, &b) {
+                            self.begin_auxiliary(host, &b)
+                        }
                     }
                 } else if pressed && !auto_repeat {
                     let mut requested = b;

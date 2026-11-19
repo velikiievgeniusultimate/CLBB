@@ -17,6 +17,19 @@ pub(crate) struct AuxiliaryHold {
     epoch: String,
 }
 
+// A brief delay preserves a key press across the game's shared aimed attack
+// control. A completed press cannot suddenly cast much later in the fight.
+const ITEM_AFTER_ATTACK_NS: i64 = 250_000_000;
+
+pub(crate) struct DeferredItem {
+    key: i32,
+    skill: i32,
+    mode: i32,
+    requested: i64,
+    released: bool,
+    expires: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -32,6 +45,7 @@ mod tests {
         fail_down: bool,
         attack_key: i32,
         attack_mode: i32,
+        item_mode: i32,
         attack_aim: u8,
         clock: Option<i64>,
         abort_ok: bool,
@@ -72,7 +86,9 @@ mod tests {
         fn navigation(&mut self, _: Point, p: Point, _: bool) -> Result<Vec<Point>, String> { Ok(vec![p]) }
         fn binding(&mut self, _: i32, b: &Button, _: &str) -> Binding {
             Binding { key: if b.slot=="extra:1" || b.slot=="item:active" || b.slot=="ally:mathilda" || b.slot=="ally:johnson" {68} else if b.kind == "attack" { self.attack_key } else { 81 },
-                aim_type: if b.kind=="attack" { self.attack_aim } else {2}, cast_mode: if b.kind == "attack" { self.attack_mode } else { 0 }, stop_movement: false }
+                aim_type: if b.kind=="attack" { self.attack_aim } else {2},
+                cast_mode: match b.kind.as_str() { "attack" => self.attack_mode, "item" => self.item_mode, _ => 0 },
+                stop_movement: false }
         }
         fn cancel_key(&mut self, _: i32) -> i32 { 84 }
         fn timer(&mut self, _: Timer, _: Option<i64>) {}
@@ -142,6 +158,81 @@ mod tests {
     fn others(h: &TestHost, primary: i32, movement: i32) {
         assert!(h.active.contains_key(&primary) && h.active.contains_key(&movement));
         assert!(!h.ended.contains(&primary) && !h.ended.contains(&movement));
+    }
+
+    fn item_frame(ms: i64, attack_owns_slot: bool, item_cooldown: bool) -> snapshot::Frame {
+        let mut f = frame(ms, Some(true));
+        f.ui.button_count = 3;
+        f.ui.buttons[2] = snapshot::Button {
+            slot: text("item:active"), kind: text("item"), skill_id: n(25790.),
+            active: flag(true), press_uv: v2(0.9, 0.55), center_uv: v2(0.9, 0.55),
+            radius_uv: v2(0.1, 0.1), ..Default::default()
+        };
+        if attack_owns_slot {
+            f.ui.active_slot = text("attack");
+            f.skill_id = n(201803.);
+        }
+        f.ui.cooldown_state = snapshot::CooldownState {
+            present: flag(true), ready: flag(true), coherent: flag(true),
+            source: text("VirtualButton.m_CdCoolDown"), token: f.token, hero_id: f.hero_id,
+            sample_start_ns: n(f.time_ns.value - 250_000.), sample_end_ns: f.time_ns,
+            count: 1, ..Default::default()
+        };
+        f.ui.cooldown_state.buttons[0] = snapshot::CooldownRow {
+            slot: text("item:active"), base_skill_id: n(25790.), active_skill_id: n(25811.),
+            ready: flag(true), on_cooldown: flag(item_cooldown), ..Default::default()
+        };
+        f
+    }
+
+    #[test]
+    fn item_press_survives_shared_attack_ownership_without_releasing_movement() {
+        for (mode, released_before_attack) in [(0, false), (0, true), (1, false), (1, true)] {
+            let (mut c, mut h) = setup(Some(true));
+            h.item_mode = mode;
+            let movement = c.movementTouch_;
+            key(&mut c, &mut h, 60, 32, true);
+            let attack = c.auxiliaryHolds_[0].id;
+            send(&mut c, &mut h, item_frame(61, true, false));
+            key(&mut c, &mut h, 62, 68, true);
+            assert!(c.deferredItem_.is_some() && c.auxiliaryTaps_.is_empty());
+            if released_before_attack {
+                key(&mut c, &mut h, 63, 68, false);
+            }
+            key(&mut c, &mut h, 70, 32, false);
+            assert_eq!(h.ended, [attack]);
+            send(&mut c, &mut h, item_frame(71, true, false));
+            assert!(c.auxiliaryTaps_.is_empty());
+            send(&mut c, &mut h, item_frame(72, false, false));
+            assert!(c.deferredItem_.is_none());
+            let item = c.auxiliaryTaps_[0].id;
+            if released_before_attack || mode == 1 {
+                c.apply_input(&mut h, Input::Timer(Timer::Auxiliary), T + 90 * MS);
+            }
+            if !released_before_attack {
+                key(&mut c, &mut h, 91, 68, false);
+            }
+            assert_eq!(h.ended, [attack, item]);
+            assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        }
+    }
+
+    #[test]
+    fn deferred_item_rechecks_cooldown_and_discards_cancelled_or_expired_intent() {
+        for case in ["cooldown", "cancel", "expired"] {
+            let (mut c, mut h) = setup(Some(true));
+            send(&mut c, &mut h, item_frame(61, true, false));
+            key(&mut c, &mut h, 62, 68, true);
+            key(&mut c, &mut h, 63, 68, false);
+            assert!(c.deferredItem_.is_some());
+            if case == "cancel" {
+                key(&mut c, &mut h, 64, 84, true);
+            }
+            let after = if case == "expired" { 315 } else { 65 };
+            send(&mut c, &mut h, item_frame(after, false, case == "cooldown"));
+            assert!(c.deferredItem_.is_none() && c.auxiliaryTaps_.is_empty(), "{case}");
+            assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [c.movementTouch_]);
+        }
     }
 
     #[test]
@@ -858,6 +949,71 @@ impl Controller {
             }
         }
     }
+    fn aimed_attack_owns_input(&self) -> bool {
+        self.frameActiveSlot_ == "attack"
+            || self.activeSlot_ == "attack"
+            || self.auxiliaryHolds_.iter().any(|hold| hold.slot == "attack")
+    }
+
+    pub(crate) fn defer_item_for_attack(&mut self, host: &mut impl Host, b: &Button) -> bool {
+        if b.kind != "item" || b.slot != "item:active" {
+            return false;
+        }
+        if !self.aimed_attack_owns_input() {
+            self.deferredItem_ = None;
+            return false;
+        }
+        self.deferredItem_ = Some(DeferredItem {
+            key: b.key,
+            skill: b.skillId,
+            mode: b.castMode,
+            requested: self.now_,
+            released: false,
+            expires: if b.castMode == 0 { i64::MAX } else { self.now_ + ITEM_AFTER_ATTACK_NS },
+        });
+        self.trace(host, "item_input", "deferred_for_aimed_attack");
+        true
+    }
+
+    pub(crate) fn dispatch_deferred_item(&mut self, host: &mut impl Host) {
+        let Some(item) = &self.deferredItem_ else { return };
+        if self.now_ >= item.expires {
+            self.deferredItem_ = None;
+            self.trace(host, "item_input", "deferred_press_expired");
+            return;
+        }
+        if self.frameCoreSampleStartNs_ < item.requested
+            || self.coreSkill_ != 0
+            || !self.frameActiveSlot_.is_empty()
+            || self.aimed_attack_owns_input()
+            || self.skillTouch_ >= 0
+        {
+            return;
+        }
+        let Some(mut button) = self.find_button("item:active")
+            .filter(|b| b.available && b.kind == "item" && b.skillId == item.skill
+                && b.key == item.key && b.castMode == item.mode).cloned()
+        else {
+            self.deferredItem_ = None;
+            return;
+        };
+
+        let reason = self.cooldown_block(&button, item.requested);
+        if reason == "await_post_release_snapshot" {
+            return;
+        }
+        let item = self.deferredItem_.take().unwrap();
+        if !reason.is_empty() {
+            self.trace_cooldown_ignored(host, &button, item.key, reason);
+            return;
+        }
+        if item.released {
+            button.castMode = 1;
+        }
+        self.trace(host, "item_input", "delivered_after_aimed_attack");
+        self.begin_auxiliary(host, &button);
+    }
+
     pub(crate) fn begin_auxiliary(&mut self, host: &mut impl Host, b: &Button) {
         let row = self.auxiliary_scope(&self.auxiliaryControlState_)
             .then(|| self.auxiliaryControlState_.controls[..self.auxiliaryControlState_.count as usize]
@@ -895,6 +1051,10 @@ impl Controller {
         self.begin_auxiliary_tap(host, b);
     }
     pub(crate) fn release_auxiliary_key(&mut self, host: &mut impl Host, key: i32) {
+        if let Some(item) = self.deferredItem_.as_mut().filter(|item| item.key == key) {
+            item.released = true;
+            item.expires = item.expires.min(self.now_ + ITEM_AFTER_ATTACK_NS);
+        }
         for i in (0..self.auxiliaryTaps_.len()).rev() {
             if self.auxiliaryTaps_[i].key == key && self.auxiliaryTaps_[i].until == i64::MAX {
                 if self.auxiliaryTaps_[i].cancelRequested {

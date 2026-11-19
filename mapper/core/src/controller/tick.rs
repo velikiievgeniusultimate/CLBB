@@ -14,6 +14,7 @@ impl Controller {
             self.request_pointer_flush(host)
         }
         self.dispatch_queued_skill(host);
+        self.dispatch_deferred_item(host);
         if self.skillTouch_ < 0 {
             return;
         }

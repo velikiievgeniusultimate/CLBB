@@ -982,6 +982,7 @@ impl Controller {
             self.mark_cooldown_cast(&tap.cooldownSlot, tap.cooldownVariant)
         }
         self.auxiliaryHeldKeys_.clear();
+        self.deferredItem_ = None;
     }
     pub(crate) fn release_all(&mut self, host: &mut impl Host) {
         self.tombstone_physical_inputs();

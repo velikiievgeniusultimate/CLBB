@@ -357,6 +357,7 @@ pub struct Controller {
     pub(crate) responseModels_: Vec<ResponseModel>,
     pub(crate) movementPath_: Vec<Point>,
     pub(crate) auxiliaryHeldKeys_: BTreeSet<i32>,
+    pub(crate) deferredItem_: Option<auxiliary::DeferredItem>,
     pub(crate) cooldownIgnoredKeys_: BTreeSet<i32>,
     pub(crate) cooldownCasts_: BTreeMap<String, i64>,
     pub(crate) cooldownState_: snapshot::CooldownState,
