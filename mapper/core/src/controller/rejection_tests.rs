@@ -44,13 +44,13 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17 | 22 | 27, "skill", "skill:1") => 87,
+            (17 | 22 | 27 | 33, "skill", "skill:1") => 87,
             (22 | 33, "skill", "skill:2") => 69,
             (27, "skill", "skill:3") => 82,
             _ => 81,
         };
-        Binding { key,
-            cast_mode: self.cast_mode, aim_type: self.aim_type, stop_movement: false }
+        let aim_type = if (hero, button.skillId) == (33, 3320) { 1 } else { self.aim_type };
+        Binding { key, cast_mode: self.cast_mode, aim_type, stop_movement: false }
     }
     fn cancel_key(&mut self, _: i32) -> i32 { 84 }
     fn timer(&mut self, _: Timer, _: Option<i64>) {}
@@ -260,6 +260,49 @@ fn cancelling_unclaimed_cyclops_ultimate_retires_only_its_finger() {
             assert!(h.active.contains_key(&c.skillTouch_));
         }
     }
+}
+
+#[test]
+fn cyclops_w_leaves_queue_after_automatically_cancelling_an_unclaimed_q() {
+    let q = Skill { hero: 33, base: 3310, form: 3310, slot: "skill:0" };
+    let w = Skill { hero: 33, base: 3320, form: 3320, slot: "skill:1" };
+    let at = |ms: i64| START + ms * 1_000_000;
+    let controls = |now: i64| {
+        let mut f = frame(now, q, Some(false));
+        f.ui.buttons[2] = frame(now, w, Some(false)).ui.buttons[0];
+        f.ui.button_count = 3;
+        f.ui.cancel_uv = v2(0.835, 0.375);
+        f.cancel_state = snapshot::CancelState {
+            ready: flag(true), coherent: flag(true), source: text("UIKeySkill.bCancelSkill"),
+            token: f.token, hero_id: f.hero_id, base_skill_id: n(3310.), cancelled: flag(false),
+            sample_start_ns: n(now as f64 - 500_000.), sample_end_ns: f.time_ns,
+            ..Default::default()
+        };
+        f
+    };
+    let (mut c, mut h) = setup(q, Some(false), 2, 0);
+    let movement = c.movementTouch_;
+    c.apply_snapshot(&mut h, &controls(at(56)), at(56));
+    key(&mut c, &mut h, at(60), 81, true);
+    let rejected_q = c.skillTouch_;
+    key(&mut c, &mut h, at(107), 87, true);
+    assert!(c.skillCancelPending_);
+    assert_eq!(c.queuedSkills_[0].slot, "skill:1");
+    assert_eq!(h.active[&rejected_q], Point::new(0.835, 0.375));
+    key(&mut c, &mut h, at(155), 81, false);
+    key(&mut c, &mut h, at(216), 87, false);
+    c.apply_snapshot(&mut h, &controls(at(217)), at(217));
+    assert_eq!(h.ended, [rejected_q]);
+    assert!(c.cooldownCasts_.is_empty());
+    assert_eq!(c.queuedSkills_.len(), 1);
+    c.apply_snapshot(&mut h, &controls(at(220)), at(220));
+    let w_touch = c.skillTouch_;
+    assert_eq!(c.activeSlot_, "skill:1");
+    assert!(c.queuedSkills_.is_empty());
+    c.apply_snapshot(&mut h, &controls(at(239)), at(239));
+    assert_eq!(h.ended, [rejected_q, w_touch]);
+    assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+    assert!(c.cooldownCasts_.contains_key("skill:1:3320"));
 }
 
 #[test]

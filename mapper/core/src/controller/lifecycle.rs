@@ -913,7 +913,8 @@ impl Controller {
             self.skillCancelAcknowledged_ = true;
             self.trace(host, "cancel_acknowledged", "native_cancel_flag_after_move");
         } else if self.heroId_ == 33
-            && b.slot == "skill:2" && b.kind == "skill" && b.skillId == 3330
+            && b.kind == "skill"
+            && matches!((b.slot.as_str(), b.skillId), ("skill:0", 3310) | ("skill:2", 3330))
             && self.skillBehavior_ == SkillBehavior::Direction
             && !self.skillKeyHeld_ && !self.skillActivationObserved_
             && self.touchSequence_ == 2
@@ -921,9 +922,9 @@ impl Controller {
             && s.slot.as_str().is_empty() && !s.cancelled.get()
             && self.frameCoreSampleStartNs_ >= self.skillCancelSentNs_ + 100_000_000
         {
-            // DOWN and cancel MOVE were delivered, but the game never
-            // claimed this E. An idle frame cannot acknowledge its cancel.
-            self.finish_skill_inner(host, false, Some("cancelled_unclaimed_cyclops_ultimate"));
+            // DOWN and cancel MOVE reached the game without opening a skill
+            // preview. Release just that touch and let the queued skill run.
+            self.finish_skill_inner(host, false, Some("cancelled_unclaimed_cyclops_skill"));
         } else if same_skill && self.cancelled_cable_form_expired(b, f) {
             // The cancel MOVE was delivered. Lift only that finger at its
             // last point, without booking a cast or discarding newer input.
