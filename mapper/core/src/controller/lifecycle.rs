@@ -441,22 +441,41 @@ impl Controller {
             _ => {}
         }
     }
+    pub(crate) fn waiting_for_fanny_cable(&self, b: &Button) -> bool {
+        // A rapid return through the same chain form can open its preview
+        // while the previous cable is still taking over, then lose it before
+        // UP. Buffer only that observed form pair, preserving physical UP.
+        const CABLE_CHAIN_SETTLE_NS: i64 = 225_000_000;
+        self.heroId_ == 17
+            && b.slot == "skill:1"
+            && b.skillId == 1720
+            && b.castMode == 0
+            && self.active_variant(b) == 1723
+            && self.lastSkillEndNs_ > 0
+            && self.cooldownCasts_.get("skill:1:1723") == Some(&self.lastSkillEndNs_)
+            && (0..CABLE_CHAIN_SETTLE_NS).contains(&(self.now_ - self.lastSkillEndNs_))
+    }
+
     pub(crate) fn queue_skill(&mut self, host: &mut impl Host, b: &Button) {
         if self.queuedSkills_.len() >= 4 {
             self.trace(host, "skill_queue", "capacity_rejected_newest");
             self.set_status("F7: очередь навыков заполнена — новое нажатие пропущено");
             return;
         }
+        let fanny_cable = self.waiting_for_fanny_cable(b);
         let request = QueuedSkill {
             slot: b.slot.clone(),
             key: b.key,
             held: true,
             requestedNs: self.now_,
+            fannyCableBuffered: fanny_cable,
             down: self.capture_skill_intent(host),
             ..QueuedSkill::default()
         };
         self.queuedSkills_.push(request);
-        let reason = if self.waiting_for_kagura_w(b) { "queued_for_kagura_w_unlock" } else { "queued_after_active_gesture" };
+        let reason = if fanny_cable { "queued_for_fanny_cable_settle" }
+            else if self.waiting_for_kagura_w(b) { "queued_for_kagura_w_unlock" }
+            else { "queued_after_active_gesture" };
         self.trace(host, "skill_queue", reason);
         if self.skillTouch_ >= 0
             && !self.skillCancelPending_
@@ -490,7 +509,7 @@ impl Controller {
             if !b.available {
                 return;
             }
-            if self.waiting_for_kagura_w(&b) {
+            if self.waiting_for_kagura_w(&b) || self.waiting_for_fanny_cable(&b) {
                 return;
             }
             if self.classify_skill(&b) == SkillBehavior::AwaitVariant {
@@ -535,6 +554,8 @@ impl Controller {
                 return;
             }
             self.skillKeyHeld_ = q.held;
+            self.fannyCableBuffered_ = q.fannyCableBuffered
+                && self.skillBehavior_ == SkillBehavior::Direction && self.skillCastMode_ == 0;
             if self.skillCastMode_ == 1 {
                 Self::drop_intent(host, &q.up);
                 self.apply_skill_intent(host, q.down)
@@ -617,6 +638,7 @@ impl Controller {
         self.skillNudged_ = false;
         self.skillExpectedAim_ = false;
         self.skillActivationObserved_ = false;
+        self.fannyCableBuffered_ = false;
         self.skillStateForbiddenAtDown_ = state_forbidden;
         self.traceDesiredValid_ = false;
         self.observedSkillId_ = 0;
@@ -742,6 +764,7 @@ impl Controller {
         self.selection_=Default::default();
         self.chargeGesture_ = None;
         self.skillActivationObserved_ = false;
+        self.fannyCableBuffered_ = false;
         self.skillStateForbiddenAtDown_ = false;
         self.skillCancelPending_ = false;
         self.skillCancelAcknowledged_ = false;
@@ -1024,6 +1047,29 @@ mod transport_clock_tests {
             hero_id:meteor_number(61.),slot:meteor_text("skill:2"),base_skill_id:meteor_number(6130.),
             cancelled:meteor_flag(false),sample_start_ns:meteor_number(1_010_000_000.),
             sample_end_ns:meteor_number(1_019_000_000.)};(c,s)
+    }
+    #[test]
+    fn rapid_cable_buffer_is_scoped_to_the_same_native_chain_form() {
+        let button = Button {slot: "skill:1".into(), skillId: 1720, castMode: 0,
+            kind: "skill".into(), ..Default::default()};
+        let mut c = Controller {heroId_: 17, now_: 1_132_000_000,
+            lastSkillEndNs_: 1_000_000_000, skillVariantSampleNs_: 1_132_000_000,
+            ..Default::default()};
+        c.skillVariants_.push(SkillVariant {slot: button.slot.clone(), base: 1720, active: 1723,
+            ..Default::default()});
+        assert!(!c.waiting_for_fanny_cable(&button));
+        c.cooldownCasts_.insert("skill:1:1723".into(), c.lastSkillEndNs_);
+        assert!(c.waiting_for_fanny_cable(&button));
+        c.skillVariants_[0].active = 1720;
+        assert!(!c.waiting_for_fanny_cable(&button));
+        c.skillVariants_[0].active = 1723;
+        assert!(!c.waiting_for_fanny_cable(&Button {castMode: 1, ..button.clone()}));
+        c.heroId_ = 18;
+        assert!(!c.waiting_for_fanny_cable(&button));
+        c.heroId_ = 17;
+        c.now_ = 1_225_000_000;
+        c.skillVariantSampleNs_ = c.now_;
+        assert!(!c.waiting_for_fanny_cable(&button));
     }
     #[test]
     fn revoked_meteor_stop_requires_exact_observed_channel_transition() {
