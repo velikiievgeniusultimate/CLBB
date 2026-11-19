@@ -323,6 +323,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         || (hero==23 && slot=="skill:2" && base==2330 && active==2333)
         // Natalia's ultimate spends a charge on a self-cast.
         || (hero==24 && slot=="skill:2" && base==2430 && active==2430)
+        // Yi Sun-Shin opens his ultimate with a tap. The following phase
+        // inherits the game's independently measured range targeting.
+        || (hero==30 && slot=="skill:2" && base==3030 && active==3030)
         // Gusion's marked-target pursuit and dagger recall are plain recasts.
         // Availability and the hit requirement come from the native variant.
         || (hero==56 && ((slot=="skill:0" && base==5610 && active==5612)
@@ -2896,6 +2899,18 @@ mod tests {
         for (hero, slot, base, active) in [
             (23, "skill:2", 2430, 2430), (24, "skill:1", 2430, 2430),
             (24, "skill:2", 2420, 2430), (24, "skill:2", 2430, 2431),
+        ] {
+            assert!(!verified_button_only_form(hero, slot, base, active));
+        }
+    }
+    #[test]
+    fn yi_sun_shin_ultimate_taps_only_before_the_aimed_follow_up() {
+        assert!(verified_button_only_form(30, "skill:2", 3030, 3030));
+        for (hero, slot, base, active) in [
+            (30, "skill:2", 3030, 203030),
+            (30, "skill:1", 3030, 3030),
+            (30, "skill:2", 3020, 3030),
+            (29, "skill:2", 3030, 3030),
         ] {
             assert!(!verified_button_only_form(hero, slot, base, active));
         }
