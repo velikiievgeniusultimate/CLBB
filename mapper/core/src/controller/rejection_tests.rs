@@ -132,6 +132,74 @@ fn setup(skill: Skill, forbidden: Option<bool>, aim_type: u8, cast_mode: i32) ->
     assert!(c.movementHeld_);
     (c, h)
 }
+fn resource_frame(now: i64, skill: Skill, shortage: bool) -> snapshot::Frame {
+    let mut f = frame(now, skill, Some(false));
+    f.ui.cooldown_state = snapshot::CooldownState {
+        present: flag(true),
+        ready: flag(true),
+        coherent: flag(true),
+        source: text("VirtualButton.m_CdCoolDown"),
+        token: f.token,
+        hero_id: f.hero_id,
+        sample_start_ns: n(now as f64 - 500_000.),
+        sample_end_ns: f.time_ns,
+        count: 1,
+        ..Default::default()
+    };
+    f.ui.cooldown_state.buttons[0] = snapshot::CooldownRow {
+        slot: text(skill.slot),
+        base_skill_id: n(skill.base as f64),
+        active_skill_id: n(skill.form as f64),
+        ready: flag(true),
+        on_cooldown: flag(false),
+        resource_shortage: flag(shortage),
+    };
+    f
+}
+
+#[test]
+fn empty_energy_or_mana_discards_press_until_a_fresh_press_after_recovery() {
+    let cable = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
+    for (skill, code, aim) in [(cable, 87, 2), (KAGURA, 81, 3)] {
+        let (mut c, mut h) = setup(skill, Some(false), aim, 0);
+        let movement = c.movementTouch_;
+        let now = START + 60_000_000;
+        c.apply_snapshot(&mut h, &resource_frame(now, skill, true), now);
+        key(&mut c, &mut h, now + 1_000_000, code, true);
+        assert!(c.skillTouch_ < 0 && c.queuedSkills_.is_empty());
+        assert!(h.traces.iter().any(|(event, reason)| event == "cooldown_ignored" && reason == "insufficient_resource"));
+        let now = now + 8_000_000;
+        c.apply_snapshot(&mut h, &resource_frame(now, skill, false), now);
+        assert!(c.apply_input(&mut h, Input::Key { code, down: true, repeat: true }, now + 1_000_000));
+        key(&mut c, &mut h, now + 2_000_000, code, false);
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        key(&mut c, &mut h, now + 3_000_000, code, true);
+        assert!(h.active.contains_key(&c.skillTouch_));
+        assert!(h.active.contains_key(&movement));
+    }
+}
+
+#[test]
+fn resource_spent_by_previous_cast_discards_queued_press_before_touch_down() {
+    let skill = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
+    let (mut c, mut h) = setup(skill, Some(false), 2, 0);
+    let movement = c.movementTouch_;
+    let now = START + 60_000_000;
+    c.apply_snapshot(&mut h, &resource_frame(now, skill, false), now);
+    // Represent an outstanding release frame: new W is admissible with the
+    // last resource sample, but dispatch needs fresh post-cast evidence.
+    c.lastSkillEndNs_ = now + 1_000_000;
+    let button = c.find_button("skill:1").unwrap().clone();
+    c.queue_skill(&mut h, &button);
+    c.dispatch_queued_skill(&mut h);
+    assert_eq!(c.queuedSkills_.len(), 1);
+    let now = now + 8_000_000;
+    c.apply_snapshot(&mut h, &resource_frame(now, skill, true), now);
+    assert!(c.queuedSkills_.is_empty());
+    assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+    assert!(h.traces.iter().any(|(event, reason)| event == "cooldown_ignored" && reason == "insufficient_resource"));
+}
+
 fn rejected(h: &TestHost) -> usize {
     h.traces.iter().filter(|(event, _)| event == "range_rejected").count()
 }

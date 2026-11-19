@@ -141,6 +141,7 @@ impl Encode for s::CooldownRow {
         out.insert("active_skill_id".into(), self.active_skill_id.encode());
         out.insert("ready".into(), self.ready.encode());
         out.insert("on_cooldown".into(), self.on_cooldown.encode());
+        out.insert("resource_shortage".into(), self.resource_shortage.encode());
         Value::Object(out)
     }
 }

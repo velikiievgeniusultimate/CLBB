@@ -225,6 +225,7 @@ pub struct ButtonPlan {
     pub data: u64,
     pub skill: u64,
     pub variant: Option<u64>,
+    pub(crate) skill_level: Option<u64>,
     pub cast_lock: Option<u64>,
     pub state_forbid: Option<u64>,
     clint_ammo: Option<[u64; 2]>,
@@ -624,6 +625,16 @@ impl UiPlan {
             } else {
                 None
             };
+            let skill_level = if kind == "skill" && data != 0 {
+                let mut ownership = Vec::new();
+                crate::skill_config::typed_field(r, &mut ownership, data, "skillLvl", &[8])
+                    .ok().map(|(address, _)| {
+                        checks.extend(ownership);
+                        address
+                    })
+            } else {
+                None
+            };
             let timer = r.field(button, "m_CdCoolDown").ok();
             let cast_lock = if kind == "skill" {
                 crate::control_audit::cast_lock_address(r, button)
@@ -662,6 +673,7 @@ impl UiPlan {
                 data,
                 skill,
                 variant,
+                skill_level,
                 cast_lock,
                 state_forbid,
                 clint_ammo,
@@ -937,6 +949,7 @@ impl UiPlan {
                     active_skill_id: number(variant as f64),
                     ready: flag(blocked.is_some()),
                     on_cooldown: flag(blocked.unwrap_or(false)),
+                    resource_shortage: s::Flag::default(),
                 };
                 cooldown.count += 1;
             }
@@ -1107,6 +1120,7 @@ struct Plan {
     skill: u64,
     clock: u64,
     ui: UiPlan,
+    resources: Option<crate::skill_cost::ResourcePlan>,
     motions: std::collections::HashMap<i32, crate::aim::MotionPlan>,
     attack_mode: Option<crate::attack::ModePlan>,
     attack_mode_retry:i64,
@@ -1474,6 +1488,7 @@ impl<M: Memory> Source<M> {
         let skill = r.field(indicator, "m_iCurSkillID")?;
         let clock = r.field(manager, "m_uiFrameTime")?;
         let ui = UiPlan::new(r, show, hero)?;
+        let resources = crate::skill_cost::ResourcePlan::discover(r, actor).ok();
         let mut motions = std::collections::HashMap::new();
         for id in [2510, 2511, 2520, 20020, 20150, 8410] {
             if let Ok(m) = crate::aim::MotionPlan::discover(r, indicator, id) {
@@ -1494,6 +1509,7 @@ impl<M: Memory> Source<M> {
             skill,
             clock,
             ui,
+            resources,
             motions, attack_mode:None,attack_mode_retry:0,attack_motion:None,
             behaviors: Default::default(),
             behavior_retry: Default::default(),
@@ -1572,9 +1588,14 @@ impl<M: Memory> Source<M> {
             clock,
         );
         let token = format!("{}:{}", self.token, epoch);
-        let (ui, mut skill_state, cancel_state) =
+        let (mut ui, mut skill_state, cancel_state) =
             plan.ui
                 .sample(r, hero, &token, now, size, clock, &mut consumed)?;
+        if let Some(resources) = &mut plan.resources {
+            resources.sample(
+                r, hero, now, &plan.ui.buttons, &mut ui.cooldown_state, &mut consumed,
+            );
+        }
         if plan.ui.linked.as_ref().is_some_and(|p|p.validate(r).is_err()) {plan.ui.linked=None;plan.ui.linked_retry=0;}
         if plan.ui.linked.is_none() && now>=plan.ui.linked_retry {
             plan.ui.linked=crate::control_audit::CurvePlan::discover(r,plan.ui.object,&plan.ui.buttons).ok();

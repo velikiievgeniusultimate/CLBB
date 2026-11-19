@@ -294,8 +294,6 @@ impl Controller {
             return "unknown";
         };
         if rows.next().is_some()
-            || !r.ready.get()
-            || !r.on_cooldown.is_bool()
             || !r.base_skill_id.is_number()
             || r.base_skill_id.value != b.skillId as f64
             || !r.active_skill_id.is_number()
@@ -316,6 +314,12 @@ impl Controller {
                 .unwrap_or(&0) as f64
         {
             return "pre_cast_snapshot";
+        }
+        if r.resource_shortage.get() {
+            return "insufficient_resource";
+        }
+        if !r.ready.get() || !r.on_cooldown.is_bool() {
+            return "unknown";
         }
         if r.on_cooldown.get() { "active" } else { "" }
     }

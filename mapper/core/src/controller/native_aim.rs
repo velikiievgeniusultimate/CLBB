@@ -1732,7 +1732,7 @@ mod tests {
             token:text("token"),hero_id:n(131.),sample_start_ns:n(1_990_000_000.),sample_end_ns:n(1_995_000_000.),count:1,..Default::default()
         };
         state.buttons[0]=super::super::snapshot::CooldownRow {
-            slot:text("skill:0"),base_skill_id:n(1_013_110.),active_skill_id:n(2_013_110.),ready:flag(true),on_cooldown:flag(false)
+            slot:text("skill:0"),base_skill_id:n(1_013_110.),active_skill_id:n(2_013_110.),ready:flag(true),on_cooldown:flag(false),..Default::default()
         };
         for active in [1_013_110.,2_013_110.,10_000_000.] {
             state.buttons[0].active_skill_id=n(active);c.cooldownState_=state;

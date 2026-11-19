@@ -180,6 +180,7 @@ pub struct CooldownRow {
     pub active_skill_id: Number,
     pub ready: Flag,
     pub on_cooldown: Flag,
+    pub resource_shortage: Flag,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]

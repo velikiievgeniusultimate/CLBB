@@ -24,6 +24,8 @@ pub mod render_metrics;
 #[cfg(target_os = "linux")]
 pub mod runtime;
 pub mod settings;
+pub mod skill_config;
+mod skill_cost;
 pub mod source;
 pub mod unity;
 pub mod updater;

@@ -348,7 +348,7 @@ mod tests {
             source:text("VirtualButton.m_CdCoolDown"),token:f.token,hero_id:f.hero_id,
             sample_start_ns:f.time_ns,sample_end_ns:f.time_ns,count:1,..Default::default()};
         f.ui.cooldown_state.buttons[0]=snapshot::CooldownRow {slot:text("item:active"),
-            base_skill_id:n(25790.),active_skill_id:n(25811.),ready:flag(true),on_cooldown:flag(false)};
+            base_skill_id:n(25790.),active_skill_id:n(25811.),ready:flag(true),on_cooldown:flag(false),..Default::default()};
         f.ui.active_slot=text("item:active");send(&mut c,&mut h,f);
         key(&mut c,&mut h,66,68,true);let regen=c.auxiliaryTaps_[0].id;
         assert_eq!(c.auxiliaryTaps_[0].cooldownVariant,25811);
@@ -399,7 +399,7 @@ mod tests {
             source:text("VirtualButton.m_CdCoolDown"),token:f.token,hero_id:f.hero_id,
             sample_start_ns:f.time_ns,sample_end_ns:f.time_ns,count:1,..Default::default()};
         f.ui.cooldown_state.buttons[0]=snapshot::CooldownRow {slot:text("ally:mathilda"),
-            base_skill_id:n(10224.),active_skill_id:n(10224.),ready:flag(false),on_cooldown:flag(false)};
+            base_skill_id:n(10224.),active_skill_id:n(10224.),ready:flag(false),on_cooldown:flag(false),..Default::default()};
         f.ui.active_slot=text("ally:mathilda");send(&mut c,&mut h,f);
         key(&mut c,&mut h,66,68,true);let regen=c.auxiliaryTaps_[0].id;
         assert_eq!(c.auxiliaryTaps_[0].cooldownVariant,10224);
