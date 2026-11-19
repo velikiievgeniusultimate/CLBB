@@ -203,7 +203,6 @@ pub struct Controller {
     pub(crate) skillStateForbiddenAtDown_: bool,
     pub(crate) chargeGesture_: Option<charge_lifecycle::ChargeGesture>,
     cableChain_: cable::CableChain,
-    cableAwaitingAim_: bool,
     pub(crate) pendingRelease_: bool,
     pub(crate) pendingWorldValid_: bool,
     pub(crate) movementReady_: bool,

@@ -86,8 +86,8 @@ impl Controller {
             && matches!(self.skillCooldownVariant_, 1720 | 1723)
     }
 
-    pub(super) fn cable_release_before_capture(&self) -> bool {
-        self.holding_cable_contact() && !self.skillActivationObserved_
+    pub(super) fn awaiting_cable_direction(&self) -> bool {
+        self.pendingRelease_ && self.holding_cable_contact()
     }
 
     // The game closes the chained cable's reticle when its recast window

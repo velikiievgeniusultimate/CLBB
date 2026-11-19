@@ -124,15 +124,7 @@ impl Controller {
         }
         if self.skillBehavior_ == SkillBehavior::Direction {
             self.skillExpectedAim_ = true;
-            if self.cableAwaitingAim_ && self.releaseRequested_.elapsed(self.now_) >= 100 {
-                if !self.directionGeometryFresh_ {
-                    self.end_unconfirmed_cable(host);
-                    return;
-                }
-                // Once W owns the contact, missing angular feedback can use
-                // the ordinary ordered MOVE and UP.
-                self.cableAwaitingAim_ = false;
-            }
+            let awaiting_cable = self.awaiting_cable_direction();
             if let Some(p) = self.direction_point(host) {
                 if !self.send_direction(host, p) {
                     self.finish_skill(host, true);
@@ -144,7 +136,7 @@ impl Controller {
                 // Geometry computes the final command; successful ordered MOVE
                 // delivery is followed by UP, without awaiting another visual
                 // receipt that the game may only produce after that UP.
-                if self.pendingRelease_ && self.skillCastMode_ == 0 && !self.skillKeyHeld_ && !self.cableAwaitingAim_ {
+                if self.pendingRelease_ && self.skillCastMode_ == 0 && !self.skillKeyHeld_ && !awaiting_cable {
                     self.trace(host, "direction_goal", "physical_up_after_final_direction_move");
                     self.finish_skill(host, false);
                     return;
@@ -170,6 +162,17 @@ impl Controller {
                         .map(|s| s.time_ns)
                         .unwrap_or(self.now_);
                     self.trace(host, "touch_echo", "direction_goal_keepalive")
+                }
+            }
+            // Fanny's new indicator can open with the previous cable's angle.
+            // Only the matching native command and direction above authorize
+            // release. A timeout cannot turn that old angle into a valid cast.
+            if awaiting_cable && self.releaseRequested_.elapsed(self.now_) >= 100 {
+                if self.skillActivationObserved_ {
+                    self.trace(host, "direction_goal", "cancel_unconfirmed_cable_direction");
+                    self.request_skill_cancel(host);
+                } else {
+                    self.end_unconfirmed_cable(host);
                 }
             }
             return;

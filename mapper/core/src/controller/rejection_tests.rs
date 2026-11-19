@@ -191,6 +191,70 @@ fn early_fanny_release_waits_at_w_even_during_movement_pointer_flushes() {
 }
 
 #[test]
+fn fanny_cable_commits_only_the_angle_chosen_at_physical_release() {
+    let cable = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
+    let observed = |at: i64, raw: Point, direction: Point| {
+        let mut f = frame(at, cable, Some(false));
+        f.skill_id = n(1723.);
+        f.ui.active_slot = text(cable.slot);
+        f.ui.cancel_uv = v2(0.83, 0.42);
+        f.active_joystick = snapshot::Geometry {
+            ready: flag(true), source: text("active_widget_transform"), slot: text(cable.slot),
+            skill_id: f.skill_id, center_uv: v2(0.8, 0.8), radius_uv: v2(0.1, 0.1),
+            sample_start_ns: f.skill_state.sample_start_ns, sample_end_ns: f.time_ns,
+        };
+        f.direction_input = snapshot::Direction {
+            ready: flag(true), coherent: flag(true), token: f.token, hero_id: f.hero_id,
+            source: text("IndicatorMotionRot.m_vDragResult"), slot: f.ui.active_slot, skill_id: f.skill_id,
+            sample_start_ns: f.skill_state.sample_start_ns, sample_end_ns: f.time_ns,
+            raw_touch_xyz: snapshot::Vector3 { count: 3, values: [n(raw.x), n(raw.y), n(0.)] },
+            direction_xz: v2(direction.x, direction.y), ..Default::default()
+        };
+        f
+    };
+    for acknowledge in [true, false] {
+        let (mut c, mut h) = setup(cable, Some(false), 2, 0);
+        let movement = c.movementTouch_;
+        let start = START + 60_000_000;
+        let old = Point::new(1., 0.);
+        c.apply_input(&mut h, Input::Pointer(old), start);
+        key(&mut c, &mut h, start, 87, true);
+        let finger = c.skillTouch_;
+        let at = start + 8_000_000;
+        c.apply_snapshot(&mut h, &observed(at, Point::default(), old), at);
+        assert!(c.skillActivationObserved_ && c.directionGeometryFresh_ && !c.directionAccepted_);
+        let target = Point::new(0., 1.);
+        let up = at + 1_500_000;
+        c.apply_input(&mut h, Input::Pointer(target), up);
+        key(&mut c, &mut h, up, 87, false);
+        assert!(h.ended.is_empty(), "W opened the HUD but the game still holds the old angle");
+        let sent = h.active[&finger];
+        c.apply_input(&mut h, Input::Pointer(old), up + 1_000_000);
+        c.apply_input(&mut h, Input::Timer(Timer::Pointer), up + 2_000_000);
+        assert_eq!(h.active[&finger], sent);
+        assert_eq!(c.pendingDirection_, target);
+        let cell = c.pixels(sent);
+        let raw = Point::new(cell.x.floor() * 0.999, 1000. - cell.y.floor() * 0.999);
+        let at = up + 7_000_000;
+        c.apply_snapshot(&mut h, &observed(at, raw, old), at);
+        assert!(h.ended.is_empty(), "coordinates alone cannot acknowledge a stale angle");
+        if acknowledge {
+            let at = up + 14_000_000;
+            c.apply_snapshot(&mut h, &observed(at, raw, target), at);
+            assert_eq!(h.ended, [finger]);
+            assert!(h.traces.iter().any(|(_, reason)| reason == "native_direction_ack_release"));
+        } else {
+            let at = up + 105_000_000;
+            c.apply_snapshot(&mut h, &observed(at, raw, old), at);
+            assert!(c.skillCancelPending_ && h.ended.is_empty());
+            assert_eq!(h.active[&finger], Point::new(0.83, 0.42));
+            assert!(!h.traces.iter().any(|(_, reason)| reason == "cast"));
+        }
+        assert!(c.movementHeld_ && h.active.contains_key(&movement));
+    }
+}
+
+#[test]
 fn expiring_fanny_cable_cancel_releases_only_w_and_accepts_the_next_physical_press() {
     const CHAIN: Skill = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
     const NORMAL: Skill = Skill { form: 1720, ..CHAIN };

@@ -541,7 +541,6 @@ impl Controller {
                 self.apply_skill_intent(host, q.down)
             } else if !q.held {
                 Self::drop_intent(host, &q.down);
-                self.cableAwaitingAim_ = self.cable_release_before_capture();
                 self.apply_skill_intent(host, q.up)
             } else {
                 Self::drop_intent(host, &q.down);
@@ -750,7 +749,6 @@ impl Controller {
             }
         }
         self.skillCooldownVariant_ = 0;
-        self.cableAwaitingAim_ = false;
         self.selection_=Default::default();
         self.chargeGesture_ = None;
         self.skillActivationObserved_ = false;

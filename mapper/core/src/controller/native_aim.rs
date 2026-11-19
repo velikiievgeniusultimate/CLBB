@@ -219,7 +219,9 @@ impl Controller {
     pub(crate) fn direction_point(&mut self, host: &mut impl Host) -> Option<Point> {
         // Pointer flush and frame tick can both send MOVE. Moving an unopened
         // W over Q can give Q the contact before the game processes W's DOWN.
-        if self.cableAwaitingAim_ && !self.directionGeometryFresh_ { return None; }
+        if self.awaiting_cable_direction() && !self.directionGeometryFresh_ {
+            return None;
+        }
         if !self.frameCameraReady_ {
             return None;
         }

@@ -100,7 +100,6 @@ impl Controller {
                 || self.skillBehavior_ == SkillBehavior::AwaitVariant
             {
                 if !self.pendingRelease_ {
-                    self.cableAwaitingAim_ = self.cable_release_before_capture();
                     self.freeze_direction_intent(host)
                 }
                 self.tick(host);
