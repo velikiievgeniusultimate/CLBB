@@ -254,13 +254,18 @@ impl Controller {
     pub(crate) fn cooldown_block(&self, b: &Button, minimum: i64) -> &'static str {
         // These forms display an ongoing enhancement and explicitly lock
         // its own button. Other animation locks may allow buffered skills.
-        let enhancement = match (self.heroId_, b.slot.as_str(), b.skillId) {
-            (1, "skill:0", 110) => Some(111),  // Miya's split arrows.
-            (22, "skill:2", 2250) => Some(2254), // Freya's Valkyrie form.
-            (64, "skill:0", 6410) => Some(6417), // Aldous's enhanced attack.
-            _ => None,
+        let enhancement_forms: &[i32] = match (self.heroId_, b.slot.as_str(), b.skillId) {
+            (1, "skill:0", 110) => &[111],    // Miya's split arrows.
+            (22, "skill:2", 2250) => &[2254], // Freya's Valkyrie form.
+            // Sun's first two skills share a clone lock. The first button
+            // can already be locked before its icon/form switches.
+            (27, "skill:0", 2710) => &[2710, 2705, 2708],
+            (27, "skill:1", 2750) => &[2706, 2707],
+            (27, "skill:3", 2730) => &[2709, 2739],
+            (64, "skill:0", 6410) => &[6417], // Aldous's enhanced attack.
+            _ => &[],
         };
-        if let Some(active) = enhancement
+        if !enhancement_forms.is_empty()
             && self.skillVariantSampleStartNs_ >= minimum
             && self.skillVariantSampleStartNs_ > 0
             && self.skillVariantSampleNs_ >= self.skillVariantSampleStartNs_
@@ -269,7 +274,7 @@ impl Controller {
         {
             let mut rows = self.skillVariants_.iter().filter(|v| v.slot == b.slot && v.base == b.skillId);
             if let Some(v) = rows.next()
-                && v.active == active && rows.next().is_none()
+                && enhancement_forms.contains(&v.active) && rows.next().is_none()
             {
                 match v.cast_locked {
                     Some(true) => return "native_locked_enhancement",

@@ -44,8 +44,9 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17 | 22, "skill", "skill:1") => 87,
+            (17 | 22 | 27, "skill", "skill:1") => 87,
             (22, "skill", "skill:2") => 69,
+            (27, "skill", "skill:3") => 82,
             _ => 81,
         };
         Binding { key,
@@ -182,10 +183,18 @@ fn empty_energy_or_mana_discards_press_until_a_fresh_press_after_recovery() {
 }
 
 #[test]
-fn miya_and_freya_cannot_repress_a_skill_during_its_locked_enhancement() {
+fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let miya = Skill { hero: 1, base: 110, form: 110, slot: "skill:0" };
     let freya = Skill { hero: 22, base: 2250, form: 2250, slot: "skill:2" };
-    for (skill, code, form) in [(miya, 81, 111), (freya, 69, 2254)] {
+    let sun_q = Skill { hero: 27, base: 2710, form: 2710, slot: "skill:0" };
+    let sun_w = Skill { hero: 27, base: 2750, form: 2750, slot: "skill:1" };
+    let sun_r = Skill { hero: 27, base: 2730, form: 2730, slot: "skill:3" };
+    for (skill, code, form) in [
+        (miya, 81, 111), (freya, 69, 2254),
+        (sun_q, 81, 2710), (sun_q, 81, 2705), (sun_q, 81, 2708),
+        (sun_w, 87, 2706), (sun_w, 87, 2707),
+        (sun_r, 82, 2709), (sun_r, 82, 2739),
+    ] {
         let (mut c, mut h) = setup(skill, Some(false), 1, 0);
         let movement = c.movementTouch_;
         let now = START + 60_000_000;
