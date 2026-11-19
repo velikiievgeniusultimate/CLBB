@@ -226,6 +226,7 @@ pub struct ButtonPlan {
     pub variant: Option<u64>,
     pub cast_lock: Option<u64>,
     pub state_forbid: Option<u64>,
+    clint_ammo: Option<[u64; 2]>,
     pub(crate) charge: Option<crate::control_audit::ChargePlan>,
     charge_retry: i64,
     choice_family: bool,
@@ -632,6 +633,14 @@ impl UiPlan {
             } else {
                 None
             };
+            let clint_ammo = if slot == "skill:2" && class.name == "SkillButtonAutoCharge"
+                && skill != 0 && r.integer(local_hero_address)? == 13 && r.integer(skill)? == 1330 {
+                let address = |name| {
+                    class.fields.get(name).filter(|f| !f.is_static && f.kind == 8 && f.offset <= 1_048_576)
+                        .map(|f| button + f.offset)
+                };
+                address("m_iOvelap").zip(address("m_iMaxOvelap")).map(|(count,max)| [count,max])
+            } else { None };
             let charge = if kind == "skill" {
                 crate::control_audit::ChargePlan::discover(r, button, data, local_show).ok()
             } else {
@@ -653,6 +662,7 @@ impl UiPlan {
                 variant,
                 cast_lock,
                 state_forbid,
+                clint_ammo,
                 charge,
                 charge_retry: 0,
                 choice_family,choice,choice_retry:0,choice_touch:None,choice_touch_retry:0,choice_touch_attempts:0,choice_touch_held:false,
@@ -905,11 +915,19 @@ impl UiPlan {
                 variants.count += 1;
             }
             if button.kind == "skill" || button.kind == "extra" || button.kind == "item" {
-                let blocked = button
+                let timer_blocked = button
                     .timer
                     .and_then(|timer_link| pointer(r, consumed, timer_link).ok())
                     .filter(|timer| *timer != 0)
                     .and_then(|timer| read_cooldown(r, timer, clock, consumed).ok());
+                // The recharge timer alone does not report an empty magazine.
+                // Preserve the usual cooldown gate and treat an uncertain count
+                // as unknown for this exact owned ultimate form.
+                let blocked = if hero == 13 && button.slot == "skill:2" && skill == 1330 && variant == 1330 {
+                    button.clint_ammo.and_then(|[count,max]| {
+                        clint_ammo_empty(integer(r, consumed, count).ok()?, integer(r, consumed, max).ok()?)
+                    }).and_then(|empty| if empty { Some(true) } else { timer_blocked })
+                } else { timer_blocked };
                 let n = cooldown.count as usize;
                 cooldown.buttons[n] = s::CooldownRow {
                     slot: text(&button.slot),
@@ -982,6 +1000,10 @@ impl UiPlan {
         Ok((ui, variants, cancel_state))
     }
 }
+fn clint_ammo_empty(count: i32, max: i32) -> Option<bool> {
+    (max == 3 && (0..=max).contains(&count)).then_some(count == 0)
+}
+
 fn read_cooldown<M: Memory>(
     r: &mut Reflection<M>,
     timer: u64,
@@ -2715,6 +2737,16 @@ mod tests {
             (44,"skill:0",4420,4426),(44,"skill:2",4420,4426),(44,"skill:1",4410,4426),
             (77,"skill:1",4420,4426),(25,"skill:1",4420,4426)] {
             assert!(!verified_button_only_form(hero,slot,base,active));
+        }
+    }
+    #[test]
+    fn clint_magazine_rejects_invalid_counts_without_admitting_a_cast() {
+        assert_eq!(clint_ammo_empty(0,3),Some(true));
+        for count in 1..=3 {
+            assert_eq!(clint_ammo_empty(count,3),Some(false));
+        }
+        for (count,max) in [(-1,3),(4,3),(0,0),(1,2)] {
+            assert_eq!(clint_ammo_empty(count,max),None);
         }
     }
     #[test]
