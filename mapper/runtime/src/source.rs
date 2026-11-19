@@ -319,6 +319,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Akai stops Heavy Spin through the same owned ultimate slot.
         // The stop form has no aiming registry, unlike other active forms.
         || (hero==9 && slot=="skill:2" && base==930 && active==938)
+        // Gord can stop his beam through an ordinary repeat in the same slot.
+        || (hero==23 && slot=="skill:2" && base==2330 && active==2333)
         // Gusion's marked-target pursuit and dagger recall are plain recasts.
         // Availability and the hit requirement come from the native variant.
         || (hero==56 && ((slot=="skill:0" && base==5610 && active==5612)
@@ -2814,6 +2816,19 @@ mod tests {
             (53,"skill:2",5330,5380),(53,"skill:1",5330,5396),
             (53,"skill:2",5310,5396),(52,"skill:2",5330,5396),
         ] {assert!(!verified_button_only_form(hero,slot,base,active));}
+    }
+    #[test]
+    fn gord_stop_is_plain_only_during_his_ultimate_channel() {
+        assert!(verified_button_only_form(23, "skill:2", 2330, 2333));
+        for (hero, slot, base, active) in [
+            (23, "skill:2", 2330, 2330),
+            (23, "skill:2", 2330, 2332),
+            (23, "skill:1", 2330, 2333),
+            (23, "skill:2", 2320, 2333),
+            (22, "skill:2", 2330, 2333),
+        ] {
+            assert!(!verified_button_only_form(hero, slot, base, active));
+        }
     }
     #[test]
     fn odette_song_stop_is_plain_only_after_her_owned_ultimate_changes_form() {
