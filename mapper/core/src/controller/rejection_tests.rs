@@ -41,8 +41,13 @@ impl Host for TestHost {
     fn resolve_world(&mut self, _: u64) -> Option<Point> { None }
     fn release_resolver(&mut self, _: u64) {}
     fn navigation(&mut self, _: Point, p: Point, _: bool) -> Result<Vec<Point>, String> { Ok(vec![p]) }
-    fn binding(&mut self, _: i32, button: &Button, _: &str) -> Binding {
-        Binding { key: if button.kind == "extra" { 70 } else { 81 },
+    fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
+        let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
+            (_, "extra", _) => 70,
+            (17, "skill", "skill:1") => 87,
+            _ => 81,
+        };
+        Binding { key,
             cast_mode: self.cast_mode, aim_type: self.aim_type, stop_movement: false }
     }
     fn cancel_key(&mut self, _: i32) -> i32 { 84 }
@@ -163,10 +168,10 @@ fn early_fanny_release_waits_at_w_even_during_movement_pointer_flushes() {
     let cable = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
     let (mut c, mut h) = setup(cable, Some(false), 2, 0);
     let movement = c.movementTouch_;
-    key(&mut c, &mut h, START + 60_000_000, 81, true);
+    key(&mut c, &mut h, START + 60_000_000, 87, true);
     let finger = c.skillTouch_;
     let press = h.active[&finger];
-    key(&mut c, &mut h, START + 61_000_000, 81, false);
+    key(&mut c, &mut h, START + 61_000_000, 87, false);
     // This callback used to move an unopened W onto Q before the game
     // recognized either button. Keep the independent movement contact alive.
     for ms in [2, 6, 11, 20] {
@@ -183,6 +188,74 @@ fn early_fanny_release_waits_at_w_even_during_movement_pointer_flushes() {
     assert!(c.movementHeld_ && h.active.contains_key(&movement));
     assert!(c.cooldownCasts_.is_empty());
     assert!(h.traces.iter().any(|(_, reason)| reason == "cable_capture_unavailable_end_at_last_point"));
+}
+
+#[test]
+fn expiring_fanny_cable_cancel_releases_only_w_and_accepts_the_next_physical_press() {
+    const CHAIN: Skill = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
+    const NORMAL: Skill = Skill { form: 1720, ..CHAIN };
+    let cancel_point = Point::new(0.83, 0.42);
+    let idle = |at, form| {
+        let mut f = frame(at, form, Some(false));
+        f.skill_id = n(0.);
+        f.ui.cancel_uv = v2(cancel_point.x, cancel_point.y);
+        f.cancel_state = snapshot::CancelState {
+            ready: flag(true), coherent: flag(true), token: f.token, hero_id: f.hero_id,
+            source: text("UIKeySkill.bCancelSkill"), base_skill_id: n(1720.), cancelled: flag(false),
+            sample_start_ns: f.skill_state.sample_start_ns, sample_end_ns: f.time_ns,
+            ..Default::default()
+        };
+        f
+    };
+    for early_press in [false, true] {
+        let (mut c, mut h) = setup(CHAIN, Some(false), 2, 0);
+        let movement = c.movementTouch_;
+        let start = START + 60_000_000;
+        key(&mut c, &mut h, start, 87, true);
+        let finger = c.skillTouch_;
+        let mut owned = idle(start + 8_000_000, CHAIN);
+        owned.skill_id = n(1723.);
+        owned.ui.active_slot = text(CHAIN.slot);
+        c.apply_snapshot(&mut h, &owned, start + 8_000_000);
+        assert!(c.skillActivationObserved_);
+        c.apply_snapshot(&mut h, &idle(start + 90_000_000, CHAIN), start + 90_000_000);
+        let cancel = start + 137_000_000;
+        key(&mut c, &mut h, cancel, 84, true);
+        key(&mut c, &mut h, cancel + 1_000_000, 84, false);
+        assert_eq!(h.active[&finger], cancel_point);
+        key(&mut c, &mut h, cancel + 2_000_000, 87, false);
+        if early_press {
+            key(&mut c, &mut h, cancel + 3_000_000, 87, true);
+        }
+        for (i, case) in ["chain", "old_cancel", "old_variant", "wrong_epoch", "other_slot", "missing_skill", "other_aim"].iter().enumerate() {
+            let at = cancel + (5 + i as i64) * 1_000_000;
+            let mut f = idle(at, NORMAL);
+            match *case {
+                "chain" => f.skill_state.buttons[0].active_skill_id = n(1723.),
+                "old_cancel" => f.cancel_state.sample_start_ns = n((cancel - 1) as f64),
+                "old_variant" => f.skill_state.sample_start_ns = n((cancel - 1) as f64),
+                "wrong_epoch" => f.cancel_state.token = text("different-match"),
+                "other_slot" => f.cancel_state.slot = text("skill:0"),
+                "missing_skill" => f.skill_id = Default::default(),
+                "other_aim" => f.ui.active_slot = text("skill:0"),
+                _ => unreachable!(),
+            }
+            c.apply_snapshot(&mut h, &f, at);
+            assert!(c.skillCancelPending_ && h.active.contains_key(&finger), "{case}");
+        }
+        let at = cancel + 22_000_000;
+        c.apply_snapshot(&mut h, &idle(at, NORMAL), at);
+        assert_eq!(h.ended, [finger]);
+        assert!(!c.skillCancelPending_ && c.cooldownCasts_.is_empty());
+        assert!(h.active.contains_key(&movement) && c.movementHeld_);
+        c.apply_snapshot(&mut h, &idle(at + 5_000_000, NORMAL), at + 5_000_000);
+        if !early_press {
+            assert_eq!(h.active.len(), 1);
+            key(&mut c, &mut h, at + 6_000_000, 87, true);
+        }
+        assert_eq!(c.activeSlot_, "skill:1");
+        assert!(c.skillKeyHeld_ && c.skillTouch_ != finger && h.active.len() == 2);
+    }
 }
 
 #[test]

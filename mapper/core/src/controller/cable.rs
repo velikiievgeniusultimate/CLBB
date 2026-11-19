@@ -1,5 +1,5 @@
 use super::host::CableReceipt;
-use super::{Button, Controller};
+use super::{snapshot, Button, Controller, SkillBehavior};
 
 // A missing impact must not keep a physical press in the queue.
 const MAX_HANDOFF_NS: i64 = 250_000_000;
@@ -79,12 +79,35 @@ impl Controller {
             && self.cableChain_.pending(self.now_)
     }
 
-    pub(super) fn cable_release_before_capture(&self) -> bool {
+    pub(super) fn holding_cable_contact(&self) -> bool {
         self.heroId_ == 17
             && self.activeSlot_ == "skill:1"
             && self.skillCastMode_ == 0
             && matches!(self.skillCooldownVariant_, 1720 | 1723)
-            && !self.skillActivationObserved_
+    }
+
+    pub(super) fn cable_release_before_capture(&self) -> bool {
+        self.holding_cable_contact() && !self.skillActivationObserved_
+    }
+
+    // The game closes the chained cable's reticle when its recast window
+    // expires. Its cancel flag can no longer acknowledge a subsequent T.
+    // Require positive evidence of the base form in the same post-MOVE frame.
+    pub(super) fn cancelled_cable_form_expired(&self, b: &Button, f: &snapshot::Frame) -> bool {
+        self.holding_cable_contact()
+            && self.skillCooldownVariant_ == 1723
+            && self.skillBehavior_ == SkillBehavior::Direction
+            && self.skillActivationObserved_
+            && b.skillId == 1720
+            && self.frameCoreSampleStartNs_ >= self.skillCancelSentNs_
+            && self.skillVariantSampleStartNs_ >= self.skillCancelSentNs_
+            && self.active_variant(b) == 1720
+            && f.skill_id.get(-1.) == 0.
+            && f.ui.active_slot.missing()
+            && f.cancel_state.slot.missing()
+            && !f.cancel_state.cancelled.get()
+            && !f.active_joystick.ready.get()
+            && !f.direction_input.ready.get()
     }
 }
 

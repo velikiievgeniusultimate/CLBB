@@ -70,6 +70,12 @@ impl Controller {
         if self.skillCancelPending_ && key == self.skillKey_ {
             if !pressed && !auto_repeat {
                 self.skillKeyHeld_ = false
+            } else if pressed && !auto_repeat && !self.skillKeyHeld_ && self.holding_cable_contact() {
+                // W went up after cancellation. This DOWN belongs to a new
+                // cable even if the old virtual finger has not lifted yet.
+                if let Some(b) = self.find_button(&self.activeSlot_).filter(|b| b.available && b.key == key).cloned() {
+                    self.queue_skill(host, &b);
+                }
             }
             return true;
         }

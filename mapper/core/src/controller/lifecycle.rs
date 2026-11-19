@@ -865,10 +865,8 @@ impl Controller {
             || !f.token_nonempty.get()
             || s.token.as_str() != self.frameEpoch_
             || s.hero_id.int() != self.heroId_
-            || s.slot.as_str() != self.activeSlot_
             || s.base_skill_id.int() != b.skillId
             || !s.cancelled.is_bool()
-            || !s.cancelled.get()
             || !s.sample_start_ns.is_number()
             || !s.sample_end_ns.is_number()
             || !start.is_finite()
@@ -881,8 +879,14 @@ impl Controller {
         {
             return;
         }
-        self.skillCancelAcknowledged_ = true;
-        self.trace(host, "cancel_acknowledged", "native_cancel_flag_after_move");
+        if s.slot.as_str() == self.activeSlot_ && s.cancelled.get() {
+            self.skillCancelAcknowledged_ = true;
+            self.trace(host, "cancel_acknowledged", "native_cancel_flag_after_move");
+        } else if self.cancelled_cable_form_expired(b, f) {
+            // The cancel MOVE was delivered. Lift only that finger at its
+            // last point, without booking a cast or discarding newer input.
+            self.finish_skill_inner(host, false, Some("cancelled_cable_form_expired"));
+        }
     }
     fn revoked_chang_e_stop(&self, s: &snapshot::CancelState) -> bool {
         if self.heroId_ != 61 || self.activeSlot_ != "skill:2"
