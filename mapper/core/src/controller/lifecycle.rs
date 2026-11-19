@@ -240,6 +240,7 @@ impl Controller {
         // its own button. Other animation locks may allow buffered skills.
         let enhancement = match (self.heroId_, b.slot.as_str(), b.skillId) {
             (1, "skill:0", 110) => Some(111),  // Miya's split arrows.
+            (22, "skill:2", 2250) => Some(2254), // Freya's Valkyrie form.
             (64, "skill:0", 6410) => Some(6417), // Aldous's enhanced attack.
             _ => None,
         };

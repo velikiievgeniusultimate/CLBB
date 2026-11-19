@@ -44,7 +44,8 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17, "skill", "skill:1") => 87,
+            (17 | 22, "skill", "skill:1") => 87,
+            (22, "skill", "skill:2") => 69,
             _ => 81,
         };
         Binding { key,
@@ -73,6 +74,7 @@ fn v2(x: f64, y: f64) -> snapshot::Vector2 {
 struct Skill { hero: i32, base: i32, form: i32, slot: &'static str }
 const KAGURA: Skill = Skill { hero: 25, base: 2510, form: 2510, slot: "skill:0" };
 const LING_WALL_W: Skill = Skill { hero: 84, base: 8420, form: 8425, slot: "skill:1" };
+const FREYA_W: Skill = Skill { hero: 22, base: 2298, form: 2298, slot: "skill:1" };
 
 fn frame(now: i64, skill: Skill, forbidden: Option<bool>) -> snapshot::Frame {
     let mut f = snapshot::Frame {
@@ -160,7 +162,7 @@ fn resource_frame(now: i64, skill: Skill, shortage: bool) -> snapshot::Frame {
 #[test]
 fn empty_energy_or_mana_discards_press_until_a_fresh_press_after_recovery() {
     let cable = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
-    for (skill, code, aim) in [(cable, 87, 2), (KAGURA, 81, 3)] {
+    for (skill, code, aim) in [(cable, 87, 2), (KAGURA, 81, 3), (FREYA_W, 87, 2)] {
         let (mut c, mut h) = setup(skill, Some(false), aim, 0);
         let movement = c.movementTouch_;
         let now = START + 60_000_000;
@@ -180,31 +182,33 @@ fn empty_energy_or_mana_discards_press_until_a_fresh_press_after_recovery() {
 }
 
 #[test]
-fn miya_cannot_repress_q_while_split_arrows_are_active() {
-    let q = Skill { hero: 1, base: 110, form: 110, slot: "skill:0" };
-    let (mut c, mut h) = setup(q, Some(false), 1, 0);
-    let movement = c.movementTouch_;
-    let now = START + 60_000_000;
-    let active = Skill { form: 111, ..q };
-    let mut f = resource_frame(now, active, false);
-    f.skill_state.buttons[0].cast_locked = flag(true);
-    c.apply_snapshot(&mut h, &f, now);
-    key(&mut c, &mut h, now + 1_000_000, 81, true);
-    assert!(c.queuedSkills_.is_empty());
-    assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
-    assert!(h.traces.iter().any(|(event, reason)| event == "cooldown_ignored" && reason == "native_locked_enhancement"));
+fn miya_and_freya_cannot_repress_a_skill_during_its_locked_enhancement() {
+    let miya = Skill { hero: 1, base: 110, form: 110, slot: "skill:0" };
+    let freya = Skill { hero: 22, base: 2250, form: 2250, slot: "skill:2" };
+    for (skill, code, form) in [(miya, 81, 111), (freya, 69, 2254)] {
+        let (mut c, mut h) = setup(skill, Some(false), 1, 0);
+        let movement = c.movementTouch_;
+        let now = START + 60_000_000;
+        let mut f = resource_frame(now, Skill { form, ..skill }, false);
+        f.skill_state.buttons[0].cast_locked = flag(true);
+        c.apply_snapshot(&mut h, &f, now);
+        key(&mut c, &mut h, now + 1_000_000, code, true);
+        assert!(c.queuedSkills_.is_empty());
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        assert!(h.traces.iter().any(|(event, reason)| event == "cooldown_ignored" && reason == "native_locked_enhancement"));
 
-    let now = now + 8_000_000;
-    c.apply_snapshot(&mut h, &resource_frame(now, q, false), now);
-    key(&mut c, &mut h, now + 1_000_000, 81, false);
-    assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
-    key(&mut c, &mut h, now + 2_000_000, 81, true);
-    assert!(h.active.len() > 1, "a fresh Q press works as soon as the enhancement expires");
+        let now = now + 8_000_000;
+        c.apply_snapshot(&mut h, &resource_frame(now, skill, false), now);
+        key(&mut c, &mut h, now + 1_000_000, code, false);
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        key(&mut c, &mut h, now + 2_000_000, code, true);
+        assert!(h.active.len() > 1, "a fresh press works as soon as the enhancement expires");
+    }
 }
 
 #[test]
 fn resource_spent_by_previous_cast_discards_queued_press_before_touch_down() {
-    let skill = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
+    let skill = FREYA_W;
     let (mut c, mut h) = setup(skill, Some(false), 2, 0);
     let movement = c.movementTouch_;
     let now = START + 60_000_000;

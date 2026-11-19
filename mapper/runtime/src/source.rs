@@ -910,12 +910,9 @@ impl UiPlan {
                 Some(a) => integer(r, consumed, a)?,
                 None => 0,
             };
+            let mut cast_locked = s::Flag::default();
             if button.kind == "skill" || button.kind == "attack" {
-                let cast_locked = button
-                    .cast_lock
-                    .and_then(|address| boolean(r, consumed, address).ok())
-                    .map(flag)
-                    .unwrap_or_default();
+                cast_locked = optional_flag(r, consumed, button.cast_lock);
                 let state_forbidden = optional_flag(r, consumed, button.state_forbid);
                 let n = variants.count as usize;
                 variants.buttons[n] = s::Variant {
@@ -942,6 +939,12 @@ impl UiPlan {
                         clint_ammo_empty(integer(r, consumed, count).ok()?, integer(r, consumed, max).ok()?)
                     }).and_then(|empty| if empty { Some(true) } else { timer_blocked })
                 } else { timer_blocked };
+                // Freya's Sacred Orbs use the button's native cast lock.
+                // The cooldown timer can be ready while the orb cost is unpaid.
+                let resource_shortage = match (hero, button.slot.as_str(), skill, variant) {
+                    (22, "skill:1", 2298, 2298) => cast_locked,
+                    _ => s::Flag::default(),
+                };
                 let n = cooldown.count as usize;
                 cooldown.buttons[n] = s::CooldownRow {
                     slot: text(&button.slot),
@@ -949,7 +952,7 @@ impl UiPlan {
                     active_skill_id: number(variant as f64),
                     ready: flag(blocked.is_some()),
                     on_cooldown: flag(blocked.unwrap_or(false)),
-                    resource_shortage: s::Flag::default(),
+                    resource_shortage,
                 };
                 cooldown.count += 1;
             }

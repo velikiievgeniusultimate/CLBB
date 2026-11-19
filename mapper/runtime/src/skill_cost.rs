@@ -226,6 +226,9 @@ impl ResourcePlan {
         }
         consumed.extend(catalog.guards.iter().cloned());
         for row in state.buttons.iter_mut().take(state.count.min(32) as usize) {
+            if row.resource_shortage.get() {
+                continue;
+            }
             let Some(button) = buttons
                 .iter()
                 .find(|b| b.slot == row.slot.as_str() && b.kind == "skill")
