@@ -895,7 +895,6 @@ impl Controller {
             || !f.token_nonempty.get()
             || s.token.as_str() != self.frameEpoch_
             || s.hero_id.int() != self.heroId_
-            || s.base_skill_id.int() != b.skillId
             || !s.cancelled.is_bool()
             || !s.sample_start_ns.is_number()
             || !s.sample_end_ns.is_number()
@@ -909,10 +908,23 @@ impl Controller {
         {
             return;
         }
-        if s.slot.as_str() == self.activeSlot_ && s.cancelled.get() {
+        let same_skill = s.base_skill_id.int() == b.skillId;
+        if same_skill && s.slot.as_str() == self.activeSlot_ && s.cancelled.get() {
             self.skillCancelAcknowledged_ = true;
             self.trace(host, "cancel_acknowledged", "native_cancel_flag_after_move");
-        } else if self.cancelled_cable_form_expired(b, f) {
+        } else if self.heroId_ == 33
+            && b.slot == "skill:2" && b.kind == "skill" && b.skillId == 3330
+            && self.skillBehavior_ == SkillBehavior::Direction
+            && !self.skillKeyHeld_ && !self.skillActivationObserved_
+            && self.touchSequence_ == 2
+            && self.coreSkill_ == 0 && self.frameActiveSlot_.is_empty()
+            && s.slot.as_str().is_empty() && !s.cancelled.get()
+            && self.frameCoreSampleStartNs_ >= self.skillCancelSentNs_ + 100_000_000
+        {
+            // DOWN and cancel MOVE were delivered, but the game never
+            // claimed this E. An idle frame cannot acknowledge its cancel.
+            self.finish_skill_inner(host, false, Some("cancelled_unclaimed_cyclops_ultimate"));
+        } else if same_skill && self.cancelled_cable_form_expired(b, f) {
             // The cancel MOVE was delivered. Lift only that finger at its
             // last point, without booking a cast or discarding newer input.
             self.finish_skill_inner(host, false, Some("cancelled_cable_form_expired"));

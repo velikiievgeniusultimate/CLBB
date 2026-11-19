@@ -45,7 +45,7 @@ impl Host for TestHost {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
             (17 | 22 | 27, "skill", "skill:1") => 87,
-            (22, "skill", "skill:2") => 69,
+            (22 | 33, "skill", "skill:2") => 69,
             (27, "skill", "skill:3") => 82,
             _ => 81,
         };
@@ -212,6 +212,53 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
         key(&mut c, &mut h, now + 2_000_000, code, true);
         assert!(h.active.len() > 1, "a fresh press works as soon as the enhancement expires");
+    }
+}
+
+#[test]
+fn cancelling_unclaimed_cyclops_ultimate_retires_only_its_finger() {
+    let skill = Skill { hero: 33, base: 3330, form: 3330, slot: "skill:2" };
+    let cross = Point::new(0.68, 0.39);
+    for case in ["unclaimed", "claimed", "foreign", "before_cancel_move", "too_soon"] {
+        let (mut c, mut h) = setup(skill, Some(false), 2, 0);
+        let movement = c.movementTouch_;
+        let at = |ms: i64| START + ms * 1_000_000;
+        key(&mut c, &mut h, at(60), 69, true);
+        let finger = c.skillTouch_;
+        let mut preview = frame(at(75), skill, Some(false));
+        preview.ui.cancel_uv = v2(cross.x, cross.y);
+        if case == "claimed" {
+            preview.ui.active_slot = text("skill:2");
+            preview.skill_id = n(3330.);
+        }
+        c.apply_snapshot(&mut h, &preview, at(75));
+
+        key(&mut c, &mut h, at(80), 84, true);
+        key(&mut c, &mut h, at(85), 84, false);
+        key(&mut c, &mut h, at(90), 69, false);
+        assert_eq!(h.active[&finger], cross, "{case}");
+
+        let now = at(if case == "too_soon" { 160 } else { 190 });
+        let mut idle = frame(now, skill, Some(false));
+        idle.ui.cancel_uv = v2(cross.x, cross.y);
+        idle.cancel_state = snapshot::CancelState {
+            ready: flag(true), coherent: flag(true), source: text("UIKeySkill.bCancelSkill"),
+            token: if case == "foreign" { text("foreign") } else { idle.token },
+            hero_id: idle.hero_id, base_skill_id: n(3300.), cancelled: flag(false),
+            sample_start_ns: n(if case == "before_cancel_move" { at(78) } else { now - 500_000 } as f64),
+            sample_end_ns: idle.time_ns,
+            ..Default::default()
+        };
+        c.apply_snapshot(&mut h, &idle, now);
+        assert_eq!(h.active.contains_key(&finger), case != "unclaimed", "{case}");
+        assert!(h.active.contains_key(&movement));
+        assert!(c.cooldownCasts_.is_empty());
+        if case == "unclaimed" {
+            assert_eq!(h.ended, [finger]);
+            assert!(!c.skillCancelPending_);
+            key(&mut c, &mut h, at(191), 69, true);
+            assert!(h.active.contains_key(&c.skillTouch_));
+        }
     }
 }
 
