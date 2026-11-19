@@ -180,6 +180,29 @@ fn empty_energy_or_mana_discards_press_until_a_fresh_press_after_recovery() {
 }
 
 #[test]
+fn miya_cannot_repress_q_while_split_arrows_are_active() {
+    let q = Skill { hero: 1, base: 110, form: 110, slot: "skill:0" };
+    let (mut c, mut h) = setup(q, Some(false), 1, 0);
+    let movement = c.movementTouch_;
+    let now = START + 60_000_000;
+    let active = Skill { form: 111, ..q };
+    let mut f = resource_frame(now, active, false);
+    f.skill_state.buttons[0].cast_locked = flag(true);
+    c.apply_snapshot(&mut h, &f, now);
+    key(&mut c, &mut h, now + 1_000_000, 81, true);
+    assert!(c.queuedSkills_.is_empty());
+    assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+    assert!(h.traces.iter().any(|(event, reason)| event == "cooldown_ignored" && reason == "native_locked_enhancement"));
+
+    let now = now + 8_000_000;
+    c.apply_snapshot(&mut h, &resource_frame(now, q, false), now);
+    key(&mut c, &mut h, now + 1_000_000, 81, false);
+    assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+    key(&mut c, &mut h, now + 2_000_000, 81, true);
+    assert!(h.active.len() > 1, "a fresh Q press works as soon as the enhancement expires");
+}
+
+#[test]
 fn resource_spent_by_previous_cast_discards_queued_press_before_touch_down() {
     let skill = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
     let (mut c, mut h) = setup(skill, Some(false), 2, 0);

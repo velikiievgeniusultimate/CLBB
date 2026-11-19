@@ -236,22 +236,28 @@ impl Controller {
             .unwrap_or(b.skillId)
     }
     pub(crate) fn cooldown_block(&self, b: &Button, minimum: i64) -> &'static str {
-        // Aldous's enhanced-Q icon is a native locked display of the pending
-        // next attack, not another cast. Starting a finger here cannot acquire
-        // a native cancel ACK. Do not generalize cast-lock rejection: other
-        // heroes deliberately buffer casts during their current animations.
-        if self.heroId_==64&&b.slot=="skill:0"&&b.skillId==6410
-            &&self.skillVariantSampleStartNs_>=minimum&&self.skillVariantSampleStartNs_>0
-            &&self.skillVariantSampleNs_>=self.skillVariantSampleStartNs_
-            &&self.skillVariantSampleNs_<=self.now_&&self.now_-self.skillVariantSampleNs_<=100_000_000 {
-            let mut rows=self.skillVariants_.iter().filter(|v|v.slot==b.slot&&v.base==b.skillId);
-            if let Some(v)=rows.next() {
-                if v.active==6417&&rows.next().is_none() {
-                    match v.cast_locked {
-                        Some(true)=>return "native_locked_enhancement",
-                        None=>return "unknown_enhancement_readiness",
-                        Some(false)=>{},
-                    }
+        // These forms display an ongoing enhancement and explicitly lock
+        // its own button. Other animation locks may allow buffered skills.
+        let enhancement = match (self.heroId_, b.slot.as_str(), b.skillId) {
+            (1, "skill:0", 110) => Some(111),  // Miya's split arrows.
+            (64, "skill:0", 6410) => Some(6417), // Aldous's enhanced attack.
+            _ => None,
+        };
+        if let Some(active) = enhancement
+            && self.skillVariantSampleStartNs_ >= minimum
+            && self.skillVariantSampleStartNs_ > 0
+            && self.skillVariantSampleNs_ >= self.skillVariantSampleStartNs_
+            && self.skillVariantSampleNs_ <= self.now_
+            && self.now_ - self.skillVariantSampleNs_ <= 100_000_000
+        {
+            let mut rows = self.skillVariants_.iter().filter(|v| v.slot == b.slot && v.base == b.skillId);
+            if let Some(v) = rows.next()
+                && v.active == active && rows.next().is_none()
+            {
+                match v.cast_locked {
+                    Some(true) => return "native_locked_enhancement",
+                    None => return "unknown_enhancement_readiness",
+                    Some(false) => {}
                 }
             }
         }
