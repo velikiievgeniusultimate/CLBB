@@ -296,6 +296,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
     // through the SAME owned slot/data. There is intentionally no aim registry
     // entry for this recast. Never apply the exception to its original dash.
     (hero==77 && slot=="skill:1" && base==7720 && active==7725)
+        // Alice's orb changes Q to an ordinary teleport to the orb's current
+        // position. The initial projectile still uses directional aiming.
+        || (hero==4 && slot=="skill:0" && base==410 && active==411)
         // Chou's follow-up follows the target selected by the initial kick;
         // its HookLine indicator does not take a second aiming direction.
         || (hero==26 && slot=="skill:2" && base==2630 && active==2632)
@@ -2706,6 +2709,17 @@ mod tests {
         for(hero,slot,base,active)in [(44,"skill:1",4420,4420),(44,"skill:1",4420,4425),
             (44,"skill:0",4420,4426),(44,"skill:2",4420,4426),(44,"skill:1",4410,4426),
             (77,"skill:1",4420,4426),(25,"skill:1",4420,4426)] {
+            assert!(!verified_button_only_form(hero,slot,base,active));
+        }
+    }
+    #[test]
+    fn alice_orb_teleport_is_plain_only_in_its_native_recast_form() {
+        assert!(verified_button_only_form(4,"skill:0",410,411));
+        for (hero,slot,base,active) in [
+            (4,"skill:0",410,410), (4,"skill:0",410,412),
+            (4,"skill:1",410,411), (4,"skill:0",420,411),
+            (5,"skill:0",410,411),
+        ] {
             assert!(!verified_button_only_form(hero,slot,base,active));
         }
     }
