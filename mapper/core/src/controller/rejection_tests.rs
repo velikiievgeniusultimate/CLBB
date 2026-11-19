@@ -44,7 +44,7 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17 | 22 | 27 | 33, "skill", "skill:1") => 87,
+            (17 | 22 | 27 | 33 | 46, "skill", "skill:1") => 87,
             (22 | 33, "skill", "skill:2") => 69,
             (27, "skill", "skill:3") => 82,
             _ => 81,
@@ -189,11 +189,14 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let sun_q = Skill { hero: 27, base: 2710, form: 2710, slot: "skill:0" };
     let sun_w = Skill { hero: 27, base: 2750, form: 2750, slot: "skill:1" };
     let sun_r = Skill { hero: 27, base: 2730, form: 2730, slot: "skill:3" };
+    let odette_q = Skill { hero: 46, base: 4610, form: 4610, slot: "skill:0" };
+    let odette_w = Skill { hero: 46, base: 4620, form: 4620, slot: "skill:1" };
     for (skill, code, form) in [
         (miya, 81, 111), (freya, 69, 2254),
         (sun_q, 81, 2710), (sun_q, 81, 2705), (sun_q, 81, 2708),
         (sun_w, 87, 2706), (sun_w, 87, 2707),
         (sun_r, 82, 2709), (sun_r, 82, 2739),
+        (odette_q, 81, 4610), (odette_w, 87, 4620),
     ] {
         let (mut c, mut h) = setup(skill, Some(false), 1, 0);
         let movement = c.movementTouch_;

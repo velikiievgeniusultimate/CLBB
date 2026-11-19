@@ -252,8 +252,8 @@ impl Controller {
             .unwrap_or(b.skillId)
     }
     pub(crate) fn cooldown_block(&self, b: &Button, minimum: i64) -> &'static str {
-        // These forms display an ongoing enhancement and explicitly lock
-        // its own button. Other animation locks may allow buffered skills.
+        // Only these verified forms treat the native cast lock as a hard
+        // input gate. Other animation locks may allow buffered skills.
         let enhancement_forms: &[i32] = match (self.heroId_, b.slot.as_str(), b.skillId) {
             (1, "skill:0", 110) => &[111],    // Miya's split arrows.
             (22, "skill:2", 2250) => &[2254], // Freya's Valkyrie form.
@@ -262,6 +262,9 @@ impl Controller {
             (27, "skill:0", 2710) => &[2710, 2705, 2708],
             (27, "skill:1", 2750) => &[2706, 2707],
             (27, "skill:3", 2730) => &[2709, 2739],
+            // Odette's song locks both base spells without changing their IDs.
+            (46, "skill:0", 4610) => &[4610],
+            (46, "skill:1", 4620) => &[4620],
             (64, "skill:0", 6410) => &[6417], // Aldous's enhanced attack.
             _ => &[],
         };
