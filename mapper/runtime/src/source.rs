@@ -301,6 +301,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         || (hero==4 && slot=="skill:0" && base==410 && active==411)
         // Karina returns to the mark from her targeted ultimate with a tap.
         || (hero==8 && slot=="skill:2" && base==830 && active==860)
+        // Bane drinks with a tap in the initial W form. The follow-up
+        // keeps its own native aiming and readiness.
+        || (hero==11 && slot=="skill:1" && base==1120 && active==1120)
         // Chou's follow-up follows the target selected by the initial kick;
         // its HookLine indicator does not take a second aiming direction.
         || (hero==26 && slot=="skill:2" && base==2630 && active==2632)
@@ -2711,6 +2714,17 @@ mod tests {
         for(hero,slot,base,active)in [(44,"skill:1",4420,4420),(44,"skill:1",4420,4425),
             (44,"skill:0",4420,4426),(44,"skill:2",4420,4426),(44,"skill:1",4410,4426),
             (77,"skill:1",4420,4426),(25,"skill:1",4420,4426)] {
+            assert!(!verified_button_only_form(hero,slot,base,active));
+        }
+    }
+    #[test]
+    fn bane_drink_is_plain_only_for_the_initial_owned_second_skill() {
+        assert!(verified_button_only_form(11,"skill:1",1120,1120));
+        for (hero,slot,base,active) in [
+            (11,"skill:1",1120,1123), (11,"skill:1",1120,0),
+            (11,"skill:0",1120,1120), (11,"skill:1",1110,1120),
+            (12,"skill:1",1120,1120),
+        ] {
             assert!(!verified_button_only_form(hero,slot,base,active));
         }
     }
