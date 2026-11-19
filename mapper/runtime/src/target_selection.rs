@@ -903,6 +903,189 @@ impl TargetPlan {
     }
 }
 
+// Rafaela exposes a different native backend from Angela's UILockHeroSkill.
+// It reports selection as an index into its expanded portrait list.
+#[derive(Clone)]
+pub(crate) struct ResurrectionPlan {
+    checks: Checks,
+    data: u64,
+    backend: u64,
+    available: u64,
+    expanded: u64,
+    index: u64,
+    icons: u64,
+    follow: GameObjectPlan,
+    button: GameObjectPlan,
+    cancel: GameObjectPlan,
+    camera: u64,
+    portrait_widget: Option<crate::unity::Widget>,
+    contacts: Option<ContactRegistryPlan>,
+    cancel_widget: Option<crate::target_cancel_geometry::CachedCancelWidgetPlan>,
+}
+
+impl ResurrectionPlan {
+    pub(crate) fn discover<M: Memory>(r: &mut Reflection<M>, ui: u64, button: u64, data: u64, show: u64, camera: u64) -> Result<Self> {
+        let mut c = Vec::new();
+        let (class, bf) = fields(r, &mut c, button)?;
+        let (data_class, df) = fields(r, &mut c, data)?;
+        let (ui_class, uf) = fields(r, &mut c, ui)?;
+        let (_, sf) = fields(r, &mut c, show)?;
+        if class != "KeySkillLockDeadHero" || data_class != "ShowSkillData" || ui_class != "UIKeySkill"
+            || int(r, &mut c, address(show, &sf, "m_ID", &[8])?.0)? != 14
+            || int(r, &mut c, address(data, &df, "m_InitSkillID", &[8])?.0)? != 1469 {
+            return Err("resurrection_frontend_unqualified".into());
+        }
+        reference(r, &mut c, address(button, &bf, "m_SkillData", &[18])?.0, data)?;
+        let comp = ptr(r, &mut c, address(show, &sf, "m_SkillComp", &[18])?.0)?;
+        if comp == 0 { return Err("resurrection_skill_owner_absent".into()); }
+        reference(r, &mut c, address(data, &df, "m_SkillComp", &[18])?.0, comp)?;
+        let button = GameObjectPlan::new(r, ptr(r, &mut c, address(button, &bf, "m_Self", &[18])?.0)?)?;
+        let logic = ptr(r, &mut c, address(ui, &uf, "m_LogicExtra", &[18])?.0)?;
+        let (name, lf) = fields(r, &mut c, logic)?;
+        if name != "KeySkillLogicExtra" { return Err("resurrection_logic_type".into()); }
+        let backend = ptr(r, &mut c, address(logic, &lf, "m_UiLockHeroSkill", &[18])?.0)?;
+        let (name, nf) = fields(r, &mut c, backend)?;
+        if name != "UILockDeadHeroTwo" || int(r, &mut c, address(backend, &nf, "configSkillID", &[8])?.0)? != 1469 {
+            return Err("resurrection_backend_type".into());
+        }
+        reference(r, &mut c, address(backend, &nf, "m_pOwner", &[18])?.0, show)?;
+        let follow = GameObjectPlan::new(r, ptr(r, &mut c, address(backend, &nf, "m_followGo", &[18])?.0)?)?;
+        let cancel = GameObjectPlan::new(r, ptr(r, &mut c, address(backend, &nf, "m_skillCancel", &[18])?.0)?)?;
+        check(r, &c)?;
+        Ok(Self { checks: c, data, backend,
+            available: address(backend, &nf, "m_IsDeadHeroEntryVisible", &[2])?.0,
+            expanded: address(backend, &nf, "m_IsExpandViewActive", &[2])?.0,
+            index: address(backend, &nf, "_selectIndex", &[8])?.0,
+            icons: address(backend, &nf, "m_DeadButtons", &[21])?.0,
+            follow, button, cancel, camera, portrait_widget: None, contacts: None, cancel_widget: None })
+    }
+
+    pub(crate) fn validate<M: Memory>(&self, r: &Reflection<M>) -> Result<()> {
+        check(r, &self.checks)
+    }
+
+    pub(crate) fn available<M: Memory>(&self, r: &Reflection<M>, c: &mut Checks) -> Result<bool> {
+        self.validate(r)?;
+        c.extend(self.checks.iter().cloned());
+        boolean(r, c, self.available)
+    }
+
+    pub(crate) fn cancel_uv<M: Memory>(&mut self, r: &mut Reflection<M>, c: &mut Checks) -> Result<[f64; 2]> {
+        self.cancel.sample(r, c)?;
+        if self.cancel_widget.is_none() {
+            self.cancel_widget = Some(crate::target_cancel_geometry::CachedCancelWidgetPlan::discover(r, self.cancel.object)?);
+        }
+        let result = self.cancel_widget.as_ref().unwrap().sample(r, c);
+        if result.is_err() { self.cancel_widget = None; }
+        result
+    }
+
+    fn selected_portrait<M: Memory>(&self, r: &mut Reflection<M>, c: &mut Checks, index: i32)
+        -> Result<(u32, u64, u64, u64)> {
+        let list = ptr(r, c, self.icons)?;
+        let (name, lf) = fields(r, c, list)?;
+        if name != "List`1" { return Err("resurrection_portrait_list_type".into()); }
+        let count = int(r, c, address(list, &lf, "_size", &[8])?.0)?;
+        if !(1..=4).contains(&count) || !(0..count).contains(&index) {
+            return Err("resurrection_portrait_index".into());
+        }
+        let array = ptr(r, c, address(list, &lf, "_items", &[29])?.0)?;
+        let header = capture(r, c, array, 32)?;
+        let class = capture(r, c, u64_at(&header, 0), 0x50)?;
+        if u64_at(&header, 24) < count as u64 || r.class(u64_at(&class, 0x40))?.name != "DisplayDeadUI" {
+            return Err("resurrection_portrait_array".into());
+        }
+        let icon = ptr(r, c, array + 32 + index as u64 * 8)?;
+        let (name, f) = fields(r, c, icon)?;
+        if name != "DisplayDeadUI" || !boolean(r, c, address(icon, &f, "m_bSelect", &[2])?.0)? {
+            return Err("resurrection_portrait_not_selected".into());
+        }
+        let id = guid(r, c, address(icon, &f, "m_uGuid", &[8,9])?)?;
+        let root = ptr(r, c, address(icon, &f, "m_Root", &[18])?.0)?;
+        let player = ptr(r, c, address(icon, &f, "m_Player", &[18])?.0)?;
+        let (_, pf) = fields(r, c, player)?;
+        if id == 0 || root == 0 || guid(r, c, address(player, &pf, "m_uGuid", &[8,9])?)? != id
+            || !boolean(r, c, address(player, &pf, "m_bDeath", &[2])?.0)? {
+            return Err("resurrection_recipient_unavailable".into());
+        }
+        let head = ptr(r, c, address(icon, &f, "m_HeadIcon", &[18])?.0)?;
+        Ok((id, icon, root, head))
+    }
+
+    pub(crate) fn sample<M: Memory>(&mut self, r: &mut Reflection<M>, frame: &s::Frame, now: i64, matrix: u64, c: &mut Checks) -> Result<s::SelectionInput> {
+        let available = self.available(r, c)?;
+        let expanded = boolean(r, c, self.expanded)?;
+        let mut packet = s::SelectionInput {
+            kind: number(2.), ready: flag(true), coherent: flag(true), source: text(SOURCE),
+            token: frame.token, slot: text("skill:3"), hero_id: frame.hero_id,
+            base_skill_id: number(1469.), active_skill_id: number(1469.), native_skill_id: frame.skill_id,
+            owner_id: self.data, backend_owner_id: self.backend,
+            sample_start_ns: number(now as f64), sample_end_ns: number(now as f64),
+            panel_visible: flag(expanded), backend_state: number(if expanded {4.} else {3.}),
+            input_ready: flag(false), reason: text("resurrection_panel_closed"), ..Default::default()
+        };
+        if !expanded {
+            packet.contact_present = flag(false);
+            packet.has_drag = flag(false);
+            return Ok(packet);
+        }
+        self.follow.sample(r, c)?;
+        self.button.sample(r, c)?;
+        self.cancel.sample(r, c)?;
+        if self.contacts.as_ref().is_some_and(|p| p.validate(r).is_err()) {
+            self.contacts = None;
+        }
+        if self.contacts.is_none() {
+            let camera_class = target_contacts::discover_ui_camera_class(r, self.camera)?;
+            self.contacts = Some(ContactRegistryPlan::discover(r, camera_class)?);
+        }
+        let mut owners = vec![self.follow.object];
+        if self.button.object != self.follow.object { owners.push(self.button.object); }
+        let contact = self.contacts.as_ref().unwrap().sample_owned(r, &owners, self.cancel.object, c)?;
+        packet.contact_present = flag(contact.present);
+        packet.has_drag = flag(contact.present && contact.drag_started);
+        packet.reason = text("resurrection_contact_unavailable");
+        if !contact.present { return Ok(packet); }
+        packet.native_contact_id = number(contact.native_id as f64);
+        packet.contact_owner_id = contact.contact_owner_id;
+        packet.raw_touch_xyz = v3([contact.raw_pos[0], contact.raw_pos[1], 0.]);
+        packet.input_ready = flag(contact.press_started && contact.drag_started);
+        let index = int(r, c, self.index)?;
+        let cancelled = index == -1 && contact.cancel_hit;
+        packet.target_cancel_hit = flag(cancelled);
+        packet.native_cancel = flag(cancelled);
+        if index == -1 || !available || cancelled {
+            packet.target_guid = number(0.);
+            packet.target_valid = flag(false);
+            packet.reason = text("resurrection_no_recipient");
+        } else {
+            let (id, icon, root, head) = self.selected_portrait(r, c, index)?;
+            // Native radial highlight can stay on the nearest sector well
+            // beyond the portrait. Only accept an actual hit on the portrait.
+            if self.portrait_widget.as_ref().is_none_or(|w| w.object != head) {
+                self.portrait_widget = Some(crate::unity::Widget::new(r, head)?);
+            }
+            let widget = self.portrait_widget.as_mut().unwrap();
+            widget.refresh_path(r)?;
+            let camera = capture(r, c, matrix, 128)?;
+            let (view, projection) = crate::unity::matrices(&camera)?;
+            let (center, radius) = crate::source::widget_geometry(r, c, widget, &view, &projection)?;
+            let [width,height] = frame.ui.resolution_px.values.map(|v| v.value);
+            let cursor = [contact.raw_pos[0] / (width - 1.), (height - contact.raw_pos[1]) / (height - 1.)];
+            let inside = (0..2).map(|i| ((cursor[i] - center[i]) / radius[i]).powi(2)).sum::<f64>() <= 1.;
+            packet.target_valid = flag(inside);
+            packet.target_guid = number(if inside {id as f64} else {0.});
+            if inside {
+                packet.target_owner_id = icon;
+                packet.target_self_id = root;
+            }
+            packet.native_unselectable = flag(false);
+            packet.reason = text(if inside {"resurrection_target_ready"} else {"resurrection_outside_portrait"});
+        }
+        Ok(packet)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

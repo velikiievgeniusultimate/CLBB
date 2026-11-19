@@ -107,7 +107,7 @@ fn path_position<M: Memory>(
     math::trs_chain(&capture_path(r, checks, path)?, None)
         .ok_or("Invalid native transform values".into())
 }
-fn widget_geometry<M: Memory>(
+pub(crate) fn widget_geometry<M: Memory>(
     r: &Reflection<M>,
     checks: &mut Checks,
     widget: &Widget,
@@ -238,6 +238,7 @@ pub struct ButtonPlan {
     choice_touch_held: bool,
     target_family: bool,
     target: Option<crate::target_selection::TargetPlan>,
+    resurrection: Option<crate::target_selection::ResurrectionPlan>,
     target_retry: i64,
     pub timer: Option<u64>,
     pub widget: Option<Widget>,
@@ -666,7 +667,7 @@ impl UiPlan {
                 charge,
                 charge_retry: 0,
                 choice_family,choice,choice_retry:0,choice_touch:None,choice_touch_retry:0,choice_touch_attempts:0,choice_touch_held:false,
-                target_family,target:None,target_retry:0,
+                target_family,target:None,resurrection:None,target_retry:0,
                 timer,
                 widget: None,
                 johnson_interactive,
@@ -1654,7 +1655,7 @@ impl<M: Memory> Source<M> {
                     }
                 }
             }
-            if button.target_family {
+            if button.target_family || (hero==14 && button.slot=="skill:3") {
                 retain_choice_family(&ui,&skill_state,&button.slot,&mut control_types);
             }
         }
@@ -1672,7 +1673,8 @@ impl<M: Memory> Source<M> {
             }
         }
         for entry in ui.buttons.iter().take(ui.button_count.min(32) as usize).filter(|b|b.kind.as_str()=="skill" || b.kind.as_str()=="extra") {
-            let choice_family=plan.ui.buttons.iter().any(|b|b.slot==entry.slot.as_str()&&(b.choice_family||b.target_family));
+            let choice_family=(hero==14 && entry.slot.as_str()=="skill:3" && entry.skill_id.int()==1469)
+                || plan.ui.buttons.iter().any(|b|b.slot==entry.slot.as_str()&&(b.choice_family||b.target_family));
             if choice_family
                 &&choice_selector_phase(&ui,&skill_state,entry.slot.as_str())!=Some(false){continue;}
             let id=skill_state.buttons.iter().take(skill_state.count.min(32) as usize)
@@ -1943,10 +1945,50 @@ impl<M: Memory> Source<M> {
                 frame.selection_input=target;
             }
         }
+        if hero == 14 {
+            if let Some(button) = plan.ui.buttons.iter_mut().find(|b| b.slot == "skill:3") {
+                if button.resurrection.as_ref().is_some_and(|selector| selector.validate(r).is_err()) {
+                    button.resurrection = None;
+                    button.target_retry = 0;
+                }
+                if button.resurrection.is_none() && now >= button.target_retry {
+                    button.resurrection = crate::target_selection::ResurrectionPlan::discover(
+                        r, plan.ui.object, button.object, button.data, plan.match_owners[2], plan.ui.camera_object,
+                    ).ok();
+                    button.target_retry = now.saturating_add(20_000_000);
+                }
+                let start = consumed.len();
+                let availability = button.resurrection.as_ref().and_then(|selector| selector.available(r, &mut consumed).ok());
+                if availability.is_none() { consumed.truncate(start); }
+                let state = &mut frame.ui.cooldown_state;
+                if let Some(row) = state.buttons.iter_mut().take(state.count.min(32) as usize)
+                    .find(|b| b.slot.as_str() == "skill:3" && b.base_skill_id.int()==1469 && b.active_skill_id.int()==1469)
+                {
+                    match availability {
+                        Some(true) => (),
+                        Some(false) => { row.ready = flag(true); row.on_cooldown = flag(true); }
+                        None => { row.ready = flag(false); }
+                    }
+                }
+                if let Some(selector) = button.resurrection.as_mut() {
+                    let start = consumed.len();
+                    match selector.sample(r, &frame, now, plan.ui.matrix, &mut consumed) {
+                        Ok(packet) => frame.selection_input = packet,
+                        Err(_) => consumed.truncate(start),
+                    }
+                }
+            }
+        }
         let mut target_cancel_error=None;
         let target_cancel=if frame.selection_input.kind.int()==2&&frame.selection_input.ready.get()&&frame.selection_input.coherent.get()&&frame.selection_input.panel_visible.get() {
-            plan.ui.buttons.iter_mut().find(|b|b.target_family&&b.slot==frame.selection_input.slot.as_str()).and_then(|b|b.target.as_mut()).and_then(|target| {
-                let checkpoint=consumed.len();match target.cancel_uv(r,now,&mut consumed) {
+            plan.ui.buttons.iter_mut().find(|b|b.slot==frame.selection_input.slot.as_str()).and_then(|button| {
+                let checkpoint=consumed.len();
+                let geometry = if let Some(target)=button.resurrection.as_mut() {
+                    target.cancel_uv(r,&mut consumed)
+                } else {
+                    button.target.as_mut()?.cancel_uv(r,now,&mut consumed)
+                };
+                match geometry {
                     Ok(point)=>Some(point),Err(error)=>{consumed.truncate(checkpoint);target_cancel_error=Some(error);None}
                 }
             })
