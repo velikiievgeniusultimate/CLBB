@@ -107,7 +107,7 @@ fn path_position<M: Memory>(
     math::trs_chain(&capture_path(r, checks, path)?, None)
         .ok_or("Invalid native transform values".into())
 }
-pub(crate) fn widget_geometry<M: Memory>(
+fn widget_geometry<M: Memory>(
     r: &Reflection<M>,
     checks: &mut Checks,
     widget: &Widget,
@@ -1972,7 +1972,7 @@ impl<M: Memory> Source<M> {
                 }
                 if let Some(selector) = button.resurrection.as_mut() {
                     let start = consumed.len();
-                    match selector.sample(r, &frame, now, plan.ui.matrix, &mut consumed) {
+                    match selector.sample(r, &frame, now, &mut consumed) {
                         Ok(packet) => frame.selection_input = packet,
                         Err(_) => consumed.truncate(start),
                     }

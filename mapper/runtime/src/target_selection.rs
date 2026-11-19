@@ -918,7 +918,6 @@ pub(crate) struct ResurrectionPlan {
     button: GameObjectPlan,
     cancel: GameObjectPlan,
     camera: u64,
-    portrait_widget: Option<crate::unity::Widget>,
     contacts: Option<ContactRegistryPlan>,
     cancel_widget: Option<crate::target_cancel_geometry::CachedCancelWidgetPlan>,
 }
@@ -957,7 +956,7 @@ impl ResurrectionPlan {
             expanded: address(backend, &nf, "m_IsExpandViewActive", &[2])?.0,
             index: address(backend, &nf, "_selectIndex", &[8])?.0,
             icons: address(backend, &nf, "m_DeadButtons", &[21])?.0,
-            follow, button, cancel, camera, portrait_widget: None, contacts: None, cancel_widget: None })
+            follow, button, cancel, camera, contacts: None, cancel_widget: None })
     }
 
     pub(crate) fn validate<M: Memory>(&self, r: &Reflection<M>) -> Result<()> {
@@ -981,7 +980,7 @@ impl ResurrectionPlan {
     }
 
     fn selected_portrait<M: Memory>(&self, r: &mut Reflection<M>, c: &mut Checks, index: i32)
-        -> Result<(u32, u64, u64, u64)> {
+        -> Result<(u32, u64, u64)> {
         let list = ptr(r, c, self.icons)?;
         let (name, lf) = fields(r, c, list)?;
         if name != "List`1" { return Err("resurrection_portrait_list_type".into()); }
@@ -1008,11 +1007,10 @@ impl ResurrectionPlan {
             || !boolean(r, c, address(player, &pf, "m_bDeath", &[2])?.0)? {
             return Err("resurrection_recipient_unavailable".into());
         }
-        let head = ptr(r, c, address(icon, &f, "m_HeadIcon", &[18])?.0)?;
-        Ok((id, icon, root, head))
+        Ok((id, icon, root))
     }
 
-    pub(crate) fn sample<M: Memory>(&mut self, r: &mut Reflection<M>, frame: &s::Frame, now: i64, matrix: u64, c: &mut Checks) -> Result<s::SelectionInput> {
+    pub(crate) fn sample<M: Memory>(&mut self, r: &mut Reflection<M>, frame: &s::Frame, now: i64, c: &mut Checks) -> Result<s::SelectionInput> {
         let available = self.available(r, c)?;
         let expanded = boolean(r, c, self.expanded)?;
         let mut packet = s::SelectionInput {
@@ -1059,28 +1057,15 @@ impl ResurrectionPlan {
             packet.target_valid = flag(false);
             packet.reason = text("resurrection_no_recipient");
         } else {
-            let (id, icon, root, head) = self.selected_portrait(r, c, index)?;
-            // Native radial highlight can stay on the nearest sector well
-            // beyond the portrait. Only accept an actual hit on the portrait.
-            if self.portrait_widget.as_ref().is_none_or(|w| w.object != head) {
-                self.portrait_widget = Some(crate::unity::Widget::new(r, head)?);
-            }
-            let widget = self.portrait_widget.as_mut().unwrap();
-            widget.refresh_path(r)?;
-            let camera = capture(r, c, matrix, 128)?;
-            let (view, projection) = crate::unity::matrices(&camera)?;
-            let (center, radius) = crate::source::widget_geometry(r, c, widget, &view, &projection)?;
-            let [width,height] = frame.ui.resolution_px.values.map(|v| v.value);
-            let cursor = [contact.raw_pos[0] / (width - 1.), (height - contact.raw_pos[1]) / (height - 1.)];
-            let inside = (0..2).map(|i| ((cursor[i] - center[i]) / radius[i]).powi(2)).sum::<f64>() <= 1.;
-            packet.target_valid = flag(inside);
-            packet.target_guid = number(if inside {id as f64} else {0.});
-            if inside {
-                packet.target_owner_id = icon;
-                packet.target_self_id = root;
-            }
+            // The native selector owns the full highlighted sector, not just
+            // the portrait image drawn inside it.
+            let (id, icon, root) = self.selected_portrait(r, c, index)?;
+            packet.target_guid = number(id as f64);
+            packet.target_owner_id = icon;
+            packet.target_self_id = root;
+            packet.target_valid = flag(true);
             packet.native_unselectable = flag(false);
-            packet.reason = text(if inside {"resurrection_target_ready"} else {"resurrection_outside_portrait"});
+            packet.reason = text("resurrection_target_ready");
         }
         Ok(packet)
     }
