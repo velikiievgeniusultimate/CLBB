@@ -124,16 +124,6 @@ impl Controller {
         }
         if self.skillBehavior_ == SkillBehavior::Direction {
             self.skillExpectedAim_ = true;
-            if self.fannyCableBuffered_ && self.pendingRelease_ {
-                if self.releaseRequested_.elapsed(self.now_) >= 220 {
-                    self.finish_skill(host, true);
-                    self.trace(host, "skill_queue", "fanny_cable_native_aim_timeout");
-                    return;
-                }
-                if !self.directionGeometryFresh_ {
-                    return;
-                }
-            }
             if let Some(p) = self.direction_point(host) {
                 if !self.send_direction(host, p) {
                     self.finish_skill(host, true);
@@ -145,7 +135,7 @@ impl Controller {
                 // Geometry computes the final command; successful ordered MOVE
                 // delivery is followed by UP, without awaiting another visual
                 // receipt that the game may only produce after that UP.
-                if self.pendingRelease_ && self.skillCastMode_ == 0 && !self.skillKeyHeld_ && !self.fannyCableBuffered_ {
+                if self.pendingRelease_ && self.skillCastMode_ == 0 && !self.skillKeyHeld_ {
                     self.trace(host, "direction_goal", "physical_up_after_final_direction_move");
                     self.finish_skill(host, false);
                     return;

@@ -88,7 +88,6 @@ pub struct QueuedSkill {
     pub key: i32,
     pub held: bool,
     pub requestedNs: i64,
-    pub fannyCableBuffered: bool,
     pub down: SkillIntent,
     pub up: SkillIntent,
 }
@@ -200,7 +199,6 @@ pub struct Controller {
     pub(crate) skillKeyHeld_: bool,
     pub(crate) skillExpectedAim_: bool,
     pub(crate) skillActivationObserved_: bool,
-    pub(crate) fannyCableBuffered_: bool,
     pub(crate) skillStateForbiddenAtDown_: bool,
     pub(crate) chargeGesture_: Option<charge_lifecycle::ChargeGesture>,
     pub(crate) pendingRelease_: bool,
