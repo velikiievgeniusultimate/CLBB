@@ -94,6 +94,7 @@ impl Controller {
                 || self.skillBehavior_ == SkillBehavior::AwaitVariant
             {
                 if !self.pendingRelease_ {
+                    self.cableAwaitingAim_ = self.cable_release_before_capture();
                     self.freeze_direction_intent(host)
                 }
                 self.tick(host);
@@ -196,6 +197,7 @@ impl Controller {
                     if self.skillTouch_ >= 0
                         || !self.queuedSkills_.is_empty()
                         || self.waiting_for_kagura_w(&requested)
+                        || self.waiting_for_cable(&requested)
                     {
                         self.queue_skill(host, &requested)
                     } else {

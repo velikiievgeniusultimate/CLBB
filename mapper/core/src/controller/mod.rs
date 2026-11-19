@@ -14,6 +14,7 @@ mod auxiliary;
 mod auxiliary_cancel;
 mod lifecycle;
 mod charge_lifecycle;
+mod cable;
 mod movement;
 mod native_aim;
 mod selection;
@@ -201,6 +202,8 @@ pub struct Controller {
     pub(crate) skillActivationObserved_: bool,
     pub(crate) skillStateForbiddenAtDown_: bool,
     pub(crate) chargeGesture_: Option<charge_lifecycle::ChargeGesture>,
+    cableChain_: cable::CableChain,
+    cableAwaitingAim_: bool,
     pub(crate) pendingRelease_: bool,
     pub(crate) pendingWorldValid_: bool,
     pub(crate) movementReady_: bool,

@@ -13,7 +13,7 @@ use clbb_moba_core::{
     controller::{
         Button, Controller,
         api::Input,
-        host::{Binding, Host, Timer},
+        host::{Binding, CableReceipt, Host, Timer},
     },
 };
 const BATTLE_SPELLS: [i32; 12] = [
@@ -142,6 +142,7 @@ impl Worker {
                                     "clock_ms":sample.game_clock_ms,"epoch":f.token.as_str(),"revision":sample.plan_revision,
                                     "linked":sample.linked,"cancel_uv_valid":f.ui.cancel_uv.valid(),"cancel_uv":f.ui.cancel_uv.values.map(|v|v.value),
                                     "control_types":sample.control_types,"control_holds":sample.control_holds,
+                                    "cable":sample.cable.map(|c| (c.uses,c.impact)),
                                     "buttons":f.ui.buttons.iter().take(f.ui.button_count.min(32) as usize).map(|b|serde_json::json!({"slot":b.slot.as_str(),"kind":b.kind.as_str(),"skill":b.skill_id.int(),"active":b.active.get(),"press_valid":b.press_uv.valid(),"press":b.press_uv.values.map(|v|v.value)})).collect::<Vec<_>>(),
                                     "hero":f.hero_id.int(),"hero_render":f.hero_render_xyz.values.map(|v|v.value),"hero_logic":sample.logic,"direction_visual":sample.direction_visual,"direction_origin":sample.direction_origin,"direction_source":f.direction_input.source.as_str(),
                                     "skill":f.skill_id.int(),"slot":f.ui.active_slot.as_str(),"resolution":f.ui.resolution_px.values.map(|v|v.value),"native_source":f.logical.source.as_str(),"view":f.view_matrix.values.map(|v|v.value),"projection":sample.projection,
@@ -441,6 +442,7 @@ impl Adapter {
     }
 }
 impl Host for Adapter {
+    fn cable_receipt(&self) -> Option<CableReceipt> { self.fresh()?.cable }
     fn clock_ns(&mut self) -> Option<i64> {
         Some(now_ns())
     }
@@ -1570,6 +1572,7 @@ mod tests {
         frame.sample_duration_ms = number(0.001);
         frame.ui.time_ns = frame.time_ns;
         Sample {
+            cable: None,
             plan_revision: 1, game_clock_ms: 1, match_owners: [1, 2, 3, 4], frame,
             projection: [0.; 16], logic: [0.; 2], indicator: 0,
             aim: None, direction_visual: None, direction_origin:None,

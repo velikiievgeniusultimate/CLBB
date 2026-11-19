@@ -159,6 +159,33 @@ fn forbidden_unclaimed_range_releases_on_physical_up_for_kagura_and_ling_wall_fo
 }
 
 #[test]
+fn early_fanny_release_waits_at_w_even_during_movement_pointer_flushes() {
+    let cable = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
+    let (mut c, mut h) = setup(cable, Some(false), 2, 0);
+    let movement = c.movementTouch_;
+    key(&mut c, &mut h, START + 60_000_000, 81, true);
+    let finger = c.skillTouch_;
+    let press = h.active[&finger];
+    key(&mut c, &mut h, START + 61_000_000, 81, false);
+    // This callback used to move an unopened W onto Q before the game
+    // recognized either button. Keep the independent movement contact alive.
+    for ms in [2, 6, 11, 20] {
+        let at = START + (60 + ms) * 1_000_000;
+        c.apply_input(&mut h, Input::Pointer(Point::new(0.1, 0.9)), at);
+        c.apply_input(&mut h, Input::Timer(Timer::Pointer), at);
+        c.apply_snapshot(&mut h, &frame(at, cable, Some(false)), at);
+        assert_eq!(h.active.get(&finger), Some(&press));
+        assert!(c.pendingRelease_ && h.active.contains_key(&movement));
+    }
+    let now = START + 165_000_000;
+    c.apply_snapshot(&mut h, &frame(now, cable, Some(false)), now);
+    assert_eq!(h.ended, [finger]);
+    assert!(c.movementHeld_ && h.active.contains_key(&movement));
+    assert!(c.cooldownCasts_.is_empty());
+    assert!(h.traces.iter().any(|(_, reason)| reason == "cable_capture_unavailable_end_at_last_point"));
+}
+
+#[test]
 fn recorded_q_timings_do_not_lock_out_the_later_unblocked_press() {
     let (mut c, mut h) = setup(KAGURA, Some(true), 3, 0);
     let down = START + 60_000_000;

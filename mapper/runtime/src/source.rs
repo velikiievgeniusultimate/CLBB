@@ -6,6 +6,7 @@ use crate::{
     unity::{self, Path, Widget},
 };
 use clbb_moba_core::controller::snapshot as s;
+use clbb_moba_core::controller::host::CableReceipt;
 pub fn number(value: f64) -> s::Number {
     s::Number { value, kind: 1 }
 }
@@ -1035,22 +1036,45 @@ fn read_cooldown<M: Memory>(
 /// Observe a result's skill-component owner; UI result context alone is not proof.
 /// The caller must reread all returned consumed bytes before accepting its receipt.
 pub fn skill_result_is_local<M:Memory>(r:&mut Reflection<M>,show:u64,data:u64,consumed:&mut Checks)->Result<bool> {
-    let raw=capture(r,consumed,data,8)?;let class=r.class(u64_at(&raw,0))?;
+    let raw=capture(r,consumed,data,8)?;let class=r.cached_class(u64_at(&raw,0))?;
     if class.name!="ShowSkillData" {return Err("Unexpected skill result owner type".into());}
     let field=class.fields.get("m_SkillComp").ok_or("Skill result owner field absent")?;
     if field.is_static || field.kind!=18 || field.offset>1048576 {return Err("Skill result owner link type changed".into());}
-    let result_owner=capture(r,consumed,data+field.offset,8)?;
+    let owner_at=data+field.offset;
+    let result_owner=capture(r,consumed,owner_at,8)?;
     let at=r.field(show,"m_SkillComp")?;
     let local_owner=capture(r,consumed,at,8)?;
     let owner=u64_at(&result_owner,0);let local=u64_at(&local_owner,0);
     if local==0 || owner==0 {return Ok(false);}
     let raw=capture(r,consumed,local,8)?;
-    if r.class(u64_at(&raw,0))?.name!="ShowSkillComp" {return Err("Unexpected local skill component".into());}
+    if r.class_name(u64_at(&raw,0))?!="ShowSkillComp" {return Err("Unexpected local skill component".into());}
     Ok(owner==local)
+}
+
+/// An optional observation. A foreign or changing effect cannot authorize a
+/// chained W or invalidate the rest of the local player's input snapshot.
+fn cable_receipt<M: Memory>(r: &mut Reflection<M>, show: u64, actor: u64) -> Result<CableReceipt> {
+    let mut checks = Vec::new();
+    let count_at = covered_instance_field(r, &mut checks, actor, "m_iSecondSkillUseCount", 8)?;
+    let uses = u32::try_from(integer(r, &mut checks, count_at)?).map_err(|_| "Invalid cable count")?;
+    let link = covered_instance_field(r, &mut checks, show, "m_SkillCompCurrentSkillData", 18)?;
+    let data = pointer(r, &mut checks, link)?;
+    let mut impact = None;
+    if data != 0 {
+        let base = covered_instance_field(r, &mut checks, data, "m_InitSkillID", 8)?;
+        if integer(r, &mut checks, base)? == 1722 && skill_result_is_local(r, show, data, &mut checks)? {
+            let at = covered_instance_field(r, &mut checks, data, "m_SkillGuid", 9)?;
+            let guid = integer(r, &mut checks, at)? as u32;
+            impact = (guid != 0).then_some(guid);
+        }
+    }
+    check(r, &checks)?;
+    Ok(CableReceipt { uses, impact })
 }
 
 #[derive(Clone)]
 pub struct Sample {
+    pub cable: Option<CableReceipt>,
     pub plan_revision: u64,
     /// Battle clock consumed and verified in the same bracket as the geometry.
     /// Repeated reads of one game update must not be counted as new updates.
@@ -2080,6 +2104,9 @@ impl<M: Memory> Source<M> {
             if observed.is_none(){consumed.truncate(checkpoint);}
             observed
         } else {None};
+        let cable = if hero == 17 {
+            cable_receipt(r, plan.match_owners[2], plan.match_owners[3]).ok()
+        } else { None };
         check(r, &consumed)
             .map_err(|_| "Camera/actor/UI/native feedback changed during sample".to_string())?;
         let end = now.saturating_add(phase.elapsed().as_nanos().min(i64::MAX as u128) as i64);
@@ -2089,6 +2116,7 @@ impl<M: Memory> Source<M> {
         stamp_frame(&mut frame, now, end);
         self.match_epoch = next_epoch;
         Ok(Sample {
+            cable,
             plan_revision: self.generation,
             game_clock_ms: clock,
             match_owners: plan.match_owners,
@@ -2113,7 +2141,7 @@ fn covered_instance_field<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks,
     if object == 0 { return Err("Covered direction object absent".into()); }
     let mut class = u64_at(&capture(r, checks, object, 8)?, 0);
     for _ in 0..24 {
-        let metadata = r.class(class)?;
+        let metadata = r.cached_class(class)?;
         if let Some(field) = metadata.fields.get(name) {
             if field.is_static || field.kind != kind || field.offset > 1_048_576 {
                 return Err("Covered direction field type changed".into());

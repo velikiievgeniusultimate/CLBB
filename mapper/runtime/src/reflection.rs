@@ -112,7 +112,7 @@ impl<M: Memory> Reflection<M> {
     }
     /// Borrow immutable reflected metadata without copying its whole field map.
     /// Callers must still obtain a current class pointer from the live owner.
-    fn cached_class(&mut self, address: u64) -> Result<&Class> {
+    pub(crate) fn cached_class(&mut self, address: u64) -> Result<&Class> {
         if !self.classes.contains_key(&address) {
             self.class(address)?;
         }

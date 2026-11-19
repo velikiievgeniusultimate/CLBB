@@ -124,6 +124,15 @@ impl Controller {
         }
         if self.skillBehavior_ == SkillBehavior::Direction {
             self.skillExpectedAim_ = true;
+            if self.cableAwaitingAim_ && self.releaseRequested_.elapsed(self.now_) >= 100 {
+                if !self.directionGeometryFresh_ {
+                    self.end_unconfirmed_cable(host);
+                    return;
+                }
+                // Once W owns the contact, missing angular feedback can use
+                // the ordinary ordered MOVE and UP.
+                self.cableAwaitingAim_ = false;
+            }
             if let Some(p) = self.direction_point(host) {
                 if !self.send_direction(host, p) {
                     self.finish_skill(host, true);
@@ -135,7 +144,7 @@ impl Controller {
                 // Geometry computes the final command; successful ordered MOVE
                 // delivery is followed by UP, without awaiting another visual
                 // receipt that the game may only produce after that UP.
-                if self.pendingRelease_ && self.skillCastMode_ == 0 && !self.skillKeyHeld_ {
+                if self.pendingRelease_ && self.skillCastMode_ == 0 && !self.skillKeyHeld_ && !self.cableAwaitingAim_ {
                     self.trace(host, "direction_goal", "physical_up_after_final_direction_move");
                     self.finish_skill(host, false);
                     return;

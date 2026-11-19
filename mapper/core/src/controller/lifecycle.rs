@@ -456,7 +456,8 @@ impl Controller {
             ..QueuedSkill::default()
         };
         self.queuedSkills_.push(request);
-        let reason = if self.waiting_for_kagura_w(b) { "queued_for_kagura_w_unlock" } else { "queued_after_active_gesture" };
+        let reason = if self.waiting_for_cable(b) { "queued_for_previous_cable_impact" }
+            else if self.waiting_for_kagura_w(b) { "queued_for_kagura_w_unlock" } else { "queued_after_active_gesture" };
         self.trace(host, "skill_queue", reason);
         if self.skillTouch_ >= 0
             && !self.skillCancelPending_
@@ -490,7 +491,7 @@ impl Controller {
             if !b.available {
                 return;
             }
-            if self.waiting_for_kagura_w(&b) {
+            if self.waiting_for_kagura_w(&b) || self.waiting_for_cable(&b) {
                 return;
             }
             if self.classify_skill(&b) == SkillBehavior::AwaitVariant {
@@ -540,6 +541,7 @@ impl Controller {
                 self.apply_skill_intent(host, q.down)
             } else if !q.held {
                 Self::drop_intent(host, &q.down);
+                self.cableAwaitingAim_ = self.cable_release_before_capture();
                 self.apply_skill_intent(host, q.up)
             } else {
                 Self::drop_intent(host, &q.down);
@@ -688,24 +690,28 @@ impl Controller {
         true
     }
     pub(crate) fn finish_skill(&mut self, host: &mut impl Host, cancel: bool) {
-        self.finish_skill_inner(host, cancel, false);
+        self.finish_skill_inner(host, cancel, None);
     }
     pub(crate) fn finish_auto_completed_charge(&mut self, host: &mut impl Host) {
-        self.finish_skill_inner(host, false, true);
+        self.finish_skill_inner(host, false, Some("auto_completed"));
     }
     pub(crate) fn finish_auto_completed_selection(&mut self, host: &mut impl Host) {
-        self.finish_skill_inner(host, false, true);
+        self.finish_skill_inner(host, false, Some("auto_completed"));
     }
-    fn finish_skill_inner(&mut self, host: &mut impl Host, cancel: bool, auto_completed: bool) {
+    pub(super) fn end_unconfirmed_cable(&mut self, host: &mut impl Host) {
+        self.finish_skill_inner(host, false, Some("cable_capture_unavailable_end_at_last_point"));
+    }
+    fn finish_skill_inner(&mut self, host: &mut impl Host, cancel: bool, end_at_last_point: Option<&str>) {
+        let cast = !cancel && end_at_last_point.is_none();
         host.timer(Timer::Tap, None);
         if cancel && !(self.skillCancelPending_ && self.skillCancelAcknowledged_) {
             self.clear_queued_skills(host, "predecessor_aborted")
         }
-        if cancel || auto_completed {
+        if !cast {
             self.skillEchoPending_ = false
         }
         if self.skillTouch_ >= 0 {
-            if !cancel && !auto_completed {
+            if cast {
                 let finishing = self.skillTouch_;
                 self.flush_pointer(host);
                 if self.skillTouch_ != finishing
@@ -714,7 +720,7 @@ impl Controller {
                     return;
                 }
             }
-            self.trace(host, "release", if auto_completed { "auto_completed" } else if cancel { "cancel" }
+            self.trace(host, "release", if let Some(reason) = end_at_last_point { reason } else if cancel { "cancel" }
                 else if self.skillBehavior_==SkillBehavior::Selection {"selection_up_after_ui_ack"} else { "cast" });
             if cancel && !self.skillCancelPending_ {
                 if let Some(point) = self.selection_cancel_point() {
@@ -724,8 +730,13 @@ impl Controller {
             host.end(self.skillTouch_, self.skillPoint_);
             self.sync_clock(host);
             self.lastSkillEndNs_ = self.now_;
+            if self.heroId_ == 17 {
+                let chained = cast && self.activeSlot_ == "skill:1"
+                    && self.skillCastMode_ == 0 && self.skillCooldownVariant_ == 1723;
+                self.cableChain_.finish(chained, self.now_);
+            }
             if self.heroId_ == 25 && self.activeSlot_ == "skill:0" {
-                self.kaguraThrow_ = (!cancel && !auto_completed
+                self.kaguraThrow_ = (cast
                     && self.skillCooldownVariant_ == 2510
                     && self.kagura_w_cast_lock().is_some())
                 .then_some(KaguraThrowTransition {
@@ -733,12 +744,13 @@ impl Controller {
                     observed_lock: false,
                 });
             }
-            if !cancel && !auto_completed {
+            if cast {
                 let slot = self.activeSlot_.clone();
                 self.mark_cooldown_cast(&slot, self.skillCooldownVariant_)
             }
         }
         self.skillCooldownVariant_ = 0;
+        self.cableAwaitingAim_ = false;
         self.selection_=Default::default();
         self.chargeGesture_ = None;
         self.skillActivationObserved_ = false;
@@ -967,6 +979,7 @@ impl Controller {
         self.cooldownIgnoredKeys_.clear();
         self.finish_skill(host, true);
         self.kaguraThrow_ = None;
+        self.cableChain_ = Default::default();
         self.finish_movement(host, "");
         self.finish_manual(host);
         self.finish_auxiliary_taps(host);
@@ -980,6 +993,7 @@ impl Controller {
         let was = self.ready_;
         self.finish_skill(host, true);
         self.kaguraThrow_ = None;
+        self.cableChain_ = Default::default();
         self.finish_movement(host, "");
         self.finish_auxiliary_taps(host);
         self.finish_auxiliary_holds(host);

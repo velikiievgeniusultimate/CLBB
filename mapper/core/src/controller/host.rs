@@ -8,9 +8,15 @@ pub enum Timer {
     Movement,
     Auxiliary,
 }
+#[derive(Clone, Copy, Debug)]
+pub struct CableReceipt {
+    pub uses: u32,
+    pub impact: Option<u32>,
+}
 /// Qt supplies transport and camera projection only. Implementations must defer
 /// all reentrant events until the current Rust dispatch returns.
 pub trait Host {
+    fn cable_receipt(&self) -> Option<CableReceipt> { None }
     /// Refresh causal boundaries after synchronous transport returns. Tests may
     /// retain their injected deterministic clock by leaving this unavailable.
     fn clock_ns(&mut self) -> Option<i64> {

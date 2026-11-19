@@ -261,6 +261,11 @@ impl Controller {
             } else {
                 0
             };
+        if hero == 17 && f.game_clock_ms.is_number() && self.frameCoreSampleStartNs_ > 0 {
+            if let Some(receipt) = host.cable_receipt() {
+                self.cableChain_.observe(receipt, f.game_clock_ms.value as u32, self.frameCoreSampleStartNs_);
+            }
+        }
         // UI ownership is acceptance even when an animation/buffered cast has
         // not produced a logical target yet. Never infer rejection later merely
         // because that indicator disappears or becomes temporarily forbidden.
