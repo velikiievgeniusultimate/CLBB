@@ -653,7 +653,7 @@ impl UiPlan {
             } else {
                 None
             };
-            let skill_charges = if slot == "skill:2" && class.name == "SkillButtonAutoCharge"
+            let skill_charges = if kind == "skill" && class.name == "SkillButtonAutoCharge"
                 && skill != 0 && auto_charge_capacity(r.integer(local_hero_address)?, &slot, r.integer(skill)?).is_some() {
                 let address = |name| {
                     class.fields.get(name).filter(|f| !f.is_static && f.kind == 8 && f.offset <= 1_048_576)
@@ -940,7 +940,7 @@ impl UiPlan {
                     .and_then(|timer| read_cooldown(r, timer, clock, consumed).ok());
                 // The cooldown timer alone does not report an empty charge pool.
                 // Preserve the usual cooldown gate and treat an uncertain count
-                // as unknown for this exact owned ultimate form.
+                // as unknown for this exact owned skill form.
                 let capacity = auto_charge_capacity(hero, &button.slot, skill)
                     .filter(|_| variant == skill);
                 let blocked = if let Some(capacity) = capacity {
@@ -1038,6 +1038,7 @@ fn auto_charge_capacity(hero: i32, slot: &str, base: i32) -> Option<i32> {
     match (hero, slot, base) {
         (13, "skill:2", 1330) => Some(3),
         (24, "skill:2", 2430) => Some(2),
+        (55, "skill:0", 5510) => Some(5),
         _ => None,
     }
 }
@@ -2880,7 +2881,8 @@ mod tests {
     fn exact_auto_charge_skills_reject_invalid_counts_without_admitting_a_cast() {
         assert_eq!(auto_charge_capacity(13, "skill:2", 1330), Some(3));
         assert_eq!(auto_charge_capacity(24, "skill:2", 2430), Some(2));
-        for capacity in [2, 3] {
+        assert_eq!(auto_charge_capacity(55, "skill:0", 5510), Some(5));
+        for capacity in [2, 3, 5] {
             assert_eq!(charge_pool_empty(0, capacity, capacity), Some(true));
             for count in 1..=capacity {
                 assert_eq!(charge_pool_empty(count, capacity, capacity), Some(false));
@@ -2889,7 +2891,10 @@ mod tests {
                 assert_eq!(charge_pool_empty(count, maximum, capacity), None);
             }
         }
-        for (hero, slot, base) in [(23, "skill:2", 2430), (24, "skill:1", 2430), (24, "skill:2", 2420)] {
+        for (hero, slot, base) in [
+            (23, "skill:2", 2430), (24, "skill:1", 2430), (24, "skill:2", 2420),
+            (54, "skill:0", 5510), (55, "skill:1", 5510), (55, "skill:0", 5520),
+        ] {
             assert_eq!(auto_charge_capacity(hero, slot, base), None);
         }
     }
