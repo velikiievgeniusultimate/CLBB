@@ -271,6 +271,7 @@ impl Controller {
             (50, "skill:3", 5040) => &[5040, 5076],
             (54, "skill:0", 5410) => &[5417], // Jawhead's active missiles.
             (59, "skill:1", 5920) => &[5921], // Uranus's active shield.
+            (61, "skill:0", 6110) => &[6110, 6150], // Chang'e's meteor channel.
             (64, "skill:0", 6410) => &[6417], // Aldous's enhanced attack.
             _ => &[],
         };
