@@ -256,6 +256,7 @@ impl Controller {
         // input gate. Other animation locks may allow buffered skills.
         let enhancement_forms: &[i32] = match (self.heroId_, b.slot.as_str(), b.skillId) {
             (1, "skill:0", 110) => &[111],    // Miya's split arrows.
+            (18, "skill:0", 1810) => &[201812], // Layla's range buff after a hit.
             (22, "skill:2", 2250) => &[2254], // Freya's Valkyrie form.
             // Sun's first two skills share a clone lock. The first button
             // can already be locked before its icon/form switches.

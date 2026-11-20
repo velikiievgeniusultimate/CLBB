@@ -185,6 +185,7 @@ fn empty_energy_or_mana_discards_press_until_a_fresh_press_after_recovery() {
 #[test]
 fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let miya = Skill { hero: 1, base: 110, form: 110, slot: "skill:0" };
+    let layla_q = Skill { hero: 18, base: 1810, form: 1810, slot: "skill:0" };
     let freya = Skill { hero: 22, base: 2250, form: 2250, slot: "skill:2" };
     let sun_q = Skill { hero: 27, base: 2710, form: 2710, slot: "skill:0" };
     let sun_w = Skill { hero: 27, base: 2750, form: 2750, slot: "skill:1" };
@@ -199,7 +200,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let change_q = Skill { hero: 61, base: 6110, form: 6110, slot: "skill:0" };
     let cici_q = Skill { hero: 123, base: 12310, form: 12310, slot: "skill:0" };
     for (skill, code, form) in [
-        (miya, 81, 111), (freya, 69, 2254),
+        (miya, 81, 111), (layla_q, 81, 201812), (freya, 69, 2254),
         (sun_q, 81, 2710), (sun_q, 81, 2705), (sun_q, 81, 2708),
         (sun_w, 87, 2706), (sun_w, 87, 2707),
         (sun_r, 82, 2709), (sun_r, 82, 2739),
