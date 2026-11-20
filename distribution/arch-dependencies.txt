@@ -1,8 +1,7 @@
 # Runtime dependencies installed by pacman, not bundled.
 gtk4>=4.14
 webkitgtk-6.0>=2.54.1
-libportal-gtk4
-sdl3
+libportal
 pipewire-alsa
 libx11
 libxfixes
@@ -23,7 +22,6 @@ noto-fonts-emoji
 ttf-dejavu
 python>=3.12
 curl
-tar
 coreutils
 zenity
 

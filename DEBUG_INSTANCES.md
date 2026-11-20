@@ -1,10 +1,12 @@
 # Отладочная вторая игра / Private debug instance
 
-Обычный ярлык остаётся основным аккаунтом. Этот инструмент предназначен только
-для разработки; переключателя аккаунтов в настройках игры CLBB нет.
+В локальной рабочей сборке обычный ярлык запускает выбранный профиль.
+Переключение профилей и второе окно доступны в разделе «Аккаунты» настроек F7.
+Для отдельного отладочного запуска из терминала используйте команды ниже.
 
-The normal shortcut remains the primary account. This is a developer-only tool,
-not an in-game account switcher.
+In the local workbench, the desktop shortcut starts the selected profile.
+The Accounts section in F7 supports switching profiles and opening a second
+window. The commands below start a separate debug instance from the terminal.
 
 ```sh
 python tools/debug-instance.py start secondary

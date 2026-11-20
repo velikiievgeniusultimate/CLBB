@@ -12,9 +12,9 @@ if [ -n "${CLBB_APK_FILE:-}" ] && [ ! -f "$CLBB_APK_FILE" ]; then
     printf '%s\n' 'Use an APK path on this computer, or omit CLBB_APK_FILE and select an APK on first launch / Укажите файл на этом ПК либо уберите CLBB_APK_FILE и выберите APK при первом запуске.' >&2
     exit 1
 fi
-for tool in python3 curl tar sha256sum; do
+for tool in python3 curl sha256sum; do
     if ! command -v "$tool" >/dev/null; then
-        sudo pacman -S --needed -- python curl tar coreutils < /dev/tty
+        sudo pacman -S --needed -- python curl coreutils < /dev/tty
         break
     fi
 done
@@ -122,10 +122,19 @@ if [ -f "$CLBB_GAME_STATE/game/base.apk" ]; then
     fi
     python3 "$CLBB_NATIVE_HELPER" "$CLBB_GAME_STATE"
 fi
-clbb_stage '[8/8] Регистрация ярлыка в меню приложений / Registering application shortcut'
-curl --fail --location --progress-bar --show-error --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 60 \
-    "https://raw.githubusercontent.com/$CLBB_REPO/main/distribution/desktop_entry.py" -o "$CLBB_TMP/desktop_entry.py"
-python3 "$CLBB_TMP/desktop_entry.py"
+clbb_stage '[8/8] Проверка ярлыка приложения / Checking application shortcut'
+# Current managers register and refresh the menu during --install, including on reinstall.
+# Keep the repair path for older releases which did not create an application entry.
+CLBB_APPLICATION_ENTRY="${XDG_DATA_HOME:-$HOME/.local/share}/applications/org.clbb.CLBB.desktop"
+CLBB_DESKTOP_HELPER="${CLBB_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/clbb}/current/distribution/desktop_entry.py"
+if [ ! -s "$CLBB_APPLICATION_ENTRY" ] || [ ! -f "$CLBB_DESKTOP_HELPER" ]; then
+    if [ ! -f "$CLBB_DESKTOP_HELPER" ]; then
+        CLBB_DESKTOP_HELPER="$CLBB_TMP/desktop_entry.py"
+        curl --fail --location --progress-bar --show-error --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 60 \
+            "https://raw.githubusercontent.com/$CLBB_REPO/main/distribution/desktop_entry.py" -o "$CLBB_DESKTOP_HELPER"
+    fi
+    python3 "$CLBB_DESKTOP_HELPER"
+fi
 clbb_stage 'Готово / Complete'  
 printf 'Журнал установки / Installation log: %s\n' "$CLBB_LOG"
 printf '%s\n' 'CLBB установлен / installed. Запустите CLBB из меню приложений / Launch CLBB from your application menu.'

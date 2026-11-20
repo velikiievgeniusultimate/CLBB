@@ -2236,7 +2236,7 @@ index fc402fe..305c372 100644
 +
 +GtkWidget *surface_view_widget_unique(GtkWidget *root);
 diff --git a/src/api-impl-jni/widgets/android_webkit_WebView.c b/src/api-impl-jni/widgets/android_webkit_WebView.c
-index ef0513d..b7af23c 100644
+index ef0513d..94132f8 100644
 --- a/src/api-impl-jni/widgets/android_webkit_WebView.c
 +++ b/src/api-impl-jni/widgets/android_webkit_WebView.c
 @@ -1,5 +1,6 @@
@@ -2357,7 +2357,7 @@ index ef0513d..b7af23c 100644
  static void asset_uri_scheme_request_cb(WebKitURISchemeRequest *request, gpointer user_data)
  {
  	const gchar *path = webkit_uri_scheme_request_get_path(request);
-@@ -29,9 +130,129 @@ static void asset_uri_scheme_request_cb(WebKitURISchemeRequest *request, gpointe
+@@ -29,9 +130,169 @@ static void asset_uri_scheme_request_cb(WebKitURISchemeRequest *request, gpointe
  	g_object_unref(stream);
  }
  
@@ -2475,6 +2475,46 @@ index ef0513d..b7af23c 100644
 +	g_signal_connect(resource, "finished", G_CALLBACK(resource_trace_finished), trace);
 +}
 +
++/* Status-only feedback for the official password form, tied to its document. */
++static gboolean clbb_login_uri(const char *text, gboolean password_form)
++{
++	if (!text) return FALSE;
++	GUri *uri = g_uri_parse(text, G_URI_FLAGS_NONE, NULL);
++	if (!uri) return FALSE;
++	const char *path = g_uri_get_path(uri);
++	const char *host = password_form ? "mtacc.mobilelegends.com" : "accountmtapi.mobilelegends.com";
++	gboolean matches = !g_strcmp0(g_uri_get_scheme(uri), "https") &&
++	                   !g_strcmp0(g_uri_get_host(uri), host) && !g_uri_get_userinfo(uri) &&
++	                   (g_uri_get_port(uri) == -1 || g_uri_get_port(uri) == 443) &&
++	                   (password_form ? (!g_strcmp0(path, "/v3.0/inapp/login-new") ||
++	                                     !g_strcmp0(path, "/v3.0/inapp/login")) : !g_strcmp0(path, "/"));
++	g_uri_unref(uri);
++	return matches;
++}
++
++static void clbb_password_response(WebKitWebResource *resource, WebKitWebView *view)
++{
++	WebKitURIResponse *response = webkit_web_resource_get_response(resource);
++	if (!response || webkit_uri_response_get_status_code(response) != 405 ||
++	    !clbb_login_uri(webkit_uri_response_get_uri(response), FALSE) ||
++	    g_object_get_data(G_OBJECT(resource), "clbb-login-document") != webkit_web_view_get_main_resource(view) ||
++	    !clbb_login_uri(webkit_web_view_get_uri(view), TRUE)) return;
++	webkit_web_view_evaluate_javascript(view, "window.dispatchEvent(new Event('clbb-password-unavailable'))",
++	                                    -1, NULL, NULL, NULL, NULL, NULL);
++}
++
++static void clbb_password_resource(WebKitWebView *view, WebKitWebResource *resource,
++                                  WebKitURIRequest *request, gpointer unused)
++{
++	(void)unused;
++	if (!clbb_login_uri(webkit_uri_request_get_uri(request), FALSE) ||
++	    !clbb_login_uri(webkit_web_view_get_uri(view), TRUE)) return;
++	WebKitWebResource *page = webkit_web_view_get_main_resource(view);
++	if (!page || page == resource) return;
++	g_object_set_data_full(G_OBJECT(resource), "clbb-login-document", g_object_ref(page), g_object_unref);
++	g_signal_connect_object(resource, "finished", G_CALLBACK(clbb_password_response), view, 0);
++}
++
  static void web_view_load_changed(WebKitWebView *web_view, WebKitLoadEvent load_event, gpointer user_data)
  {
 +	if (load_event == WEBKIT_LOAD_FINISHED && g_getenv("ATL_WEBVIEW_NETWORK_TRACE")) {
@@ -2487,7 +2527,7 @@ index ef0513d..b7af23c 100644
  	JNIEnv *env = get_jni_env();
  	J__WebView__internalLoadChanged(env, wrapper->jobj, load_event, _JSTRING(webkit_web_view_get_uri(web_view)));
  }
-@@ -65,23 +286,249 @@ JNIEXPORT jlong JNICALL Java_android_webkit_WebView_native_1constructor(JNIEnv *
+@@ -65,23 +326,250 @@ JNIEXPORT jlong JNICALL Java_android_webkit_WebView_native_1constructor(JNIEnv *
  	if (!getenv("ATL_UGLY_ENABLE_WEBVIEW"))
  		return Java_android_view_View_native_1constructor(env, this, context, attrs);
  
@@ -2555,6 +2595,7 @@ index ef0513d..b7af23c 100644
 +		WebKitUserScript *preference = webkit_user_script_new(login_source,
 +		    WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END, allowed, NULL);
 +		webkit_user_content_manager_add_script(manager, preference);
++		g_signal_connect(webview, "resource-load-started", G_CALLBACK(clbb_password_resource), NULL);
 +		webkit_user_script_unref(preference);
 +		g_free(login_source);
 +	}
@@ -2738,7 +2779,7 @@ index ef0513d..b7af23c 100644
  	webkit_web_view_load_uri(webview, _CSTRING(url));
  }
  
-@@ -91,6 +538,9 @@ JNIEXPORT void JNICALL Java_android_webkit_WebView_native_1loadDataWithBaseURL(J
+@@ -91,6 +579,9 @@ JNIEXPORT void JNICALL Java_android_webkit_WebView_native_1loadDataWithBaseURL(J
  		return;
  
  	WebKitWebView *webview = _PTR(widget_ptr);

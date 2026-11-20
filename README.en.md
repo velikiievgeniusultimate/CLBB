@@ -31,6 +31,10 @@ The APK is not included in the Git repository or GitHub releases; it is a separa
 proprietary game download and is not covered by the CLBB license.
 The file is not modified or re-signed. Sign in to your account inside the game.
 
+On the Create Character screen, select **Switch Account** → **MOONTON Account**.
+The email-code form opens first. Choose **Use a password** to open the password
+form. If the service returns HTTP 405, choose **Use an email code** to switch back.
+
 To install CLBB without downloading the game, set `CLBB_INSTALL_GAME=0`:
 the first launch will offer a picker for your own APK.
 

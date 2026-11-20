@@ -26,7 +26,10 @@ if [[ ! -d "$CLBB_WEBKIT_PROCESS_DIR" ]]; then
     export CLBB_WEBKIT_PROCESS_DIR=/usr/lib/webkitgtk-6.0
 fi
 export WEBKIT_INJECTED_BUNDLE_PATH="$CLBB_WEBKIT_PROCESS_DIR/injected-bundle"
-export LD_PRELOAD="$CLBB_ATL_PREFIX/lib/libclbb_webkit_launch_adapter.so${LD_PRELOAD:+:$LD_PRELOAD}"
+# Packaged WebKit already launches its helpers from the system directory.
+if [[ ! "$CLBB_WEBKIT_PROCESS_DIR" -ef /usr/lib/webkitgtk-6.0 ]]; then
+    export LD_PRELOAD="$CLBB_ATL_PREFIX/lib/libclbb_webkit_launch_adapter.so${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
 # Select the host compatibility device for optional Android audio APIs.
 if [[ -z "${ATL_AUDIO_DEVICE:-}" && -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pipewire-0" ]]; then
     export ATL_AUDIO_DEVICE=pipewire

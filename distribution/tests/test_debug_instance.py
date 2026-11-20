@@ -15,9 +15,14 @@ class DebugInstanceTests(unittest.TestCase):
     values=json.loads((state/'config/clbb/settings.json').read_text())['values'];self.assertEqual(values['display.resolution'],'1280x720');self.assertEqual(values['common.bindings.skill:0.key'],'81');self.assertTrue(json.loads(settings.read_text())['values']['display.resolution']=='4000x3111')
  def test_sandbox_hides_primary_and_isolates_tmp_and_settings(self):
   with tempfile.TemporaryDirectory()as td:
-   t=Path(td);state=t/'secondary';state.mkdir();(state/'.clbb-local-runtime.json').write_text(json.dumps({'directory':str(t/'candidate')}))
+   t=Path(td);state=t/'secondary';state.mkdir();runtime=t/'candidate/runtime';runtime.mkdir(parents=True);(runtime/'VERSION').write_text('fixture');(state/'.clbb-local-runtime.json').write_text(json.dumps({'directory':str(t/'candidate')}))
    with patch.object(module,'ROOT',t/'primary'):
     args=module.sandbox(state,['fixture-game']);self.assertIn(str(t/'primary'),args);self.assertIn('--tmpfs',args);self.assertIn('/tmp',args);self.assertIn(str(state/'config'),args);self.assertIn(str(state/'run'),args);self.assertIn('CLBB_BACKGROUND_STARTUP',args);self.assertIn('CLBB_WRAPPED',args);self.assertEqual(args[-1],'fixture-game')
+    self.assertFalse((runtime/'code_cache').exists())
+    self.assertIn(['--ro-bind',str(runtime/'VERSION'),str(runtime/'VERSION')],[args[i:i+3] for i in range(len(args))])
+    self.assertIn('--remount-ro',args)
+    (runtime/'code_cache').mkdir()
+    self.assertNotIn('--remount-ro',module.sandbox(state,['fixture-game']))
  def test_names_cannot_escape_private_profile_base(self):
   for name in ['../primary','/tmp/primary','secondary/other','', 'x'*33]:
    with self.assertRaises(ValueError):module.profile(name)

@@ -80,7 +80,16 @@ def mounts(state):
 def sandbox(state,command):
  selected=json.loads((state/'.clbb-local-runtime.json').read_text());runtime=Path(selected['directory'])/'runtime';host_run=os.environ.get('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}')
  (state/'code_cache').mkdir(exist_ok=True)
- args=['bwrap','--ro-bind','/','/','--bind',str(state),str(state),'--bind',str(state/'code_cache'),str(runtime/'code_cache'),'--ro-bind',str(ROOT/'game'),str(state/'game'),'--tmpfs','/tmp','--ro-bind','/tmp/.X11-unix','/tmp/.X11-unix','--proc','/proc','--dev-bind','/dev','/dev','--tmpfs',str(ROOT),'--chdir',str(runtime)]
+ args=['bwrap','--ro-bind','/','/','--bind',str(state),str(state)]
+ cache_mount=runtime/'code_cache'
+ if not cache_mount.exists():
+  # Older packages lack the mount point. Construct the top level in this namespace
+  # so a fresh profile can use its own ART cache even on a read-only installation.
+  args+=['--tmpfs',str(runtime)]
+  for entry in sorted(runtime.iterdir()):
+   args+=['--ro-bind',str(entry),str(entry)]
+  args+=['--dir',str(cache_mount),'--remount-ro',str(runtime)]
+ args+=['--bind',str(state/'code_cache'),str(cache_mount),'--ro-bind',str(ROOT/'game'),str(state/'game'),'--tmpfs','/tmp','--ro-bind','/tmp/.X11-unix','/tmp/.X11-unix','--proc','/proc','--dev-bind','/dev','/dev','--tmpfs',str(ROOT),'--chdir',str(runtime)]
  env={
   'CLBB_ROOT':str(runtime),'CLBB_STATE_ROOT':str(state),'CLBB_MANAGED_INSTALL':'0',
   'CLBB_WRAPPED':'1', # File reports only: never spawn Zenity for private tests.

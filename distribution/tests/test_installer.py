@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess,sys,tempfile,unittest
 ROOT=Path(__file__).resolve().parents[2]
 class InstallerTests(unittest.TestCase):
-    def run_installer(self, *, existing=False, override=None, manifest_url='https://fixture.invalid/game.apk'):
+    def run_installer(self, *, existing=False, override=None, manifest_url='https://fixture.invalid/game.apk', desktop='legacy'):
         with tempfile.TemporaryDirectory(prefix='clbb-installer-test-')as temp:
             p=Path(temp);bin=p/'bin';bin.mkdir();home=p/'home';home.mkdir();install=p/'installation'
             if existing:
@@ -14,6 +14,13 @@ class InstallerTests(unittest.TestCase):
             helper.write_text('#!'+sys.executable+'\nimport json,os,sys\nfrom pathlib import Path\np=Path(os.environ["CLBB_FIXTURE"])\nwith (p/"calls").open("a")as f:f.write(json.dumps(sys.argv[1:])+"\\n")\nprint("{}")\n')
             digest=hashlib.sha256(helper.read_bytes()).hexdigest()
             (p/'desktop_entry.py').write_text('print("desktop registration fixture")\n')
+            if desktop != 'legacy':
+                packaged=install/'current/distribution/desktop_entry.py'
+                packaged.parent.mkdir(parents=True,exist_ok=True)
+                packaged.write_text('print("packaged desktop helper executed")\n')
+            if desktop == 'registered':
+                entry=home/'.local/share/applications/org.clbb.CLBB.desktop'
+                entry.parent.mkdir(parents=True);entry.write_text('[Desktop Entry]\nName=CLBB\n')
             (p/'SHA256SUMS').write_text(digest+'  clbb-manager-linux-x86_64\n')
             (p/'releases.json').write_text(json.dumps([{'tag_name':'v0.1.0-alpha.3','draft':False}]))
             (p/'game-apk.json').write_text(json.dumps({'package':'com.mobile.legends','download_url':manifest_url,'sha256':'a'*64}))
@@ -28,7 +35,7 @@ flag='--output'if '--output'in args else '-o';shutil.copyfile(p/name,args[args.i
                 f=bin/tool;f.write_text('#!/bin/sh\n'+text+'\n');f.chmod(0o755)
             env=os.environ.copy()
             for key in ['CLBB_APK_FILE','CLBB_APK_URL','CLBB_APK_SHA256','CLBB_INSTALL_GAME','CLBB_STATE_ROOT']:env.pop(key,None)
-            env.update(HOME=str(home),CLBB_INSTALL_ROOT=str(install),CLBB_FIXTURE=str(p),PATH=str(bin)+':'+env['PATH']);env.update(override or {})
+            env.update(HOME=str(home),XDG_DATA_HOME=str(home/'.local/share'),XDG_STATE_HOME=str(home/'.local/state'),CLBB_INSTALL_ROOT=str(install),CLBB_FIXTURE=str(p),PATH=str(bin)+':'+env['PATH']);env.update(override or {})
             result=subprocess.run(['sh',str(ROOT/'install.sh')],env=env,capture_output=True,text=True,timeout=10)
             calls=[json.loads(line)for line in (p/'calls').read_text().splitlines()]if(p/'calls').exists()else[]
             requests=(p/'requests').read_text().splitlines()if(p/'requests').exists()else[]
@@ -43,6 +50,13 @@ flag='--output'if '--output'in args else '-o';shutil.copyfile(p/name,args[args.i
         self.assertEqual(calls,[['--install']]);self.assertEqual(preserved,b'preserved');self.assertFalse(any(url.endswith('/game-apk.json')for url in requests))
     def test_game_download_can_be_disabled(self):
         result,calls,_,_=self.run_installer(override={'CLBB_INSTALL_GAME':'0'});self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(calls,[['--install']])
+    def test_shortcut_registration_uses_the_installed_release(self):
+        for desktop in ('registered','missing','legacy'):
+            with self.subTest(desktop=desktop):
+                result,_,requests,_=self.run_installer(override={'CLBB_INSTALL_GAME':'0'},desktop=desktop)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assertEqual(any(url.endswith('/desktop_entry.py') for url in requests),desktop=='legacy')
+                self.assertEqual('packaged desktop helper executed' in result.stdout,desktop=='missing')
     def test_missing_local_apk_fails_before_network_or_install(self):
         result,calls,requests,_=self.run_installer(override={'CLBB_APK_FILE':'/clbb/does-not-exist.apk'});self.assertNotEqual(result.returncode,0);self.assertEqual(calls,[]);self.assertEqual(requests,[]);self.assertIn('APK file not found',result.stderr)
     def test_non_https_default_source_is_rejected(self):
