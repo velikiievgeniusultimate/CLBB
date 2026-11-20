@@ -43,6 +43,12 @@ for (const path of ['/', '/v3.0/', '/v3.0/index.html']) {
     assert.equal(t.calls[2].args[0], 'login-new');
     assert.equal(t.document.body.children.length, 0);
 }
+{
+    const t = setup(origin + '/');
+    t.window.LoadPage('loginbyemail');
+    t.window.LoadPage('login-new');
+    assert.deepEqual(t.calls.map(call => call.args[0]), ['loginbyemail', 'login-new']);
+}
 for (const [page, destination] of [['login-new','loginbyemail'], ['login','loginbyemail'], ['loginbyemail','login-new']]) {
     const t = setup(origin + prefix + page + '?fixture=1#keep', 'ru-RU');
     const bar = t.document.body.children[0];

@@ -14,9 +14,9 @@
         if (typeof original !== 'function' || original.clbbEmailPreference) return;
         let firstLogin = true;
         const preferred = function(page, ...rest) {
-            if (firstLogin && (page === 'login-new' || page === 'login')) {
+            if (firstLogin && ['login-new', 'login', 'loginbyemail'].includes(page)) {
                 firstLogin = false;
-                return original.call(this, 'loginbyemail', ...rest);
+                page = 'loginbyemail';
             }
             return original.call(this, page, ...rest);
         };
