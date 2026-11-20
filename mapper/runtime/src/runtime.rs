@@ -79,6 +79,27 @@ struct Shared {
     last_publish_ns: i64,
     max_publish_gap_ms: f64,
     max_navigation_ms: f64,
+    chooser: Option<(crate::account_chooser::Chooser, Instant)>,
+    chooser_generation: u64,
+}
+impl Shared {
+    fn update_chooser(&mut self, next: Option<crate::account_chooser::Chooser>) {
+        if let Some(new) = next {
+            if self.chooser.is_none_or(|(old,_)| old.frame != new.frame) {
+                self.chooser_generation += 1;
+            }
+        }
+        self.chooser = next.map(|state| (state, Instant::now()));
+    }
+    fn chooser_layout(&self) -> String {
+        let Some((state, when)) = self.chooser else { return String::new() };
+        if when.elapsed() > Duration::from_secs(1) { return String::new(); }
+        let [x1,y1,x2,y2] = state.bounds;
+        let [x,y] = state.moonton.filter(|_| when.elapsed() <= Duration::from_millis(350)).unwrap_or([0.;2]);
+        // Integer millionths are independent of GTK's numeric locale.
+        let [a,b,c,d,e,f] = [x1,y1,x2,y2,x,y].map(|v| (v*1e6).round() as u32);
+        format!("{} {a} {b} {c} {d} {e} {f}", self.chooser_generation)
+    }
 }
 struct Worker {
     shared: Arc<Mutex<Shared>>,
@@ -110,6 +131,7 @@ impl Worker {
             last_publish_ns: 0,
             max_publish_gap_ms: 0.,
             max_navigation_ms: 0.,
+            ..Default::default()
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let size = Arc::new(Mutex::new([1280., 720.]));
@@ -126,6 +148,7 @@ impl Worker {
                 let mut epoch = String::new();
                 let mut nav_at = Instant::now() - Duration::from_secs(5);
                 let mut last_success = None;
+                let mut chooser = crate::account_chooser::Reader::default();
                 let mut result_at = 0i64;
                 let mut audit_at=0i64;let mut full_frame_at=0i64;let mut frame_identity=(0,String::new());
                 while !quit.load(Ordering::Relaxed) {
@@ -182,6 +205,7 @@ impl Worker {
                                 if out.last_publish_ns != 0 {
                                     out.max_publish_gap_ms = out.max_publish_gap_ms.max((published - out.last_publish_ns) as f64 / 1e6);
                                 }
+                                out.chooser = None;
                                 out.last_publish_ns = published;
                                 out.published_samples += 1;
                                 out.source_ms = sample.frame.sample_duration_ms.value;
@@ -225,8 +249,16 @@ impl Worker {
                         out.sample = None;
                         out.mesh = None;
                     }
-                    if !wait.is_zero() {
-                        std::thread::sleep(wait);
+                    if active {
+                        if !wait.is_zero() { std::thread::sleep(wait); }
+                    } else {
+                        // Only the lightweight menu reader runs between idle match-source checks.
+                        let deadline = Instant::now() + wait;
+                        while Instant::now() < deadline && !quit.load(Ordering::Relaxed) {
+                            let state = chooser.read(&mut source.reflection);
+                            out.lock().unwrap().update_chooser(state);
+                            std::thread::sleep(Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())));
+                        }
                     }
                 }
             })
@@ -1178,6 +1210,7 @@ impl Runtime {
         let v=match key {
             "audio.input_devices"|"audio.output_devices"|"audio.status"|"audio.capture_status"|"audio.playback_status"=>crate::audio::read(key),
             "hero.id"=>hero.to_string(),"hero.name"=>hero_display_name(hero),
+            "account.chooser" => self.worker.shared.lock().unwrap().chooser_layout(),
             "profiles.catalog" => (1..=134).map(|id| format!("{id}\t{}\n", hero_display_name(id))).collect(),
             _ if profile_setting(key).is_some() => {
                 let (profile, setting) = profile_setting(key).unwrap();

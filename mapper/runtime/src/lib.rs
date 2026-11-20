@@ -1,5 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![recursion_limit="512"]
+#[cfg(target_os = "linux")]
+mod account_chooser;
 pub mod aim;
 mod hero_names;
 mod control_audit;

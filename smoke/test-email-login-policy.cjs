@@ -6,76 +6,43 @@ const policy = fs.readFileSync(require('node:path').join(__dirname, '../distribu
 const origin = 'https://mtacc.mobilelegends.com';
 const prefix = '/v3.0/inapp/';
 
-function setup(url, language = 'en') {
-    const location = new URL(url), calls = [], navigations = [], ids = new Map(), events = new Map();
-    function element() {
-        return {
-            children: [], style: {}, events: new Map(),
-            setAttribute(key, value) { this[key] = value; },
-            addEventListener(key, callback) { this.events.set(key, callback); },
-            append(...items) { this.children.push(...items); },
-            appendChild(child) { this.append(child); if (child.id) ids.set(child.id, child); },
-        };
-    }
-    const document = { body: element(), documentElement: {lang: language}, createElement: element, getElementById: id => ids.get(id) };
-    location.replace = value => navigations.push(value);
-    location.reload = () => navigations.push('reload');
-    const window = {
-        LoadPage(...args) { calls.push({args, self: this}); return 42; },
-        addEventListener(key, callback) { events.set(key, callback); },
-    };
-    const context = vm.createContext({location, window, document, navigator: {language}, URL});
+function setup(url, delayed = false) {
+    const location = new URL(url), calls = [], navigations = [], events = {}, stored = new Map();
+    location.replace = to => navigations.push(to);
+    const original = function(...args) { calls.push({args, self:this}); return 42; };
+    const window = {LoadPage: delayed ? undefined : original, addEventListener(type, cb) { events[type] = cb; }};
+    const context = vm.createContext({location, window, document:{body:null}, URL,
+        sessionStorage:{setItem:(k,v) => stored.set(k,v)}});
     vm.runInContext(policy, context);
-    return {context, window, document, events, calls, navigations};
+    if (delayed) { window.LoadPage = original; events.load(); }
+    return {window, context, calls, navigations, stored};
 }
 
-for (const path of ['/', '/v3.0/', '/v3.0/index.html']) {
-    const t = setup(origin + path);
+for (const path of ['/', '/v3.0', '/v3.0/', '/v3.0/index.html']) {
+    const t = setup(origin + path, path === '/v3.0/');
     const receiver = {};
-    assert.equal(t.window.LoadPage.call(receiver,'login-new','ru','fixture-context','fixture-device'),42);
-    assert.deepEqual(t.calls[0].args, ['loginbyemail','ru','fixture-context','fixture-device']);
-    assert.equal(t.calls[0].self, receiver);
-    const first = t.window.LoadPage;
+    for (const [page,expected] of [['login-new','loginbyemail'], ['loginbyemail','loginbyemail'],
+        ['changebindemail','changebindemail'], ['login','loginbyemail'], ['forgotpassword-email','forgotpassword-email']]) {
+        assert.equal(t.window.LoadPage.call(receiver,page,'ru','fixture-context',7),42);
+        assert.deepEqual(t.calls.at(-1), {args:[expected,'ru','fixture-context',7], self:receiver});
+    }
+    const wrapper = t.window.LoadPage;
     vm.runInContext(policy, t.context);
-    assert.equal(first, t.window.LoadPage);
-    t.window.LoadPage('changebindemail');
-    assert.equal(t.calls[1].args[0], 'changebindemail');
-    t.window.LoadPage('login-new');
-    assert.equal(t.calls[2].args[0], 'login-new');
-    assert.equal(t.document.body.children.length, 0);
+    assert.equal(t.window.LoadPage, wrapper);
+    assert.equal(t.stored.size, 0);
 }
-{
-    const t = setup(origin + '/');
-    t.window.LoadPage('loginbyemail');
-    t.window.LoadPage('login-new');
-    assert.deepEqual(t.calls.map(call => call.args[0]), ['loginbyemail', 'login-new']);
-}
-for (const page of ['login-new', 'login', 'loginbyemail']) {
-    const t = setup(origin + prefix + page + '?fixture=1#keep', 'ru-RU');
-    const bar = t.document.body.children[0];
-    const [notice, code, password] = bar.children;
-    assert.equal(t.navigations.length, 0);
-    assert.equal(notice.hidden, true);
-    assert.equal(code.textContent, 'Войти по коду из письма');
-    assert.equal(password.textContent, 'Войти по паролю');
-    vm.runInContext(policy, t.context);
-    assert.deepEqual(t.document.body.children, [bar]);
-    t.events.get('clbb-login-unavailable')();
-    assert.equal(notice.hidden, false);
-    assert.match(notice.textContent, /MOONTON.*405/);
-    assert.deepEqual(t.navigations, []);
-    code.events.get('click')();
-    password.events.get('click')();
-    assert.deepEqual(t.navigations, ['loginbyemail', 'login-new'].map(destination =>
-        destination === page ? 'reload' : origin + prefix + destination + '?fixture=1#keep'));
+for (const page of ['login','login-new']) {
+    const t = setup(origin + prefix + page + '?ctx=A%2FB&lang=ru#keep');
+    assert.deepEqual(t.navigations, [origin + prefix + 'loginbyemail?ctx=A%2FB&lang=ru#keep']);
+    assert.equal(t.stored.get('clbb-password-unavailable'), '1');
 }
 for (const url of ['http://mtacc.mobilelegends.com/', 'https://mtacc.mobilelegends.com.evil.invalid/',
     'https://mtacc.mobilelegends.com:444'+prefix+'login', 'https://sample@mtacc.mobilelegends.com'+prefix+'login',
-    origin+'/unrelated/', origin+prefix+'forgotpassword-email', origin+prefix+'login-newer']) {
+    origin+'/unrelated/', origin+prefix+'forgotpassword-email', origin+prefix+'login-newer', origin+prefix+'loginbyemail']) {
     const t = setup(url);
     t.window.LoadPage('login-new');
     assert.equal(t.calls[0].args[0], 'login-new');
     assert.deepEqual(t.navigations, []);
-    assert.deepEqual(t.document.body.children, []);
+    assert.equal(t.stored.size, 0);
 }
-console.log('LOGIN_METHODS_OK initial preference, explicit password and code routes, 405 feedback, unrelated routes');
+console.log('LOGIN_POLICY_OK SDK context and receiver, repeated entry, direct routes, recovery and origin isolation');
