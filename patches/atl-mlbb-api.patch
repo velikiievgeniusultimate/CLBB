@@ -567,18 +567,19 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..6e606a2 100644
+index 3eb505c..28a8ad8 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
-@@ -1,5 +1,7 @@
+@@ -1,5 +1,8 @@
  #include <gtk/gtk.h>
  #include <jni.h>
 +#include <dlfcn.h>
 +#include "../../../../../mapper/ui/clbb-chat.h"
++#include "../../../../../mapper/ui/clbb-text-limit.h"
  
  #include "../defines.h"
  #include "../util.h"
-@@ -8,6 +10,403 @@
+@@ -8,6 +11,446 @@
  /* main app window */
  extern GtkWindow *window;
  
@@ -683,7 +684,7 @@ index 3eb505c..6e606a2 100644
 +typedef struct {
 +	GtkWindow *owner, *dialog;
 +	GtkOverlay *overlay;
-+	GtkWidget *card, *entry;
++	GtkWidget *card, *entry, *count, *source_entry;
 +	GWeakRef previous_focus;
 +	gulong position_handler;
 +	ClbbChatTarget target;
@@ -775,14 +776,48 @@ index 3eb505c..6e606a2 100644
 +	return chat_site && chat_site(owner, target);
 +}
 +
++static void update_chat_count(GtkEditable *editable, InlineChat *chat)
++{
++	int limit = clbb_text_limit(editable);
++	int used = clbb_text_units(gtk_editable_get_text(editable));
++	char count[32];
++	g_snprintf(count, sizeof(count), "%d/%d", used, limit);
++	gtk_label_set_text(GTK_LABEL(chat->count), count);
++}
++
++static void update_chat_limit(InlineChat *chat)
++{
++	int limit = chat->target.limit;
++	if (chat->source_entry) {
++		int original = clbb_text_limit(GTK_EDITABLE(chat->source_entry));
++		if (original >= 0)
++			limit = MIN(limit, original);
++	}
++	clbb_text_set_limit(GTK_EDITABLE(chat->entry), limit);
++	update_chat_count(GTK_EDITABLE(chat->entry), chat);
++}
++
++void atl_chat_source_limit_changed(GtkWidget *text)
++{
++	GtkRoot *root = gtk_widget_get_root(text);
++	if (!GTK_IS_WINDOW(root))
++		return;
++	InlineChat *chat = inline_chat(gtk_window_get_transient_for(GTK_WINDOW(root)));
++	if (chat && chat->source_entry == text)
++		update_chat_limit(chat);
++}
++
 +static void refresh_chat_channel(InlineChat *chat)
 +{
 +	ClbbChatTarget live;
 +	// The ranked room can finish selecting its Team tab after the editor
 +	// opens. Use its actual channel before indexing or discarding a draft.
 +	if (query_chat_site(chat->owner, &live) &&
-+	    live.site == chat->target.site && live.owner == chat->target.owner)
++	    live.site == chat->target.site && live.owner == chat->target.owner) {
 +		chat->target.channel = live.channel;
++		chat->target.limit = live.limit;
++		update_chat_limit(chat);
++	}
 +}
 +
 +static gboolean message_present(const char *str)
@@ -795,8 +830,11 @@ index 3eb505c..6e606a2 100644
 +
 +static void submit_inline(GtkWidget *widget, InlineChat *chat)
 +{
++	if (chat->finishing)
++		return;
++	refresh_chat_channel(chat);
 +	const char *text = gtk_editable_get_text(GTK_EDITABLE(chat->entry));
-+	if (chat->finishing || !message_present(text))
++	if (!message_present(text))
 +		return;
 +	if (!chat->dialog) {
 +		chat->send_pending = TRUE;
@@ -809,7 +847,6 @@ index 3eb505c..6e606a2 100644
 +	chat->finishing = TRUE;
 +	g_autofree char *message = g_strdup(text);
 +	gtk_widget_set_sensitive(chat->card, FALSE);
-+	refresh_chat_channel(chat);
 +	if (same_draft(g_object_get_data(G_OBJECT(chat->owner), "atl-chat-draft"), &chat->target))
 +		g_object_set_data(G_OBJECT(chat->owner), "atl-chat-draft", NULL);
 +	g_autoptr(GtkWidget) confirm = g_object_ref(controls.confirm);
@@ -877,9 +914,15 @@ index 3eb505c..6e606a2 100644
 +	gtk_widget_set_tooltip_text(close, "Закрыть и сохранить черновик (Esc)");
 +	gtk_accessible_update_property(GTK_ACCESSIBLE(close),
 +	                               GTK_ACCESSIBLE_PROPERTY_LABEL, "Закрыть и сохранить черновик", -1);
++	chat->count = gtk_label_new(NULL);
++	gtk_widget_add_css_class(chat->count, "chat-count");
++	gtk_widget_set_tooltip_text(chat->count, "Длина сообщения");
 +	gtk_box_append(GTK_BOX(chat->card), chat->entry);
++	gtk_box_append(GTK_BOX(chat->card), chat->count);
 +	gtk_box_append(GTK_BOX(chat->card), send);
 +	gtk_box_append(GTK_BOX(chat->card), close);
++	g_signal_connect(chat->entry, "changed", G_CALLBACK(update_chat_count), chat);
++	update_chat_limit(chat);
 +	g_signal_connect(chat->entry, "activate", G_CALLBACK(submit_inline), chat);
 +	g_signal_connect(send, "clicked", G_CALLBACK(submit_inline), chat);
 +	g_signal_connect(close, "clicked", G_CALLBACK(cancel_inline), chat);
@@ -892,6 +935,7 @@ index 3eb505c..6e606a2 100644
 +			".clbb-chat-entry {background:#211b23; border:1px solid #7a5266; border-radius:9px; padding:8px;}"
 +			".clbb-chat-entry entry {background:#161319; color:#fff3f8; border:1px solid #765567;}"
 +			".clbb-chat-entry entry:focus-within {border-color:#f77da6;}"
++			".clbb-chat-entry .chat-count {color:#e0c9d7; font-size:.88em; min-width:2.8em;}"
 +			".clbb-chat-entry button {background:#322631; color:#f9eff5;}"
 +			".clbb-chat-entry button.chat-send {background:#77364e;}"
 +			".clbb-chat-entry button:hover {background:#98556f;}");
@@ -940,8 +984,8 @@ index 3eb505c..6e606a2 100644
 +	chat = inline_chat(owner);
 +	chat->target = target;
 +	chat->dialog = dialog;
-+	gtk_entry_set_max_length(GTK_ENTRY(chat->entry),
-+		gtk_entry_buffer_get_max_length(gtk_text_get_buffer(GTK_TEXT(controls.text))));
++	chat->source_entry = controls.text;
++	update_chat_limit(chat);
 +	if (!*gtk_editable_get_text(GTK_EDITABLE(chat->entry))) {
 +		ChatDraft *draft = g_object_get_data(G_OBJECT(owner), "atl-chat-draft");
 +		const char *text = same_draft(draft, &target) ? draft->text :
@@ -982,7 +1026,7 @@ index 3eb505c..6e606a2 100644
  static gboolean on_close_request(GtkWidget *dialog, jobject jobj)
  {
  	printf("on_close_request\n");
-@@ -56,8 +455,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
+@@ -56,8 +499,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
  	GtkWidget *decor_view = GTK_WIDGET(_PTR(decor_view_ptr));
  	GtkWidget *dialog = gtk_window_new();
  	gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
@@ -1000,7 +1044,7 @@ index 3eb505c..6e606a2 100644
  	return _INTPTR(g_object_ref(dialog));
  }
  
-@@ -74,26 +480,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,26 +524,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
@@ -1934,6 +1978,25 @@ index e2aa204..2579961 100644
  #ifdef __cplusplus
  }
  #endif
+diff --git a/src/api-impl-jni/generated_headers/android_widget_EditText.h b/src/api-impl-jni/generated_headers/android_widget_EditText.h
+index 11466be..0e94cf2 100644
+--- a/src/api-impl-jni/generated_headers/android_widget_EditText.h
++++ b/src/api-impl-jni/generated_headers/android_widget_EditText.h
+@@ -259,6 +259,14 @@ JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setOnEditorActionLis
+ JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setText
+   (JNIEnv *, jobject, jlong, jstring);
+ 
++/*
++ * Class:     android_widget_EditText
++ * Method:    native_setLengthLimit
++ * Signature: (JI)V
++ */
++JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setLengthLimit
++  (JNIEnv *, jobject, jlong, jint);
++
+ /*
+  * Class:     android_widget_EditText
+  * Method:    native_setHint
 diff --git a/src/api-impl-jni/media/android_media_MediaCodec.c b/src/api-impl-jni/media/android_media_MediaCodec.c
 index 5cca29d..f418171 100644
 --- a/src/api-impl-jni/media/android_media_MediaCodec.c
@@ -3234,14 +3297,21 @@ index ef0513d..2ea8a44 100644
  	jsize data_jlen = (*env)->GetStringLength(env, data_jstr);
  	char *data = malloc(data_len + 1); // + 1 for NUL
 diff --git a/src/api-impl-jni/widgets/android_widget_EditText.c b/src/api-impl-jni/widgets/android_widget_EditText.c
-index d53bc4f..76fd9c9 100644
+index d53bc4f..51985e0 100644
 --- a/src/api-impl-jni/widgets/android_widget_EditText.c
 +++ b/src/api-impl-jni/widgets/android_widget_EditText.c
-@@ -7,10 +7,42 @@
+@@ -1,4 +1,5 @@
+ #include <gtk/gtk.h>
++#include "../../../../../mapper/ui/clbb-text-limit.h"
+ 
+ #include "../defines.h"
+ #include "../util.h"
+@@ -7,10 +8,43 @@
  
  #include "../generated_headers/android_widget_EditText.h"
  
 +extern gboolean atl_text_dialog_submit(GtkWidget *text);
++extern void atl_chat_source_limit_changed(GtkWidget *text);
 +
 +static jstring text_to_java(JNIEnv *env, const char *text)
 +{
@@ -3280,7 +3350,7 @@ index d53bc4f..76fd9c9 100644
  	wrapper_widget_set_child(WRAPPER_WIDGET(wrapper), gtk_text);
  	wrapper_widget_set_jobject(WRAPPER_WIDGET(wrapper), env, this);
  	wrapper_widget_register_invalidation_listener(WRAPPER_WIDGET(wrapper));
-@@ -21,7 +53,7 @@ JNIEXPORT jstring JNICALL Java_android_widget_EditText_native_1getText(JNIEnv *e
+@@ -21,7 +55,7 @@ JNIEXPORT jstring JNICALL Java_android_widget_EditText_native_1getText(JNIEnv *e
  {
  	GtkText *gtk_text = GTK_TEXT(_PTR(widget_ptr));
  	const char *text = gtk_entry_buffer_get_text(gtk_text_get_buffer(gtk_text));
@@ -3289,7 +3359,7 @@ index d53bc4f..76fd9c9 100644
  }
  
  struct changed_callback_data {
-@@ -34,12 +66,18 @@ static void changed_cb(GtkEditable *self, jobject listener)
+@@ -34,12 +68,18 @@ static void changed_cb(GtkEditable *self, jobject listener)
  {
  	JNIEnv *env = get_jni_env();
  
@@ -3314,8 +3384,17 @@ index d53bc4f..76fd9c9 100644
  	if ((*env)->ExceptionCheck(env))
  		(*env)->ExceptionDescribe(env);
  }
-@@ -102,22 +140,21 @@ JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setOnEditorActionLis
+@@ -100,24 +140,38 @@ JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setOnEditorActionLis
+ 	g_signal_connect(gtk_text, "activate", G_CALLBACK(on_activate), callback_data);
+ }
  
++JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setLengthLimit(JNIEnv *env, jobject this, jlong widget_ptr, jint max)
++{
++	GtkWidget *text = GTK_WIDGET(_PTR(widget_ptr));
++	clbb_text_set_limit(GTK_EDITABLE(text), max);
++	atl_chat_source_limit_changed(text);
++}
++
  JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setText(JNIEnv *env, jobject this, jlong widget_ptr, jstring text_jstr)
  {
 -	const char *gtk_text = (*env)->GetStringUTFChars(env, text_jstr, NULL);
@@ -3323,8 +3402,16 @@ index d53bc4f..76fd9c9 100644
 -	gtk_entry_buffer_set_text(gtk_text_get_buffer(GTK_TEXT(_PTR(widget_ptr))), gtk_text, length);
 -	(*env)->ReleaseStringUTFChars(env, text_jstr, gtk_text);
 +	g_autofree char *text = text_from_java(env, text_jstr);
-+	if (text)
-+		gtk_entry_buffer_set_text(gtk_text_get_buffer(GTK_TEXT(_PTR(widget_ptr))), text, -1);
++	if (!text)
++		return;
++	GtkText *editor = GTK_TEXT(_PTR(widget_ptr));
++	int limit = clbb_text_limit(GTK_EDITABLE(editor));
++	int count = -1;
++	if (limit >= 0) {
++		gsize keep = clbb_text_prefix(text, strlen(text), limit);
++		count = g_utf8_pointer_to_offset(text, text + keep);
++	}
++	gtk_entry_buffer_set_text(gtk_text_get_buffer(editor), text, count);
  }
  
  JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setHint(JNIEnv *env, jobject this, jlong widget_ptr, jstring text_jstr)
@@ -4823,6 +4910,38 @@ index 6c3b405..c86610e 100644
  	public String getLine1Number() {
  		return null;
  	}
+diff --git a/src/api-impl/android/text/InputFilter.java b/src/api-impl/android/text/InputFilter.java
+index 095ee32..fd4e24f 100644
+--- a/src/api-impl/android/text/InputFilter.java
++++ b/src/api-impl/android/text/InputFilter.java
+@@ -5,11 +5,26 @@ public interface InputFilter {
+ 	public CharSequence filter(CharSequence source, int start, int end, Spanned dest, int dstart, int dend);
+ 
+ 	public static class LengthFilter extends Object implements InputFilter {
++		private final int max;
++
+ 		public LengthFilter(int max) {
++			this.max = max;
++		}
++
++		public int getMax() {
++			return max;
+ 		}
+ 
+ 		public CharSequence filter(CharSequence source, int start, int end, Spanned dest, int dstart, int dend) {
+-			return "";
++			int keep = max - (dest.length() - (dend - dstart));
++			if (keep <= 0)
++				return "";
++			if (keep >= end - start)
++				return null;
++			int cutoff = start + keep;
++			if (Character.isHighSurrogate(source.charAt(cutoff - 1)))
++				cutoff--;
++			return source.subSequence(start, cutoff);
+ 		}
+ 	}
+ }
 diff --git a/src/api-impl/android/view/Choreographer.java b/src/api-impl/android/view/Choreographer.java
 index 8c1af63..8b2ed17 100644
 --- a/src/api-impl/android/view/Choreographer.java
@@ -5982,6 +6101,61 @@ index ade03d1..0dccd9a 100644
  	public boolean shouldOverrideUrlLoading(WebView view, String url) {
  		return false; // continue loading the URL
  	}
+diff --git a/src/api-impl/android/widget/EditText.java b/src/api-impl/android/widget/EditText.java
+index 763c2ea..0fafc28 100644
+--- a/src/api-impl/android/widget/EditText.java
++++ b/src/api-impl/android/widget/EditText.java
+@@ -3,12 +3,15 @@ package android.widget;
+ import android.content.Context;
+ import android.graphics.drawable.Drawable;
+ import android.text.Editable;
++import android.text.InputFilter;
+ import android.text.SpannableStringBuilder;
+ import android.text.TextWatcher;
+ import android.util.AttributeSet;
+ import android.view.MotionEvent;
+ 
+ public class EditText extends TextView {
++	private InputFilter[] filters = new InputFilter[0];
++
+ 	public EditText(Context context) {
+ 		super(context);
+ 	}
+@@ -28,6 +31,7 @@ public class EditText extends TextView {
+ 	protected native void native_removeTextChangedListener(long widget, TextWatcher watcher);
+ 	protected native void native_setOnEditorActionListener(long widget, OnEditorActionListener l);
+ 	protected native void native_setText(long widget, String text);
++	protected native void native_setLengthLimit(long widget, int limit);
+ 	protected native void native_setHint(long widget, CharSequence s);
+ 	protected native CharSequence native_getHint(long widget); // gtk_entry_set_placeholder_text
+ 
+@@ -44,6 +48,26 @@ public class EditText extends TextView {
+ 		return new SpannableStringBuilder(native_getText(widget));
+ 	}
+ 
++	@Override
++	public void setFilters(InputFilter[] filters) {
++		if (filters == null)
++			throw new IllegalArgumentException("filters must not be null");
++		this.filters = filters.clone();
++		int limit = -1;
++		for (InputFilter filter : this.filters) {
++			if (filter instanceof InputFilter.LengthFilter) {
++				int max = Math.max(0, ((InputFilter.LengthFilter) filter).getMax());
++				limit = limit < 0 ? max : Math.min(limit, max);
++			}
++		}
++		native_setLengthLimit(widget, limit);
++	}
++
++	@Override
++	public InputFilter[] getFilters() {
++		return filters.clone();
++	}
++
+ 	@Override
+ 	public void setText(CharSequence text) {
+ 		native_setText(widget, text == null ? "" : text.toString());
 diff --git a/src/api-impl/meson.build b/src/api-impl/meson.build
 index 3fd5b65..85e98f6 100644
 --- a/src/api-impl/meson.build
@@ -8321,10 +8495,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..5cdb801
+index 0000000..4ffac98
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1618 @@
+@@ -0,0 +1,1620 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -8765,9 +8939,11 @@ index 0000000..5cdb801
 +
 +static gboolean read_chat_target(ClbbHost *h, ClbbChatTarget *target) {
 +    const char *s = h->read(h->runtime, "chat.target");
-+    return s && sscanf(s, "%" G_GUINT64_FORMAT " %u %d %u %u %u",
++    target->limit = 60; /* Compatibility with older reloadable mappers. */
++    return s && sscanf(s, "%" G_GUINT64_FORMAT " %u %d %u %u %u %d",
 +            &target->owner, &target->site, &target->channel, &target->editing,
-+            &target->x, &target->y) == 6 &&
++            &target->x, &target->y, &target->limit) >= 6 &&
++        target->limit > 0 && target->limit <= 4096 &&
 +        target->owner && (target->site == 1 || target->site == 2) &&
 +        target->editing <= 1 && target->x > 0 && target->x < 1000000 &&
 +        target->y > 0 && target->y < 1000000;
@@ -8775,7 +8951,7 @@ index 0000000..5cdb801
 +
 +gboolean clbb_chat_site(GtkWindow *window, ClbbChatTarget *target) {
 +    ClbbHost *h = g_object_get_data(G_OBJECT(window), "clbb-mapper-attached");
-+    if (!h || h->closing || clbb_settings_is_visible(h->settings))
++    if (!h || h->closing || h->dispatching || clbb_settings_is_visible(h->settings))
 +        return FALSE;
 +    if (h->chat_deadline && h->chat_field_clicked && atl_chat_waiting(window)) {
 +        *target = h->quick_chat;

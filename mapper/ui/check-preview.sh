@@ -19,6 +19,9 @@ export DISPLAY=":$(cat "$work_dir/display")"
 export GDK_BACKEND=x11
 export GSK_RENDERER=cairo
 export GTK_A11Y=none
+cc -std=c11 -O2 -Wall -Wextra -Werror check-text-limit.c \
+  -o "$work_dir/check-text-limit" $(pkg-config --cflags --libs gtk4)
+"$work_dir/check-text-limit"
 /tmp/clbb-settings-preview --self-test
 if [[ ${1:-} == --screenshots ]]; then
   mkdir -p preview

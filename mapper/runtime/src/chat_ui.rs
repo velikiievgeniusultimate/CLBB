@@ -7,6 +7,8 @@ use crate::{
     unity::{Widget, matrices, onscreen, ui_matrix_offset},
 };
 
+const DEFAULT_LIMIT: i32 = 60;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Target {
     pub owner: u64,
@@ -14,17 +16,19 @@ pub struct Target {
     pub channel: i32,
     pub editing: bool,
     pub point: [f64; 2],
+    pub limit: i32,
 }
 
 impl Target {
     pub fn encode(self) -> String {
         let [x, y] = self.point.map(|v| (v * 1e6).round() as u32);
         format!(
-            "{} {} {} {} {x} {y}",
+            "{} {} {} {} {x} {y} {}",
             self.owner,
             self.site,
             self.channel,
-            u32::from(self.editing)
+            u32::from(self.editing),
+            self.limit
         )
     }
 }
@@ -69,6 +73,10 @@ fn input_point<M: Memory>(r: &mut Reflection<M>, label: u64, send_button: u64) -
 fn integer<M: Memory>(r: &mut Reflection<M>, obj: u64, field: &str) -> Option<i32> {
     let addr = r.field(obj, field).ok()?;
     r.integer(addr).ok()
+}
+
+fn configured_limit(value: Option<i32>) -> Option<i32> {
+    value.filter(|n| (1..=4096).contains(n))
 }
 
 fn lobby_bar<M: Memory>(r: &mut Reflection<M>, frame: u64) -> Option<[f64; 2]> {
@@ -148,12 +156,17 @@ pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64], in_match: bool) 
             let icon = r.link(ui, "m_sprite_SendMessage1").ok()?;
             (false, point(r, icon).ok()?)
         };
+        let limit = r
+            .link(chat, "m_sendChat")
+            .ok()
+            .and_then(|controller| integer(r, controller, "chatMaxInputNum"));
         return Some(Target {
             owner,
             site: 1,
             channel: integer(r, chat, "m_eCurrentMessageTab").unwrap_or(0),
             editing,
             point,
+            limit: configured_limit(limit).unwrap_or(DEFAULT_LIMIT),
         });
     }
     let open = named(r, top, "name", "UI_Chat");
@@ -173,17 +186,22 @@ pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64], in_match: bool) 
             channel: 0,
             editing: false,
             point: lobby_bar(r, owner)?,
+            limit: DEFAULT_LIMIT,
         });
     }
     let input = r.link(top, "localInput").ok()?;
     let label = r.link(input, "label").ok()?;
     let ui = r.link(top, "m_FrameUI").ok()?;
     let send = r.link(ui, "m_Button_Send").ok()?;
+    let chat_limit = configured_limit(integer(r, top, "maxInputSize")).unwrap_or(DEFAULT_LIMIT);
+    let limit = configured_limit(integer(r, input, "characterLimit"))
+        .map_or(chat_limit, |n| n.min(chat_limit));
     Some(Target {
         owner,
         site: 2,
         channel: integer(r, top, "_chosenTabType").unwrap_or(0),
         editing: true,
         point: input_point(r, label, send)?,
+        limit,
     })
 }

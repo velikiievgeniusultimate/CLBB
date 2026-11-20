@@ -7,6 +7,7 @@ typedef struct {
     guint site;
     int channel;
     guint editing, x, y;
+    int limit;
 } ClbbChatTarget;
 
 gboolean atl_chat_begin(GtkWindow *window, const ClbbChatTarget *target);
