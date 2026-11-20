@@ -3,8 +3,11 @@
 #include <gtk/gtk.h>
 #include <string.h>
 
-/* Android LengthFilter and the Unity input API count UTF-16 code units. GTK
- * stores UTF-8 and its built-in max-length counts Unicode code points. */
+typedef struct {
+    int utf16;
+    int bytes;
+} ClbbTextLimits;
+
 static inline int clbb_text_units(const char *text)
 {
     int units = 0;
@@ -35,22 +38,35 @@ static inline GtkEditable *clbb_text_delegate(GtkEditable *editable)
     return delegate ? delegate : editable;
 }
 
-static inline int clbb_text_limit(GtkEditable *editable)
+static inline ClbbTextLimits clbb_text_limits(GtkEditable *editable)
 {
-    editable = clbb_text_delegate(editable);
-    guint encoded = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(editable), "clbb-text-limit"));
-    return encoded ? (int)(encoded - 1) : -1;
+    const ClbbTextLimits *limits = g_object_get_data(G_OBJECT(clbb_text_delegate(editable)), "clbb-text-limits");
+    return limits ? *limits : (ClbbTextLimits){-1, -1};
+}
+
+/* The game uses UTF-8 bytes for the message. Android LengthFilter imposes
+ * an independent UTF-16 limit on the original editor. */
+static inline gsize clbb_text_fit(const char *text, gsize bytes, ClbbTextLimits remaining)
+{
+    if (remaining.bytes >= 0)
+        bytes = MIN(bytes, (gsize)remaining.bytes);
+    int units = remaining.utf16 < 0 ? G_MAXINT : remaining.utf16;
+    return clbb_text_prefix(text, bytes, units);
 }
 
 static void clbb_filter_insertion(GtkEditable *editable, const char *text,
-                                 int length, int *position, gpointer unused)
+                                 int length, int *position, gpointer data)
 {
-    (void)unused;
-    int limit = clbb_text_limit(editable);
-    if (limit < 0)
+    ClbbTextLimits remaining = *(const ClbbTextLimits *)data;
+    if (remaining.bytes < 0 && remaining.utf16 < 0)
         return;
+    const char *present = gtk_editable_get_text(editable);
+    if (remaining.bytes >= 0)
+        remaining.bytes = MAX(0, remaining.bytes - (int)strlen(present));
+    if (remaining.utf16 >= 0)
+        remaining.utf16 = MAX(0, remaining.utf16 - clbb_text_units(present));
     gsize bytes = length < 0 ? strlen(text) : (gsize)length;
-    gsize keep = clbb_text_prefix(text, bytes, limit - clbb_text_units(gtk_editable_get_text(editable)));
+    gsize keep = clbb_text_fit(text, bytes, remaining);
     if (keep == bytes)
         return;
     g_signal_stop_emission_by_name(editable, "insert-text");
@@ -58,22 +74,24 @@ static void clbb_filter_insertion(GtkEditable *editable, const char *text,
         gtk_editable_insert_text(editable, text, keep, position);
 }
 
-static inline void clbb_text_set_limit(GtkEditable *editable, int limit)
+static inline void clbb_text_set_limits(GtkEditable *editable, ClbbTextLimits next)
 {
-    if (limit == clbb_text_limit(editable))
-        return;
     editable = clbb_text_delegate(editable);
     GObject *object = G_OBJECT(editable);
-    if (!g_object_get_data(object, "clbb-text-limit-connected")) {
-        g_signal_connect(editable, "insert-text", G_CALLBACK(clbb_filter_insertion), NULL);
-        g_object_set_data(object, "clbb-text-limit-connected", GINT_TO_POINTER(1));
-    }
-    g_object_set_data(object, "clbb-text-limit", limit < 0 ? NULL : GUINT_TO_POINTER((guint)limit + 1));
-    if (limit < 0)
+    ClbbTextLimits *limits = g_object_get_data(object, "clbb-text-limits");
+    if (!limits) {
+        if (next.utf16 < 0 && next.bytes < 0)
+            return;
+        limits = g_new(ClbbTextLimits, 1);
+        g_object_set_data_full(object, "clbb-text-limits", limits, g_free);
+        g_signal_connect(editable, "insert-text", G_CALLBACK(clbb_filter_insertion), limits);
+    } else if (limits->utf16 == next.utf16 && limits->bytes == next.bytes) {
         return;
+    }
+    *limits = next;
     const char *text = gtk_editable_get_text(editable);
     gsize bytes = strlen(text);
-    gsize keep = clbb_text_prefix(text, bytes, limit);
+    gsize keep = clbb_text_fit(text, bytes, next);
     if (keep != bytes)
         gtk_editable_delete_text(editable, g_utf8_pointer_to_offset(text, text + keep), -1);
 }

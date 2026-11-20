@@ -567,7 +567,7 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..3a9dba9 100644
+index 3eb505c..e26fa30 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
 @@ -1,5 +1,8 @@
@@ -579,7 +579,7 @@ index 3eb505c..3a9dba9 100644
  
  #include "../defines.h"
  #include "../util.h"
-@@ -8,6 +11,469 @@
+@@ -8,6 +11,465 @@
  /* main app window */
  extern GtkWindow *window;
  
@@ -780,22 +780,18 @@ index 3eb505c..3a9dba9 100644
 +
 +static void update_chat_count(GtkEditable *editable, InlineChat *chat)
 +{
-+	int limit = clbb_text_limit(editable);
-+	int used = clbb_text_units(gtk_editable_get_text(editable));
++	int limit = clbb_text_limits(editable).bytes;
++	gsize used = strlen(gtk_editable_get_text(editable));
 +	char count[32];
-+	g_snprintf(count, sizeof(count), "%d/%d", used, limit);
++	g_snprintf(count, sizeof(count), "%" G_GSIZE_FORMAT "/%d", used, limit);
 +	gtk_label_set_text(GTK_LABEL(chat->count), count);
 +}
 +
 +static void update_chat_limit(InlineChat *chat)
 +{
-+	int limit = chat->target.limit;
-+	if (chat->source_entry) {
-+		int original = clbb_text_limit(GTK_EDITABLE(chat->source_entry));
-+		if (original >= 0)
-+			limit = MIN(limit, original);
-+	}
-+	clbb_text_set_limit(GTK_EDITABLE(chat->entry), limit);
++	int native = chat->source_entry ?
++		clbb_text_limits(GTK_EDITABLE(chat->source_entry)).utf16 : -1;
++	clbb_text_set_limits(GTK_EDITABLE(chat->entry), (ClbbTextLimits){native, chat->target.limit});
 +	update_chat_count(GTK_EDITABLE(chat->entry), chat);
 +}
 +
@@ -938,7 +934,7 @@ index 3eb505c..3a9dba9 100644
 +	                               GTK_ACCESSIBLE_PROPERTY_LABEL, "Закрыть и сохранить черновик", -1);
 +	chat->count = gtk_label_new(NULL);
 +	gtk_widget_add_css_class(chat->count, "chat-count");
-+	gtk_widget_set_tooltip_text(chat->count, "Длина сообщения");
++	gtk_widget_set_tooltip_text(chat->count, "Длина сообщения в байтах UTF-8");
 +	gtk_box_append(GTK_BOX(chat->card), chat->entry);
 +	gtk_box_append(GTK_BOX(chat->card), chat->count);
 +	gtk_box_append(GTK_BOX(chat->card), send);
@@ -1049,7 +1045,7 @@ index 3eb505c..3a9dba9 100644
  static gboolean on_close_request(GtkWidget *dialog, jobject jobj)
  {
  	printf("on_close_request\n");
-@@ -56,8 +522,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
+@@ -56,8 +518,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
  	GtkWidget *decor_view = GTK_WIDGET(_PTR(decor_view_ptr));
  	GtkWidget *dialog = gtk_window_new();
  	gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
@@ -1067,7 +1063,7 @@ index 3eb505c..3a9dba9 100644
  	return _INTPTR(g_object_ref(dialog));
  }
  
-@@ -74,26 +547,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,26 +543,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
@@ -3320,7 +3316,7 @@ index ef0513d..2ea8a44 100644
  	jsize data_jlen = (*env)->GetStringLength(env, data_jstr);
  	char *data = malloc(data_len + 1); // + 1 for NUL
 diff --git a/src/api-impl-jni/widgets/android_widget_EditText.c b/src/api-impl-jni/widgets/android_widget_EditText.c
-index d53bc4f..51985e0 100644
+index d53bc4f..556febe 100644
 --- a/src/api-impl-jni/widgets/android_widget_EditText.c
 +++ b/src/api-impl-jni/widgets/android_widget_EditText.c
 @@ -1,4 +1,5 @@
@@ -3414,7 +3410,7 @@ index d53bc4f..51985e0 100644
 +JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setLengthLimit(JNIEnv *env, jobject this, jlong widget_ptr, jint max)
 +{
 +	GtkWidget *text = GTK_WIDGET(_PTR(widget_ptr));
-+	clbb_text_set_limit(GTK_EDITABLE(text), max);
++	clbb_text_set_limits(GTK_EDITABLE(text), (ClbbTextLimits){max, -1});
 +	atl_chat_source_limit_changed(text);
 +}
 +
@@ -3428,10 +3424,10 @@ index d53bc4f..51985e0 100644
 +	if (!text)
 +		return;
 +	GtkText *editor = GTK_TEXT(_PTR(widget_ptr));
-+	int limit = clbb_text_limit(GTK_EDITABLE(editor));
++	ClbbTextLimits limits = clbb_text_limits(GTK_EDITABLE(editor));
 +	int count = -1;
-+	if (limit >= 0) {
-+		gsize keep = clbb_text_prefix(text, strlen(text), limit);
++	if (limits.utf16 >= 0 || limits.bytes >= 0) {
++		gsize keep = clbb_text_fit(text, strlen(text), limits);
 +		count = g_utf8_pointer_to_offset(text, text + keep);
 +	}
 +	gtk_entry_buffer_set_text(gtk_text_get_buffer(editor), text, count);

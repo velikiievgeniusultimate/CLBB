@@ -6,7 +6,7 @@ static void check_editor(GtkEditable *entry)
     GtkEditable *input = gtk_editable_get_delegate(entry);
     if (!input)
         input = entry;
-    clbb_text_set_limit(entry, 6);
+    clbb_text_set_limits(entry, (ClbbTextLimits){6, -1});
     int at = 0;
     gtk_editable_insert_text(input, "абвгдеёж", -1, &at);
     g_assert_cmpstr(gtk_editable_get_text(entry), ==, "абвгде");
@@ -18,16 +18,31 @@ static void check_editor(GtkEditable *entry)
     g_assert_cmpstr(gtk_editable_get_text(entry), ==, "аб🌙🌞");
     g_assert_cmpint(at, ==, 4);
 
-    clbb_text_set_limit(entry, 5);
+    clbb_text_set_limits(entry, (ClbbTextLimits){5, -1});
     g_assert_cmpstr(gtk_editable_get_text(entry), ==, "аб🌙");
     gtk_editable_set_text(entry, "1234🌙5");
     g_assert_cmpstr(gtk_editable_get_text(entry), ==, "1234");
-    clbb_text_set_limit(entry, 0);
+    clbb_text_set_limits(entry, (ClbbTextLimits){0, -1});
     gtk_editable_set_text(entry, "з");
     g_assert_cmpstr(gtk_editable_get_text(entry), ==, "");
-    clbb_text_set_limit(entry, -1);
+    clbb_text_set_limits(entry, (ClbbTextLimits){-1, -1});
     gtk_editable_set_text(entry, "абвгдеёж");
     g_assert_cmpint(clbb_text_units(gtk_editable_get_text(entry)), ==, 8);
+
+    gtk_editable_set_text(entry, "");
+    clbb_text_set_limits(entry, (ClbbTextLimits){-1, 6});
+    at = 0;
+    gtk_editable_insert_text(input, "абвг", -1, &at);
+    g_assert_cmpstr(gtk_editable_get_text(entry), ==, "абв");
+    gtk_editable_set_text(entry, "長度限制");
+    g_assert_cmpstr(gtk_editable_get_text(entry), ==, "長度");
+    gtk_editable_set_text(entry, "я🌙а");
+    g_assert_cmpstr(gtk_editable_get_text(entry), ==, "я🌙");
+    gtk_editable_set_text(entry, "abc🌙");
+    g_assert_cmpstr(gtk_editable_get_text(entry), ==, "abc");
+    clbb_text_set_limits(entry, (ClbbTextLimits){2, 6});
+    gtk_editable_set_text(entry, "а🌙б");
+    g_assert_cmpstr(gtk_editable_get_text(entry), ==, "а");
 }
 
 int main(void)
@@ -39,5 +54,5 @@ int main(void)
     check_editor(GTK_EDITABLE(text));
     g_object_unref(entry);
     g_object_unref(text);
-    g_print("CHAT_LENGTH_OK native typing, paste, replacement, dynamic limits and UTF-16 pairs\n");
+    g_print("CHAT_LENGTH_OK native typing, paste, replacement, dynamic UTF-8 and UTF-16 limits\n");
 }
