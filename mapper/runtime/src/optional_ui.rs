@@ -91,6 +91,20 @@ pub(crate) fn button_widget<M: Memory>(r: &mut Reflection<M>, checks: &mut Check
 }
 
 #[derive(Clone)]
+struct UpgradeLevel {
+    current: u64,
+    maximum: u64,
+    visible_at_maximum: bool,
+}
+impl UpgradeLevel {
+    fn permits(&self, current: i32, maximum: i32) -> bool {
+        (1..=100).contains(&maximum)
+            && (0..=maximum).contains(&current)
+            && (current < maximum || self.visible_at_maximum)
+    }
+}
+
+#[derive(Clone)]
 struct Control {
     slot: String,
     kind: &'static str,
@@ -98,7 +112,7 @@ struct Control {
     widget: Widget,
     target: Path,
     visibility: Vec<(u64, usize)>,
-    level: Option<(u64, u64)>,
+    level: Option<UpgradeLevel>,
     price: Option<(u64, u64)>, // UILabel.mText pointer field; ShowEntity._iGold.
 }
 impl Control {
@@ -174,10 +188,10 @@ impl Control {
         }
         let alpha = f32::from_le_bytes(state[4].1[..].try_into().unwrap());
         active &= alpha.is_finite() && alpha > 0. && alpha <= 1.001 && u64_at(&state[5].1, 0) != 0;
-        if let Some((level, max)) = self.level {
-            let level = i32_at(&capture(r, &mut state, level, 4)?, 0);
-            let max = i32_at(&capture(r, &mut state, max, 4)?, 0);
-            active &= 0 <= level && level < max && max <= 100;
+        if let Some(level) = &self.level {
+            let current = i32_at(&capture(r, &mut state, level.current, 4)?, 0);
+            let maximum = i32_at(&capture(r, &mut state, level.maximum, 4)?, 0);
+            active &= level.permits(current, maximum);
         }
         if let Some((label, gold)) = self.price {
             let string = u64_at(&capture(r, &mut state, label, 8)?, 0);
@@ -522,6 +536,29 @@ impl OptionalUi {
                         link(r, &mut family.checks, button, "m_Background_SkillAddSprite")?;
                     let data = link(r, &mut family.checks, button, "m_SkillData")?;
                     owner(r, &mut family.checks, data)?;
+                    // Lylia's W can display an enabled upgrade button while
+                    // skillLvl equals m_iMaxSkillLevel. The observed UIButton
+                    // must still own the rendered plus before we trust it.
+                    let visible_at_maximum = if index == 1
+                        && r.integer(self.local_hero_address)? == 86
+                        && r.class_name(r.pointer(button)?)? == "SkillButtonAutoCharge"
+                    {
+                        let hero = i32_at(&capture(r, &mut family.checks, self.local_hero_address, 4)?, 0);
+                        let base_at = r.field(data, "m_InitSkillID")?;
+                        let base = i32_at(&capture(r, &mut family.checks, base_at, 4)?, 0);
+                        let mut witness = Vec::new();
+                        if hero == 86
+                            && base == 8620
+                            && button_widget(r, &mut witness, target).ok() == Some(sprite)
+                        {
+                            family.checks.extend(witness);
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
                     let mut control = Control::new(
                         r,
                         &mut family.checks,
@@ -531,10 +568,11 @@ impl OptionalUi {
                         target,
                         sprite,
                     )?;
-                    control.level = Some((
-                        r.field(data, "skillLvl")?,
-                        r.field(button, "m_iMaxSkillLevel")?,
-                    ));
+                    control.level = Some(UpgradeLevel {
+                        current: r.field(data, "skillLvl")?,
+                        maximum: r.field(button, "m_iMaxSkillLevel")?,
+                        visible_at_maximum,
+                    });
                     Ok(control)
                 })();
                 match built {
@@ -853,6 +891,21 @@ mod tests {
         ] {
             assert!(!target_field(raw), "{raw}");
         }
+    }
+    #[test]
+    fn observed_upgrade_can_be_available_at_the_reported_maximum() {
+        let mut level = UpgradeLevel {
+            current: 0,
+            maximum: 0,
+            visible_at_maximum: false,
+        };
+        assert!(level.permits(5, 6));
+        assert!(!level.permits(6, 6));
+        level.visible_at_maximum = true;
+        assert!(level.permits(6, 6));
+        assert!(!level.permits(7, 6));
+        assert!(!level.permits(0, 0));
+        assert!(!level.permits(-1, 6));
     }
     #[test]
     fn capabilities_are_unique_and_never_make_hidden_buttons_clickable() {
