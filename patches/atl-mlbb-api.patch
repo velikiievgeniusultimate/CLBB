@@ -567,7 +567,7 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..25609ee 100644
+index 3eb505c..6e606a2 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
 @@ -1,5 +1,7 @@
@@ -578,7 +578,7 @@ index 3eb505c..25609ee 100644
  
  #include "../defines.h"
  #include "../util.h"
-@@ -8,6 +10,386 @@
+@@ -8,6 +10,403 @@
  /* main app window */
  extern GtkWindow *window;
  
@@ -768,6 +768,23 @@ index 3eb505c..25609ee 100644
 +	return out->width > 0 && out->height > 0;
 +}
 +
++static gboolean query_chat_site(GtkWindow *owner, ClbbChatTarget *target)
++{
++	gboolean (*chat_site)(GtkWindow *, ClbbChatTarget *) =
++		dlsym(RTLD_DEFAULT, "clbb_chat_site");
++	return chat_site && chat_site(owner, target);
++}
++
++static void refresh_chat_channel(InlineChat *chat)
++{
++	ClbbChatTarget live;
++	// The ranked room can finish selecting its Team tab after the editor
++	// opens. Use its actual channel before indexing or discarding a draft.
++	if (query_chat_site(chat->owner, &live) &&
++	    live.site == chat->target.site && live.owner == chat->target.owner)
++		chat->target.channel = live.channel;
++}
++
 +static gboolean message_present(const char *str)
 +{
 +	for (; *str; str = g_utf8_next_char(str))
@@ -790,12 +807,13 @@ index 3eb505c..25609ee 100644
 +	if (controls.texts != 1 || controls.buttons != 1 || !gtk_widget_is_sensitive(controls.confirm))
 +		return;
 +	chat->finishing = TRUE;
++	g_autofree char *message = g_strdup(text);
 +	gtk_widget_set_sensitive(chat->card, FALSE);
++	refresh_chat_channel(chat);
 +	if (same_draft(g_object_get_data(G_OBJECT(chat->owner), "atl-chat-draft"), &chat->target))
 +		g_object_set_data(G_OBJECT(chat->owner), "atl-chat-draft", NULL);
 +	g_autoptr(GtkWidget) confirm = g_object_ref(controls.confirm);
 +	g_autoptr(GtkWidget) source = g_object_ref(controls.text);
-+	g_autofree char *message = g_strdup(text);
 +	gtk_editable_set_text(GTK_EDITABLE(source), message);
 +	g_signal_emit_by_name(confirm, "clicked");
 +}
@@ -804,6 +822,7 @@ index 3eb505c..25609ee 100644
 +{
 +	if (chat->finishing)
 +		return;
++	refresh_chat_channel(chat);
 +	ChatDraft *draft = g_new0(ChatDraft, 1);
 +	draft->target = chat->target;
 +	draft->text = g_strdup(gtk_editable_get_text(GTK_EDITABLE(chat->entry)));
@@ -913,10 +932,8 @@ index 3eb505c..25609ee 100644
 +	find_text_controls(gtk_window_get_child(dialog), &controls);
 +	if (controls.texts != 1 || controls.buttons != 1)
 +		return FALSE;
-+	gboolean (*chat_site)(GtkWindow *, ClbbChatTarget *) =
-+		dlsym(RTLD_DEFAULT, "clbb_chat_site");
 +	ClbbChatTarget target = {0};
-+	if (!chat_site || !chat_site(owner, &target))
++	if (!query_chat_site(owner, &target))
 +		return FALSE;
 +	if (!chat && !atl_chat_begin(owner, &target))
 +		return FALSE;
@@ -965,7 +982,7 @@ index 3eb505c..25609ee 100644
  static gboolean on_close_request(GtkWidget *dialog, jobject jobj)
  {
  	printf("on_close_request\n");
-@@ -56,8 +438,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
+@@ -56,8 +455,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
  	GtkWidget *decor_view = GTK_WIDGET(_PTR(decor_view_ptr));
  	GtkWidget *dialog = gtk_window_new();
  	gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
@@ -983,7 +1000,7 @@ index 3eb505c..25609ee 100644
  	return _INTPTR(g_object_ref(dialog));
  }
  
-@@ -74,26 +463,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,26 +480,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
