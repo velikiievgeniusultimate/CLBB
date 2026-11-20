@@ -194,6 +194,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let zhask_q = Skill { hero: 50, base: 5010, form: 5010, slot: "skill:0" };
     let zhask_e = Skill { hero: 50, base: 5030, form: 5030, slot: "skill:2" };
     let zhask_r = Skill { hero: 50, base: 5040, form: 5040, slot: "skill:3" };
+    let jawhead_q = Skill { hero: 54, base: 5410, form: 5410, slot: "skill:0" };
     for (skill, code, form) in [
         (miya, 81, 111), (freya, 69, 2254),
         (sun_q, 81, 2710), (sun_q, 81, 2705), (sun_q, 81, 2708),
@@ -203,6 +204,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         (zhask_q, 81, 5010), (zhask_q, 81, 5013),
         (zhask_e, 69, 5030), (zhask_e, 69, 105040),
         (zhask_r, 82, 5040), (zhask_r, 82, 5076),
+        (jawhead_q, 81, 5417),
     ] {
         let (mut c, mut h) = setup(skill, Some(false), 1, 0);
         let movement = c.movementTouch_;
