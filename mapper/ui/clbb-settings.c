@@ -1836,6 +1836,9 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   gtk_box_append(GTK_BOX(card),wrap_label("Выбор применяется только к CLBB. Включите микрофон в самой игре для голосового чата.","clbb-muted"));
   b = page(s, "hotkeys", "Горячие клавиши",
            "Системные действия можно назначить на удобные кнопки.");
+  card = section(b, "Чат");
+  bind_control(s, card, "Быстрый ввод в чат", "hotkeys.chat", 0x01000004);
+
   card = section(b, "Окно и курсор");
   bind_control(s, card, "Открыть настройки", "hotkeys.settings", KEY_F1 + 6);
   bind_control(s, card, "Ограничить курсор игровой областью", "hotkeys.confine",

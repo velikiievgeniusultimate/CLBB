@@ -81,6 +81,7 @@ struct Shared {
     max_navigation_ms: f64,
     chooser: Option<(crate::account_chooser::Chooser, Instant)>,
     chooser_generation: u64,
+    chat: Option<(crate::chat_ui::Target, Instant)>,
 }
 impl Shared {
     fn update_chooser(&mut self, next: Option<crate::account_chooser::Chooser>) {
@@ -148,7 +149,8 @@ impl Worker {
                 let mut epoch = String::new();
                 let mut nav_at = Instant::now() - Duration::from_secs(5);
                 let mut last_success = None;
-                let mut chooser = crate::account_chooser::Reader::default();
+                let mut frames = crate::account_chooser::Reader::default();
+                let mut chat_at = Instant::now();
                 let mut result_at = 0i64;
                 let mut audit_at=0i64;let mut full_frame_at=0i64;let mut frame_identity=(0,String::new());
                 while !quit.load(Ordering::Relaxed) {
@@ -250,14 +252,26 @@ impl Worker {
                         out.mesh = None;
                     }
                     if active {
+                        if now >= chat_at {
+                            chat_at = now + Duration::from_millis(55);
+                            let target = frames.active_frames(&mut source.reflection)
+                                .and_then(|visible| crate::chat_ui::locate(&mut source.reflection, &visible, true));
+                            out.lock().unwrap().chat = target.map(|v| (v, Instant::now()));
+                        }
                         if !wait.is_zero() { std::thread::sleep(wait); }
                     } else {
                         // Only the lightweight menu reader runs between idle match-source checks.
                         let deadline = Instant::now() + wait;
                         while Instant::now() < deadline && !quit.load(Ordering::Relaxed) {
-                            let state = chooser.read(&mut source.reflection);
-                            out.lock().unwrap().update_chooser(state);
-                            std::thread::sleep(Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())));
+                            let visible = frames.active_frames(&mut source.reflection).unwrap_or_default();
+                            let state = crate::account_chooser::Reader::locate(&mut source.reflection, &visible);
+                            let target = crate::chat_ui::locate(&mut source.reflection, &visible, false);
+                            {
+                                let mut shared = out.lock().unwrap();
+                                shared.update_chooser(state);
+                                shared.chat = target.map(|v| (v, Instant::now()));
+                            }
+                            std::thread::sleep(Duration::from_millis(70).min(deadline.saturating_duration_since(Instant::now())));
                         }
                     }
                 }
@@ -1210,6 +1224,9 @@ impl Runtime {
         let v=match key {
             "audio.input_devices"|"audio.output_devices"|"audio.status"|"audio.capture_status"|"audio.playback_status"=>crate::audio::read(key),
             "hero.id"=>hero.to_string(),"hero.name"=>hero_display_name(hero),
+            "chat.target" => self.worker.shared.lock().unwrap().chat
+                .filter(|(_,at)| at.elapsed() <= Duration::from_millis(280))
+                .map(|(v,_)| v.encode()).unwrap_or_default(),
             "account.chooser" => self.worker.shared.lock().unwrap().chooser_layout(),
             "profiles.catalog" => (1..=134).map(|id| format!("{id}\t{}\n", hero_display_name(id))).collect(),
             _ if profile_setting(key).is_some() => {

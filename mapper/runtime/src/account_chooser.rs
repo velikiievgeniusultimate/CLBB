@@ -20,7 +20,7 @@ pub struct Reader {
     discovery: Option<Instant>,
 }
 
-fn named<M: Memory>(r: &mut Reflection<M>, obj: u64, field: &str, name: &str) -> bool {
+pub(crate) fn named<M: Memory>(r: &mut Reflection<M>, obj: u64, field: &str, name: &str) -> bool {
     let Ok(s) = r.link(obj, field) else {
         return false;
     };
@@ -36,7 +36,7 @@ fn named<M: Memory>(r: &mut Reflection<M>, obj: u64, field: &str, name: &str) ->
 }
 
 impl Reader {
-    pub fn read<M: Memory>(&mut self, r: &mut Reflection<M>) -> Option<Chooser> {
+    pub(crate) fn active_frames<M: Memory>(&mut self, r: &mut Reflection<M>) -> Option<Vec<u64>> {
         if self.frames.is_none() {
             if self
                 .discovery
@@ -48,8 +48,11 @@ impl Reader {
             r.discover(&["BaseFrame"]).ok()?;
             self.frames = r.static_field("BaseFrame", "m_ActiveFrameList").ok();
         }
-        let frames = r.list(r.pointer(self.frames?).ok()?).ok()?;
-        let frame = frames.into_iter().rev().find(|&f| f != 0)?;
+        r.list(r.pointer(self.frames?).ok()?).ok()
+    }
+
+    pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64]) -> Option<Chooser> {
+        let frame = frames.iter().rev().copied().find(|&f| f != 0)?;
         if !named(r, frame, "name", "UI_AccountBinding") {
             return None;
         }

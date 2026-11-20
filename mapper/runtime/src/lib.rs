@@ -2,6 +2,8 @@
 #![recursion_limit="512"]
 #[cfg(target_os = "linux")]
 mod account_chooser;
+#[cfg(target_os = "linux")]
+mod chat_ui;
 pub mod aim;
 mod hero_names;
 mod control_audit;

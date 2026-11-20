@@ -339,6 +339,7 @@ impl Settings {
             "audio.input_device" | "audio.output_device" => "default".into(),
             "audio.volume" | "audio.game_volume" | "audio.voice_volume" => "100".into(),
             "audio.muted" | "display.show_fps" => "false".into(),
+            "hotkeys.chat" => 0x01000004.to_string(),
             "hotkeys.settings" => F7.to_string(),
             "hotkeys.confine" => F12.to_string(),
             "hotkeys.fullscreen" => F11.to_string(),
@@ -508,19 +509,20 @@ impl Settings {
             "movement.click_mode" | "hero.movement.click_mode" => matches!(value, "0" | "1" | "2"),
             "movement.click_distance_percent" | "hero.movement.click_distance_percent" => integer.is_some_and(|v| (0..=500).contains(&v)),
             "movement.hold_ms" | "hero.movement.hold_ms" => integer.is_some_and(|v| (40..=600).contains(&v)),
-            "hotkeys.settings" | "hotkeys.confine" | "hotkeys.fullscreen" => {
+            "hotkeys.settings" | "hotkeys.confine" | "hotkeys.fullscreen" | "hotkeys.chat" => {
                 integer.is_some_and(|v| {
-                    valid_key(v)
-                        && v != 0
-                        && !["hotkeys.settings", "hotkeys.confine", "hotkeys.fullscreen", "debug.mark_shortcut"]
-                            .into_iter()
-                            .any(|k| k != key && self.integer(k, hero) == v)
+                    if v == 0 { return key == "hotkeys.chat"; }
+                    valid_key(v) && !["hotkeys.settings", "hotkeys.confine", "hotkeys.fullscreen", "hotkeys.chat", "debug.mark_shortcut"]
+                        .into_iter()
+                        .any(|k| k != key && (self.integer(k, hero) == v
+                            || ((k == "hotkeys.chat" || key == "hotkeys.chat") &&
+                                enter_key(v) && enter_key(self.integer(k, hero)))))
                 })
             }
             "debug.mark_shortcut" => integer.is_some_and(|v| {
                 let base=v & !0x0e000000;
                 v==0 || (v>0 && v & !0x3fffffff==0 && valid_key(base) && base!=0
-                    && (v & 0x0e000000!=0 || !["hotkeys.settings","hotkeys.confine","hotkeys.fullscreen"].iter().any(|key|self.integer(key,hero)==v)))
+                    && (v & 0x0e000000!=0 || !["hotkeys.settings","hotkeys.confine","hotkeys.fullscreen","hotkeys.chat"].iter().any(|key|self.integer(key,hero)==v || (*key=="hotkeys.chat" && enter_key(v) && enter_key(self.integer(key,hero))))))
             }),
             "hero.cancel_key" | "common.cancel_key" | "movement.button" | "hero.movement.button" => {
                 integer.is_some_and(|v| valid_key(v) && !self.reserved(v, hero))
@@ -569,9 +571,10 @@ impl Settings {
     }
     fn reserved(&self, key: i32, hero: i32) -> bool {
         key != 0
-            && ["hotkeys.settings", "hotkeys.confine", "hotkeys.fullscreen", "debug.mark_shortcut"]
+            && ["hotkeys.settings", "hotkeys.confine", "hotkeys.fullscreen", "hotkeys.chat", "debug.mark_shortcut"]
                 .into_iter()
-                .any(|k| self.integer(k, hero) == key)
+                .any(|k| self.integer(k, hero) == key ||
+                    (k == "hotkeys.chat" && enter_key(key) && enter_key(self.integer(k, hero))))
     }
     fn save(&self) -> Result<(), String> {
         if self.path.as_os_str().is_empty() {
@@ -632,6 +635,10 @@ pub fn hold_duration_skill(hero: i32, slot: &str) -> bool {
         || (hero==78 && base=="skill:0")
         || (hero==104 && base=="skill:2")
 }
+fn enter_key(key: i32) -> bool {
+    matches!(key, 0x01000004 | 0x01000005)
+}
+
 pub fn valid_key(key: i32) -> bool {
     key == 0
         || ((32..=0x10ffff).contains(&key) && !(0xd800..=0xdfff).contains(&key))
@@ -1088,6 +1095,18 @@ mod tests {
         assert_eq!(s.get("display.width", 0), "4000");
         s.set("display.resolution", "1920x1080", 0).unwrap();
         assert_eq!(s.get("display.height", 0), "1080");
+    }
+    #[test]
+    fn quick_chat_defaults_to_enter_and_can_be_rebound() {
+        let mut s = Settings::default();
+        assert_eq!(s.integer("hotkeys.chat", 0), 0x01000004);
+        assert!(s.set("hotkeys.fullscreen", &0x01000005.to_string(), 0).is_err());
+        assert!(s.set("common.bindings.skill:0.key", &0x01000005.to_string(), 0).is_err());
+        assert!(s.set("hotkeys.chat", &s.integer("hotkeys.settings", 0).to_string(), 0).is_err());
+        s.set("hotkeys.chat", "0", 0).unwrap();
+        s.set("common.bindings.skill:0.key", &0x01000005.to_string(), 0).unwrap();
+        s.set("hotkeys.chat", &0x01000037.to_string(), 0).unwrap();
+        assert_eq!(s.integer("hotkeys.chat", 0), 0x01000037);
     }
     #[test]
     fn lmb_never_bindable() {

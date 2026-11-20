@@ -56,7 +56,7 @@ static gboolean write_value(void *data, const char *key, const char *value) {
     return FALSE;
   if (g_str_has_prefix(key, "hotkeys.")) {
     const char *slots[] = {"hotkeys.settings", "hotkeys.confine",
-                           "hotkeys.fullscreen"};
+                           "hotkeys.fullscreen", "hotkeys.chat"};
     for (guint i = 0; i < G_N_ELEMENTS(slots); ++i)
       if (strcmp(slots[i], key) && g_ascii_strtoll(value, NULL, 0) &&
           g_ascii_strtoll(value, NULL, 0) ==
@@ -191,6 +191,7 @@ int main(int argc, char **argv) {
   put(&p, "hero.name", "Кагура");
   put(&p, "status", "Матч активен · профиль Кагуры");
   put(&p, "diagnostics.source_ms", "0.12");
+  put(&p, "hotkeys.chat", "16777220");
   put(&p, "hotkeys.settings", "16777270");
   put(&p, "hotkeys.confine", "16777275");
   put(&p, "hotkeys.fullscreen", "16777274");
