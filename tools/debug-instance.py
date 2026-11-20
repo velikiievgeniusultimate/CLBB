@@ -25,12 +25,7 @@ def profile(name):
  return BASE/name
 
 def selection():
- current=json.loads((ROOT/'.clbb-local-runtime.json').read_text())
- pending=ROOT/'logs/wind-item-cancel-2026-11-16/pending-activation.json'
- if pending.exists():
-  activation=json.loads(pending.read_text())
-  if current==activation['old']:return activation['new']
- return current
+ return json.loads((ROOT/'.clbb-local-runtime.json').read_text())
 
 def sync_runtime(state):
  path=state/'.clbb-local-runtime.json'

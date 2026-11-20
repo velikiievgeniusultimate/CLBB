@@ -49,6 +49,29 @@ class ReleaseWorkflowTests(unittest.TestCase):
    self.assertEqual(wrapper.read_text(), routed.replace(shlex.quote(str(old)), shlex.quote(str(new))))
    self.assertTrue(wrapper.stat().st_mode & 0o100)
 
+ def test_explicit_selection_retires_deferred_activation_and_its_self_exec(self):
+  with tempfile.TemporaryDirectory() as directory:
+   root = Path(directory)/'working copy'
+   new = root/'new runtime'
+   launcher = new/'bin/clbb-launcher'
+   launcher.parent.mkdir(parents=True)
+   launcher.write_text('#!/bin/sh\necho "$1"\n')
+   launcher.chmod(0o755)
+   wrapper = root/'.clbb-local-launch'
+   pending = root/'logs/older build'
+   activation = shlex.join(['python3', str(pending/'activate-next-launch.py'), str(pending/'pending-activation.json')])
+   with patch.object(workflow, 'ROOT', root):
+    workflow.write_local_launcher(wrapper, root/'old')
+    custom = 'export CLBB_ACCOUNT_BYPASS=1\n'
+    wrapper.write_text(wrapper.read_text().replace('set -eu\n', 'set -eu\n' + custom + activation + '\nexec "$0" "$@"\n'))
+    workflow.write_local_launcher(wrapper, new)
+    repaired = wrapper.read_text()
+    workflow.write_local_launcher(wrapper, new)
+   self.assertEqual(wrapper.read_text(), repaired)
+   self.assertIn(custom, repaired)
+   self.assertNotIn(activation, repaired)
+   self.assertEqual(subprocess.check_output([wrapper, 'ready'], text=True, timeout=3).strip(), 'ready')
+
  def test_native_only_updates_keep_art_paths_but_changed_jars_get_new_paths(self):
   with tempfile.TemporaryDirectory() as directory:
    workbench = Path(directory)

@@ -4,6 +4,17 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('debug_instance',ROOT/'tools/debug-instance.py');module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 class DebugInstanceTests(unittest.TestCase):
+ def test_all_profiles_use_the_explicit_runtime_even_after_an_older_experiment(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp)
+   selected={'directory':'selected'}
+   (root/'.clbb-local-runtime.json').write_text(json.dumps(selected))
+   pending=root/'logs/wind-item-cancel-2026-11-16/pending-activation.json'
+   pending.parent.mkdir(parents=True)
+   pending.write_text(json.dumps({'old':selected,'new':{'directory':'superseded'}}))
+   with patch.object(module,'ROOT',root):
+    self.assertEqual(module.selection(),selected)
+
  def test_fresh_profile_does_not_copy_authentication_or_change_primary(self):
   with tempfile.TemporaryDirectory()as td:
    t=Path(td);source=t/'primary';home=t/'home';source.mkdir();settings=home/'.config/clbb/settings.json';settings.parent.mkdir(parents=True);settings.write_text(json.dumps({'values':{'display.resolution':'4000x3111','common.bindings.skill:0.key':'81'}}))

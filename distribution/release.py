@@ -141,6 +141,23 @@ def select_art_components(target, workbench):
         hint.unlink(missing_ok=True)
         print(f'Using this runtime’s own ART libraries ({error})', file=sys.stderr)
 
+def without_deferred_activation(lines):
+    # Old workbench wrappers apply a pending build and then re-execute themselves.
+    # An explicit use-local supersedes that pair, including its unconditional exec.
+    for i, line in enumerate(lines[:-1]):
+        if lines[i + 1] != 'exec "$0" "$@"' or not line.startswith('python3 '):
+            continue
+        try:
+            argv = shlex.split(line)
+        except ValueError:
+            continue
+        if len(argv) == 3:
+            helper, plan = map(Path, argv[1:])
+            if (helper.name == 'activate-next-launch.py' and helper.is_relative_to(ROOT/'logs')
+                    and '..' not in helper.parts and plan == helper.with_name('pending-activation.json')):
+                return lines[:i] + lines[i + 2:]
+    return lines
+
 def write_local_launcher(wrapper, target):
     root_line = 'export CLBB_ROOT=' + shlex.quote(str(target))
     state_line = 'export CLBB_STATE_ROOT=' + shlex.quote(str(ROOT))
@@ -153,7 +170,7 @@ def write_local_launcher(wrapper, target):
         # The workbench wrapper can also select an account and a host network route.
         if len(exports) == 1 and state_line in current and any(launch in line for line in current):
             current[exports[0]] = root_line
-            lines = current
+            lines = without_deferred_activation(current)
     with tempfile.NamedTemporaryFile('w', dir=wrapper.parent, delete=False) as output:
         staging = Path(output.name)
         try:
