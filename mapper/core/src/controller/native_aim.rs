@@ -11,11 +11,15 @@ use std::collections::BTreeSet;
 const NS100: f64 = 100_000_000.;
 const NS250: f64 = 250_000_000.;
 const POINT_SOURCE: &str = "IndicatorMotionPos.m_vDragResult";
-fn direct_source(source:&str)->bool { matches!(source,Q_SOURCE_A | Q_SOURCE_B | POINT_SOURCE | ATTACK_SOURCE) }
+fn direct_source(source: &str) -> bool {
+    matches!(source, Q_SOURCE_A | Q_SOURCE_B | POINT_SOURCE | ATTACK_SOURCE | LESLEY_SOURCE)
+}
 const Q_SOURCE_A: &str = "IndicatorMotionFaTiaoQiu2.m_vDragResult";
 const Q_SOURCE_B: &str = "IndicatorMotionRotAndPosRot.m_vDragResult";
 const ATTACK_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult";
 const ATTACK_RANGE_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio";
+const LESLEY_SOURCE: &str = "IndicatorMotionPosSelectAndRot.m_vDragResult";
+const LESLEY_RANGE_SOURCE: &str = "IndicatorMotionPosSelectAndRot.m_vDragResult/m_fDragRatio";
 const RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]";
 const HANZO_GHOST_RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]*[20]";
 fn known_direction_source(hero:i32,skill:i32,source:&str)->bool {
@@ -120,8 +124,12 @@ impl Controller {
         self.skillVariantSampleNs_ = last as i64;
         self.skillVariantSampleStartNs_ = first as i64;
     }
+    fn lesley_ultimate(&self, button: &Button) -> bool {
+        self.heroId_ == 53 && button.slot == "skill:2" && button.kind == "skill"
+            && button.skillId == 5330
+    }
     pub(crate) fn classify_skill(&self, button: &Button) -> SkillBehavior {
-        if self.tap_only(button) {
+        if self.tap_only(button) || (button.castMode == 1 && self.lesley_ultimate(button)) {
             return SkillBehavior::Tap;
         }
         if Self::is_retribution(button) {
@@ -474,9 +482,14 @@ impl Controller {
     pub(crate) fn select_logical_coordinates(&mut self, host: &mut impl Host, frame: &Frame) {
         let logical = &frame.logical;
         let source = logical.source.as_str();
-        let known = direct_source(source) && (source!=ATTACK_SOURCE
-            || self.activeSlot_=="attack" && self.find_button("attack").is_some_and(|b|b.kind=="attack"&&b.aimType==3));
         let frame_skill = frame.skill_id.int();
+        let known = match source {
+            ATTACK_SOURCE => self.activeSlot_ == "attack"
+                && self.find_button("attack").is_some_and(|b| b.kind == "attack" && b.aimType == 3),
+            LESLEY_SOURCE => frame_skill == 5330 && self.skillBehavior_ == SkillBehavior::Range
+                && self.find_button(&self.activeSlot_).is_some_and(|b| self.lesley_ultimate(b)),
+            _ => direct_source(source),
+        };
         let same_skill = self.skillTouch_ >= 0
             && self.frameActiveSlot_ == self.activeSlot_
             && frame_skill > 0
@@ -646,6 +659,8 @@ impl Controller {
         }
         let range_source = if self.logicalSource_ == ATTACK_SOURCE {
             ATTACK_RANGE_SOURCE
+        } else if self.logicalSource_ == LESLEY_SOURCE {
+            LESLEY_RANGE_SOURCE
         } else if self.heroId_ == 69 && self.aimSkillId_ == 69200
             && self.activeSlot_ == "skill:1" && self.logicalSource_ == Q_SOURCE_B {
             HANZO_GHOST_RANGE_SOURCE
@@ -654,6 +669,7 @@ impl Controller {
             if witness_fields {
                 if logical.world_range_source.as_str() != range_source
                     || (!native_q && !logical.world_range_source_present.get())
+                    || (range_source == LESLEY_RANGE_SOURCE && !self.logicalSampleFresh_)
                     || !logical.world_range.is_number()
                     || !logical.world_range.value.is_finite()
                     || logical.world_range.value < 1e-4
@@ -1450,6 +1466,71 @@ mod tests {
         f.logical.drag_ratio = Number::default();
         f.logical.world_range = n(3.);
         (c, f, h)
+    }
+    #[test]
+    fn lesley_ultimate_arms_the_native_drag_and_uses_its_current_range() {
+        let (mut c, mut f, mut h) = generic_point_range_fixture(53, 5330);
+        c.activeSlot_ = "skill:2".into();
+        c.frameActiveSlot_ = c.activeSlot_.clone();
+        c.aimReady_ = true;
+        c.skillBehavior_ = SkillBehavior::Range;
+        c.buttons_[0].slot = c.activeSlot_.clone();
+        c.buttons_[0].kind = "skill".into();
+        f.logical.joystick.slot = text("skill:2");
+        f.logical.source = text(LESLEY_SOURCE);
+        f.logical.world_range = Number::default();
+        f.logical.world_range_source = Text::default();
+        f.logical.world_range_source_present = flag(false);
+        c.select_logical_coordinates(&mut h, &f);
+        c.configure_direct(&mut h, &f);
+        assert!(c.logicalInputFresh_ && c.directGeometryFresh_);
+        assert!(!c.logicalSampleFresh_);
+        assert_eq!(c.direct_.ready, 0);
+        c.update_range_drag_arming(&mut h, &f);
+        assert!(c.qDragArming_);
+        assert!(!h.moves.is_empty());
+
+        f.logical.ready = flag(true);
+        f.logical.valid_drag = flag(true);
+        f.logical.first_drag = flag(false);
+        f.logical.offset_xz = v2(3., 4.);
+        f.logical.target_render_xyz = v3(13., 0., 24.);
+        f.logical.drag_ratio = n(0.5);
+        f.logical.world_range = n(10.);
+        f.logical.world_range_source = text(LESLEY_RANGE_SOURCE);
+        f.logical.world_range_source_present = flag(true);
+        c.select_logical_coordinates(&mut h, &f);
+        c.configure_direct(&mut h, &f);
+        assert_eq!(c.direct_.world_range, 10.);
+        assert_eq!(c.directRangeSource_, LESLEY_RANGE_SOURCE);
+        assert!(c.directStartups_.is_empty());
+
+        c.heroId_ = 54;
+        c.select_logical_coordinates(&mut h, &f);
+        assert!(!c.logicalInputFresh_);
+    }
+    #[test]
+    fn lesley_ultimate_quick_cast_is_a_center_tap() {
+        let (mut c, _, mut h) = setup();
+        c.heroId_ = 53;
+        c.skillTouch_ = -1;
+        let mut b = Button {
+            slot: "skill:2".into(),
+            kind: "skill".into(),
+            skillId: 5330,
+            aimType: 3,
+            press: Point::new(0.93, 0.7),
+            ..Default::default()
+        };
+        assert_eq!(c.classify_skill(&b), SkillBehavior::Range);
+        b.castMode = 1;
+        assert!(c.begin_skill(&mut h, &b));
+        assert_eq!(c.skillBehavior_, SkillBehavior::Tap);
+        assert_eq!(c.skillPoint_, b.press);
+        assert!(!c.startupArmed_);
+        assert!(h.moves.is_empty());
+        b.skillId = 5320;
+        assert_eq!(c.classify_skill(&b), SkillBehavior::Range);
     }
     #[test]
     fn generic_authorized_native_range_bootstraps_before_processed_offset_exists() {
