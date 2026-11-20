@@ -138,11 +138,11 @@ fn hylos_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,
     skill==4910 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
         && rect==0 && base==1 && params==[3.,0.,30006.,0.5]
 }
-// Hanabi Q is a self shield: native application produces the shield and
-// increments FirstSkillUseCount. Its RectType1 does not authorize other skills.
-fn hanabi_self_tap_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,params:&[f64])->bool {
-    skill==6010 && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
-        && rect==1 && base==1 && params==[3.,0.,30006.,0.5]
+// The zero-extent circle shows Hanabi's shield or Melissa's barrier.
+fn self_cast_circle_template(skill:i32,motion:&str,package:&str,rect:i32,base:i32,params:&[f64])->bool {
+    matches!((skill,base),(6010,1)|(11430,174))
+        && motion=="IndicatorMotionBase" && package=="IndicatorPackageEasy_Yuan"
+        && rect==1 && params==[3.,0.,30006.,0.5]
 }
 // Belerick W arms speed and the next basic attack; native press/release
 // increments SecondSkillUseCount and cancel does not. Its small shape is an
@@ -424,6 +424,28 @@ fn fixed_part_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     }
     Ok(true)
 }
+fn melissa_dash_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i32,motion:&str,package:&str,checks:&mut Checks)->Result<bool> {
+    if skill != 11410 || motion != "IndicatorMotion_RotWithSummon" || package != "IndicatorPackage_DoubleJianTou" {
+        return Ok(false);
+    }
+    let (rect, _) = native_rect_config(r, comp, skill, checks)?;
+    let config = owner(r, comp, "m_Config", checks)?;
+    let base = typed_field(r, config, "m_BaseType", 8)?;
+    typed_field(r, config, "m_ShowRectPara", 29)?;
+    let array = owner(r, config, "m_ShowRectPara", checks)?;
+    let count = u64_at(&capture(r, checks, array, 32)?, 24);
+    // The same dash uses RectType0 at rank 1 and RectType1 at rank 6.
+    if !matches!(rect, 0 | 1) || i32_at(&capture(r, checks, base, 4)?, 0) != 742 || count != 17 {
+        return Err("Unverified Melissa dash configuration".into());
+    }
+    let raw = capture(r, checks, array + 32, 17 * 4)?;
+    let params: Vec<_> = raw.chunks_exact(4).map(|v| f32_at(v, 0) as f32).collect();
+    // The second arrow shows where the doll moves. The drag still supplies a direction.
+    if params != [19., 3.1, 21141., 3.1, 0.44, 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 3.1, 0.33] {
+        return Err("Unverified Melissa dash shape".into());
+    }
+    Ok(true)
+}
 fn camera_lock_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
     motion_name:&str,package_name:&str,checks:&mut Checks)->Result<bool> {
     if skill!=3190 || motion_name!="IndicatorMotionCameraLock" || package_name!="IndicatorPackageEasy_JianTou" {return Ok(false);}
@@ -562,7 +584,7 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
             hylos_self_tap_template(skill,motion_name,package_name,rect,base,&full)
         }
     } else {false};
-    let hanabi=if skill==6010 {
+    let self_cast_circle=if matches!(skill,6010|11430) {
         let array=owner(r,config,"m_ShowRectPara",checks)?;
         let header=capture(r,checks,array,32)?;
         if u64_at(&header,24)!=4 {false} else {
@@ -570,7 +592,7 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
             let base=i32_at(&capture(r,checks,at,4)?,0);
             let raw=capture(r,checks,array+32,16)?;
             let full=raw.chunks_exact(4).map(|v|f32_at(v,0)).collect::<Vec<_>>();
-            hanabi_self_tap_template(skill,motion_name,package_name,rect,base,&full)
+            self_cast_circle_template(skill,motion_name,package_name,rect,base,&full)
         }
     } else {false};
     let belerick=if belerick_family {
@@ -584,7 +606,7 @@ fn zero_extent_base_tap_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:
             belerick_self_tap_template(skill,motion_name,package_name,rect,base,&full)
         }
     } else {false};
-    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina && !hilda && !hylos && !hanabi && !belerick {
+    if !zero_extent_base_tap_template(motion_name,package_name,rect,&params) && !karina && !hilda && !hylos && !self_cast_circle && !belerick {
         return Err("Unverified nonzero base-tap configuration".into());
     }
     for object in [motion,package] {
@@ -924,12 +946,13 @@ impl MotionPlan {
         let (mut checks,comp,motion,package,mc,pc)=Self::registry_owner(r,indicator,skill)?;
         let base_tap=zero_extent_base_tap_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?;
+        let melissa_dash=melissa_dash_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?;
         // Read-only Grock discovery, not a production direction admission.
         let block_audit=skill==4430 && mc.name=="IndicatorMotion_Block" && pc.name=="IndicatorPackage_JianTou_PosYuan";
         // Read-only discovery of Lesley's target selector. This does not
         // admit the class as a production aim plan or infer Tap/Range/Direction.
         let lesley_audit=skill==5330 && mc.name=="IndicatorMotionPosSelectAndRot" && pc.name=="IndicatorPackage_JianTou_Yuan_SameLengthWithRange";
-        if !base_tap&&!shadow_direction&&!block_audit&&!lesley_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
             if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
@@ -1107,7 +1130,8 @@ impl MotionPlan {
             kind
         }
         else if base_tap {1}
-        else if shadow_direction || camera_direction || grock_configuration_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?==Some(2) {2}
+        else if shadow_direction || camera_direction || melissa_dash_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?
+            || grock_configuration_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?==Some(2) {2}
         else if fixed_part_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)? {2}
         else if mc.name=="IndicatorMotionPos" && pc.name=="IndicatorPackage_TwoPartAndPos_Direction" {
@@ -1177,7 +1201,8 @@ impl MotionPlan {
         let range_contract=native_range_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
-        let configured_direction=shadow_direction || camera_direction || grock_configuration_contract(r,comp,skill,&name,&package_class.name,&mut checks)?==Some(2) || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
+        let configured_direction=shadow_direction || camera_direction || melissa_dash_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
+            || grock_configuration_contract(r,comp,skill,&name,&package_class.name,&mut checks)?==Some(2) || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
         let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,configured_direction);
         let expected = match skill {
@@ -1999,25 +2024,58 @@ mod tests {
         assert!(!zero_extent_base_tap_template(m,p,0,&[3.,0.]));
     }
     #[test]
-    fn hanabi_shield_is_not_general_rect_one_tap_or_other_heroes() {
+    fn zero_extent_rect_one_shield_and_barrier_require_their_exact_skill() {
         let m="IndicatorMotionBase";let p="IndicatorPackageEasy_Yuan";
         let params=[3.,0.,30006.,0.5];
-        assert!(hanabi_self_tap_template(6010,m,p,1,1,&params));
-        for skill in [810,3510,4910,6000,6009,6020,6030,6011] {
-            assert!(!hanabi_self_tap_template(skill,m,p,1,1,&params));
+        assert!(self_cast_circle_template(6010,m,p,1,1,&params));
+        assert!(self_cast_circle_template(11430,m,p,1,174,&params));
+        assert!(!self_cast_circle_template(11430,m,p,1,1,&params));
+        assert!(!self_cast_circle_template(6010,m,p,1,174,&params));
+        for skill in [810,3510,4910,6000,6009,6020,6030,6011,11410,11420,11431] {
+            assert!(!self_cast_circle_template(skill,m,p,1,1,&params));
+            assert!(!self_cast_circle_template(skill,m,p,1,174,&params));
         }
-        for rect in [-1,0,11] {assert!(!hanabi_self_tap_template(6010,m,p,rect,1,&params));}
-        for base in [0,11,384] {assert!(!hanabi_self_tap_template(6010,m,p,1,base,&params));}
+        for rect in [-1,0,11] {assert!(!self_cast_circle_template(6010,m,p,rect,1,&params));}
+        for base in [0,11,384] {assert!(!self_cast_circle_template(6010,m,p,1,base,&params));}
         for i in 0..params.len() {
             for value in [params[i]+1.,f64::NAN,f64::INFINITY] {
                 let mut changed=params;changed[i]=value;
-                assert!(!hanabi_self_tap_template(6010,m,p,1,1,&changed));
+                assert!(!self_cast_circle_template(6010,m,p,1,1,&changed));
             }
         }
-        assert!(!hanabi_self_tap_template(6010,m,p,1,1,&params[..2]));
-        assert!(!hanabi_self_tap_template(6010,"IndicatorMotionPos",p,1,1,&params));
-        assert!(!hanabi_self_tap_template(6010,m,"IndicatorPackageEasy",1,1,&params));
+        assert!(!self_cast_circle_template(6010,m,p,1,1,&params[..2]));
+        assert!(!self_cast_circle_template(6010,"IndicatorMotionPos",p,1,1,&params));
+        assert!(!self_cast_circle_template(6010,m,"IndicatorPackageEasy",1,1,&params));
         assert!(!zero_extent_base_tap_template(m,p,1,&params));
+    }
+    #[test]
+    fn melissa_dash_requires_the_owned_summon_direction_configuration() {
+        let mut r = base_tap_fixture();
+        let motion = "IndicatorMotion_RotWithSummon";
+        let package = "IndicatorPackage_DoubleJianTou";
+        {
+            let mut bytes = r.memory.0.borrow_mut();
+            bytes[1056..1060].copy_from_slice(&11410i32.to_le_bytes());
+            bytes[1060..1064].copy_from_slice(&1i32.to_le_bytes());
+            bytes[1072..1076].copy_from_slice(&742i32.to_le_bytes());
+            bytes[1560..1568].copy_from_slice(&17u64.to_le_bytes());
+            let params = [19f32, 3.1, 21141., 3.1, 0.44, 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 3.1, 0.33];
+            for (bytes, value) in bytes[1568..1636].chunks_exact_mut(4).zip(params) {
+                bytes.copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        let mut reads = Vec::new();
+        assert!(melissa_dash_direction_contract(&mut r, 128, 11410, motion, package, &mut reads).unwrap());
+        assert!(check(&r, &reads).is_ok());
+        r.memory.0.borrow_mut()[1060..1064].copy_from_slice(&0i32.to_le_bytes());
+        reads.clear();
+        assert!(melissa_dash_direction_contract(&mut r, 128, 11410, motion, package, &mut reads).unwrap());
+        assert!(check(&r, &reads).is_ok());
+        assert!(!melissa_dash_direction_contract(&mut r, 128, 11420, motion, package, &mut Vec::new()).unwrap());
+        assert!(!melissa_dash_direction_contract(&mut r, 128, 11410, "IndicatorMotionRot", package, &mut Vec::new()).unwrap());
+        r.memory.0.borrow_mut()[1632..1636].copy_from_slice(&0.75f32.to_le_bytes());
+        assert!(check(&r, &reads).is_err());
+        assert!(melissa_dash_direction_contract(&mut r, 128, 11410, motion, package, &mut Vec::new()).is_err());
     }
     #[test]
     fn hylos_buff_is_not_general_rect_zero_aim_or_other_heroes() {
