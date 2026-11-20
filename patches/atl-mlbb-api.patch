@@ -567,7 +567,7 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..28a8ad8 100644
+index 3eb505c..3a9dba9 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
 @@ -1,5 +1,8 @@
@@ -579,7 +579,7 @@ index 3eb505c..28a8ad8 100644
  
  #include "../defines.h"
  #include "../util.h"
-@@ -8,6 +11,446 @@
+@@ -8,6 +11,469 @@
  /* main app window */
  extern GtkWindow *window;
  
@@ -688,6 +688,8 @@ index 3eb505c..28a8ad8 100644
 +	GWeakRef previous_focus;
 +	gulong position_handler;
 +	ClbbChatTarget target;
++	int observed_limit;
++	gint64 observed_limit_since;
 +	gboolean send_pending, finishing;
 +} InlineChat;
 +
@@ -797,6 +799,26 @@ index 3eb505c..28a8ad8 100644
 +	update_chat_count(GTK_EDITABLE(chat->entry), chat);
 +}
 +
++void atl_chat_sync_limit(GtkWindow *owner, const ClbbChatTarget *target)
++{
++	InlineChat *chat = inline_chat(owner);
++	if (!chat || chat->finishing || chat->target.owner != target->owner ||
++	    chat->target.site != target->site)
++		return;
++	gint64 now = g_get_monotonic_time();
++	if (chat->observed_limit != target->limit) {
++		chat->observed_limit = target->limit;
++		chat->observed_limit_since = now;
++	}
++	// During initialization UI_Chat can briefly report the cap of another tab.
++	// Apply tighter limits immediately and wait for a sustained higher limit.
++	if (target->limit < chat->target.limit ||
++	    (target->limit > chat->target.limit && now - chat->observed_limit_since >= 180000)) {
++		chat->target.limit = target->limit;
++		update_chat_limit(chat);
++	}
++}
++
 +void atl_chat_source_limit_changed(GtkWidget *text)
 +{
 +	GtkRoot *root = gtk_widget_get_root(text);
@@ -815,8 +837,7 @@ index 3eb505c..28a8ad8 100644
 +	if (query_chat_site(chat->owner, &live) &&
 +	    live.site == chat->target.site && live.owner == chat->target.owner) {
 +		chat->target.channel = live.channel;
-+		chat->target.limit = live.limit;
-+		update_chat_limit(chat);
++		atl_chat_sync_limit(chat->owner, &live);
 +	}
 +}
 +
@@ -897,6 +918,7 @@ index 3eb505c..28a8ad8 100644
 +	InlineChat *chat = g_new0(InlineChat, 1);
 +	chat->owner = owner;
 +	chat->target = *target;
++	chat->target.limit = MIN(target->limit, CLBB_CHAT_DEFAULT_LIMIT);
 +	chat->overlay = g_object_ref(GTK_OVERLAY(overlay));
 +	g_weak_ref_init(&chat->previous_focus, gtk_window_get_focus(owner));
 +	chat->card = g_object_ref_sink(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8));
@@ -982,6 +1004,7 @@ index 3eb505c..28a8ad8 100644
 +	if (!chat && !atl_chat_begin(owner, &target))
 +		return FALSE;
 +	chat = inline_chat(owner);
++	target.limit = MIN(chat->target.limit, target.limit);
 +	chat->target = target;
 +	chat->dialog = dialog;
 +	chat->source_entry = controls.text;
@@ -1026,7 +1049,7 @@ index 3eb505c..28a8ad8 100644
  static gboolean on_close_request(GtkWidget *dialog, jobject jobj)
  {
  	printf("on_close_request\n");
-@@ -56,8 +499,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
+@@ -56,8 +522,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
  	GtkWidget *decor_view = GTK_WIDGET(_PTR(decor_view_ptr));
  	GtkWidget *dialog = gtk_window_new();
  	gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
@@ -1044,7 +1067,7 @@ index 3eb505c..28a8ad8 100644
  	return _INTPTR(g_object_ref(dialog));
  }
  
-@@ -74,26 +524,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,26 +547,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
@@ -8495,10 +8518,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..4ffac98
+index 0000000..5e3a4fb
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1620 @@
+@@ -0,0 +1,1630 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -8637,7 +8660,7 @@ index 0000000..4ffac98
 +    ClbbAccountGate *account_gate;
 +    gint64 account_refresh_at;
 +    ClbbChatTarget quick_chat;
-+    gint64 chat_deadline, chat_check_at;
++    gint64 chat_deadline, chat_check_at, chat_limit_check_at;
 +    guint chat_open_edge, chat_send_edge;
 +    gboolean chat_field_clicked;
 +    gint64 present_control_at;
@@ -8939,7 +8962,7 @@ index 0000000..4ffac98
 +
 +static gboolean read_chat_target(ClbbHost *h, ClbbChatTarget *target) {
 +    const char *s = h->read(h->runtime, "chat.target");
-+    target->limit = 60; /* Compatibility with older reloadable mappers. */
++    target->limit = CLBB_CHAT_DEFAULT_LIMIT; /* Compatibility with older reloadable mappers. */
 +    return s && sscanf(s, "%" G_GUINT64_FORMAT " %u %d %u %u %u %d",
 +            &target->owner, &target->site, &target->channel, &target->editing,
 +            &target->x, &target->y, &target->limit) >= 6 &&
@@ -8987,6 +9010,15 @@ index 0000000..4ffac98
 +        if (!click_chat_target(h, &target))
 +            h->chat_field_clicked = FALSE;
 +    }
++}
++
++static void sync_chat_limit(ClbbHost *h, gint64 now) {
++    if (now < h->chat_limit_check_at || !atl_chat_active(h->window) || atl_chat_waiting(h->window))
++        return;
++    h->chat_limit_check_at = now + 65000;
++    ClbbChatTarget target;
++    if (read_chat_target(h, &target) && target.editing)
++        atl_chat_sync_limit(h->window, &target);
 +}
 +
 +static gboolean matches_chat_key(int binding, int code) {
@@ -9565,6 +9597,7 @@ index 0000000..4ffac98
 +    live_tick(h);
 +    gint64 now=g_get_monotonic_time();
 +    tick_quick_chat(h, now);
++    sync_chat_limit(h, now);
 +    if (now >= h->account_refresh_at) {
 +        h->account_refresh_at = now + 100000;
 +        clbb_account_gate_refresh(h->account_gate);
