@@ -250,6 +250,7 @@ impl Control {
 struct Family {
     checks: Checks,
     controls: Vec<Control>,
+    alternate: Option<(Control, Checks)>,
     retry: bool,
 }
 impl Family {
@@ -384,6 +385,17 @@ impl OptionalUi {
                         .push(button),
                     Err(_) => family.retry = true,
                 }
+            }
+            // A live replacement uses the same slot and binding as the
+            // ordinary button. Sample it before choosing among normal sprites.
+            if let Some((control, active)) = &family.alternate
+                && current(r, active)
+                && let Ok(mut button) = control.sample(r, view, projection)
+                && button.active.get()
+                && current(r, active)
+            {
+                button.geometry_source = text("native_melissa_doll_attack");
+                candidates.insert(control.slot.clone(), vec![button]);
             }
             if !current(r, &family.checks) {
                 family.retry = true;
@@ -684,13 +696,47 @@ impl OptionalUi {
                     sprite,
                 )?);
             }
+            if r.integer(self.local_hero_address)? == 114 {
+                family.alternate = self.melissa_doll_attack(r, attack, info).ok();
+            }
             Ok(())
         })();
         family.retry = result.is_err() || !current(r, &family.checks);
         if family.retry {
             family.controls.clear();
+            family.alternate = None;
         }
         family
+    }
+
+    fn melissa_doll_attack<M: Memory>(
+        &self,
+        r: &mut Reflection<M>,
+        attack: u64,
+        info: u64,
+    ) -> Result<(Control, Checks)> {
+        let mut active = vec![(self.local_hero_address, 114i32.to_le_bytes().to_vec())];
+        if link(r, &mut active, attack, "uiFrame")? != self.ui {
+            return Err("Melissa doll attack belongs to another UI".into());
+        }
+        let class = r.class(r.pointer(attack)?)?;
+        // Only the extra attack exposed by a linked doll after W can take
+        // over the minion binding. An unlinked summon has no such control.
+        for (name, kind, expected) in [
+            ("m_bShowExtraCoupButton", 2, vec![1]),
+            ("m_iExtraCoupMode", 8, 1i32.to_le_bytes().to_vec()),
+            ("m_iExtraCoupSkillID", 8, 11400i32.to_le_bytes().to_vec()),
+            ("m_iExtraCoupExtraParam", 8, 1142001i32.to_le_bytes().to_vec()),
+        ] {
+            let field = class.fields.get(name)
+                .filter(|f| !f.is_static && f.kind == kind && f.offset <= 65536)
+                .ok_or("Melissa doll attack field changed")?;
+            active.push((attack + field.offset, expected));
+        }
+        let target = link(r, &mut active, info, "m_AttackHero114")?;
+        let sprite = link(r, &mut active, info, "m_Sprite_AttackHero114")?;
+        let control = Control::new(r, &mut active, "attack:minion".into(), "attack", 1, target, sprite)?;
+        Ok((control, active))
     }
 }
 
