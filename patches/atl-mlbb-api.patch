@@ -2236,7 +2236,7 @@ index fc402fe..305c372 100644
 +
 +GtkWidget *surface_view_widget_unique(GtkWidget *root);
 diff --git a/src/api-impl-jni/widgets/android_webkit_WebView.c b/src/api-impl-jni/widgets/android_webkit_WebView.c
-index ef0513d..cdcfc0c 100644
+index ef0513d..2ea8a44 100644
 --- a/src/api-impl-jni/widgets/android_webkit_WebView.c
 +++ b/src/api-impl-jni/widgets/android_webkit_WebView.c
 @@ -1,5 +1,6 @@
@@ -2357,7 +2357,7 @@ index ef0513d..cdcfc0c 100644
  static void asset_uri_scheme_request_cb(WebKitURISchemeRequest *request, gpointer user_data)
  {
  	const gchar *path = webkit_uri_scheme_request_get_path(request);
-@@ -29,9 +130,170 @@ static void asset_uri_scheme_request_cb(WebKitURISchemeRequest *request, gpointe
+@@ -29,9 +130,198 @@ static void asset_uri_scheme_request_cb(WebKitURISchemeRequest *request, gpointe
  	g_object_unref(stream);
  }
  
@@ -2452,6 +2452,15 @@ index ef0513d..cdcfc0c 100644
 +	}
 +}
 +
++static const char *request_method_label(WebKitURIRequest *request)
++{
++	const char *method = webkit_uri_request_get_http_method(request);
++	static const char *const known[] = { "GET", "HEAD", "POST", "OPTIONS", "PUT", "PATCH", "DELETE" };
++	for (size_t i = 0; i < G_N_ELEMENTS(known); ++i)
++		if (!g_strcmp0(method, known[i])) return known[i];
++	return "OTHER";
++}
++
 +static void resource_trace_started(WebKitWebView *view, WebKitWebResource *resource, WebKitURIRequest *request, gpointer data)
 +{
 +	const char *uri = webkit_uri_request_get_uri(request);
@@ -2464,12 +2473,7 @@ index ef0513d..cdcfc0c 100644
 +	trace->started = g_get_monotonic_time();
 +	trace->host = g_strdup(safe ? host : "local-or-invalid");
 +	if (parsed) g_uri_unref(parsed);
-+	const char *method = webkit_uri_request_get_http_method(request);
-+	const char *safe_method = "OTHER";
-+	const char *allowed[] = { "GET", "HEAD", "POST", "OPTIONS", "PUT", "PATCH", "DELETE" };
-+	for (unsigned i = 0; i < G_N_ELEMENTS(allowed); ++i)
-+		if (!g_strcmp0(method, allowed[i])) safe_method = allowed[i];
-+	g_printerr("ATL_WEBVIEW_NETWORK started host=%s method=%s\n", trace->host, safe_method);
++	g_printerr("ATL_WEBVIEW_NETWORK started host=%s method=%s\n", trace->host, request_method_label(request));
 +	g_object_set_data_full(G_OBJECT(resource), "atl-resource-trace", trace, resource_trace_free);
 +	g_signal_connect(resource, "failed", G_CALLBACK(resource_trace_failed), trace);
 +	g_signal_connect(resource, "finished", G_CALLBACK(resource_trace_finished), trace);
@@ -2493,6 +2497,16 @@ index ef0513d..cdcfc0c 100644
 +	return matches;
 +}
 +
++static void clbb_login_sent(WebKitWebResource *resource, WebKitURIRequest *request,
++                            WebKitURIResponse *redirect, gpointer unused)
++{
++	(void)unused;
++	g_object_set_data(G_OBJECT(resource), "clbb-login-last-method", (gpointer)request_method_label(request));
++	if (redirect)
++		g_object_set_data(G_OBJECT(resource), "clbb-login-last-redirect",
++		                  GUINT_TO_POINTER(webkit_uri_response_get_status_code(redirect)));
++}
++
 +static void clbb_login_response(WebKitWebResource *resource, WebKitWebView *view)
 +{
 +	WebKitURIResponse *response = webkit_web_resource_get_response(resource);
@@ -2500,6 +2514,18 @@ index ef0513d..cdcfc0c 100644
 +	    !clbb_login_uri(webkit_uri_response_get_uri(response), FALSE) ||
 +	    g_object_get_data(G_OBJECT(resource), "clbb-login-document") != webkit_web_view_get_main_resource(view) ||
 +	    !clbb_login_uri(webkit_web_view_get_uri(view), TRUE)) return;
++	/* Fixed categories only. No account data, URLs or header values enter this log. */
++	GObject *item = G_OBJECT(resource);
++	const char *initial = g_object_get_data(item, "clbb-login-initial-method");
++	const char *last = g_object_get_data(item, "clbb-login-last-method");
++	SoupMessageHeaders *headers = webkit_uri_response_get_http_headers(response);
++	const char *allow = !headers || !soup_message_headers_get_list(headers, "Allow") ? "not-visible" :
++	                    soup_message_headers_header_contains(headers, "Allow", "POST") ? "includes-post" : "other";
++	const char *mime = webkit_uri_response_get_mime_type(response);
++	g_printerr("CLBB_LOGIN_HTTP status=405 initial=%s final=%s last_redirect=%u allow=%s format=%s\n",
++	           initial, last ? last : "unobserved",
++	           GPOINTER_TO_UINT(g_object_get_data(item, "clbb-login-last-redirect")), allow,
++	           !g_strcmp0(mime, "text/html") ? "html" : !g_strcmp0(mime, "application/json") ? "json" : "other");
 +	webkit_web_view_evaluate_javascript(view, "window.dispatchEvent(new Event('clbb-login-unavailable'))",
 +	                                    -1, NULL, NULL, NULL, NULL, NULL);
 +}
@@ -2513,6 +2539,8 @@ index ef0513d..cdcfc0c 100644
 +	WebKitWebResource *page = webkit_web_view_get_main_resource(view);
 +	if (!page || page == resource) return;
 +	g_object_set_data_full(G_OBJECT(resource), "clbb-login-document", g_object_ref(page), g_object_unref);
++	g_object_set_data(G_OBJECT(resource), "clbb-login-initial-method", (gpointer)request_method_label(request));
++	g_signal_connect(resource, "sent-request", G_CALLBACK(clbb_login_sent), NULL);
 +	g_signal_connect_object(resource, "finished", G_CALLBACK(clbb_login_response), view, 0);
 +}
 +
@@ -2528,7 +2556,7 @@ index ef0513d..cdcfc0c 100644
  	JNIEnv *env = get_jni_env();
  	J__WebView__internalLoadChanged(env, wrapper->jobj, load_event, _JSTRING(webkit_web_view_get_uri(web_view)));
  }
-@@ -65,23 +327,250 @@ JNIEXPORT jlong JNICALL Java_android_webkit_WebView_native_1constructor(JNIEnv *
+@@ -65,23 +355,250 @@ JNIEXPORT jlong JNICALL Java_android_webkit_WebView_native_1constructor(JNIEnv *
  	if (!getenv("ATL_UGLY_ENABLE_WEBVIEW"))
  		return Java_android_view_View_native_1constructor(env, this, context, attrs);
  
@@ -2780,7 +2808,7 @@ index ef0513d..cdcfc0c 100644
  	webkit_web_view_load_uri(webview, _CSTRING(url));
  }
  
-@@ -91,6 +580,9 @@ JNIEXPORT void JNICALL Java_android_webkit_WebView_native_1loadDataWithBaseURL(J
+@@ -91,6 +608,9 @@ JNIEXPORT void JNICALL Java_android_webkit_WebView_native_1loadDataWithBaseURL(J
  		return;
  
  	WebKitWebView *webview = _PTR(widget_ptr);
