@@ -372,6 +372,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         || (hero==61 && slot=="skill:2" && base==6130 && matches!(active,6146|6196))
         // Holding this native recast follows Selena's flying arrow.
         || (hero==63 && slot=="skill:1" && base==6320 && active==206320)
+        // Black Shoes is a self-cast that returns Lylia to her earlier position.
+        || (hero==86 && slot=="skill:2" && base==8630 && active==8630)
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }
@@ -2880,6 +2882,19 @@ mod tests {
             (44,"skill:0",4420,4426),(44,"skill:2",4420,4426),(44,"skill:1",4410,4426),
             (77,"skill:1",4420,4426),(25,"skill:1",4420,4426)] {
             assert!(!verified_button_only_form(hero,slot,base,active));
+        }
+    }
+    #[test]
+    fn lylia_black_shoes_is_a_plain_cast_for_its_exact_ultimate() {
+        assert!(verified_button_only_form(86, "skill:2", 8630, 8630));
+        for (hero, slot, base, active) in [
+            (85, "skill:2", 8630, 8630),
+            (86, "skill:1", 8630, 8630),
+            (86, "skill:2", 8620, 8630),
+            (86, "skill:2", 8630, 8620),
+            (86, "skill:1", 8620, 8620),
+        ] {
+            assert!(!verified_button_only_form(hero, slot, base, active));
         }
     }
     #[test]
