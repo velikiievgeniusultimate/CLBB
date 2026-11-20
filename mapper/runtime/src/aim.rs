@@ -241,6 +241,12 @@ fn native_range_shape(motion:&str,package:&str)->Option<f64> {
         _=>None,
     }
 }
+fn zhuxin_lantern_family(skill: i32, motion: &str, package: &str) -> bool {
+    skill == 12510
+        && motion == "IndicatorMotion_MultiArrowsPoint2Circle"
+        && package == "IndicatorPackage_MultiArrowsPoint2Circle"
+}
+
 fn lesley_selector_family(skill:i32,motion:&str,package:&str)->bool {
     skill==5330 && motion=="IndicatorMotionPosSelectAndRot"
         && package=="IndicatorPackage_JianTou_Yuan_SameLengthWithRange"
@@ -328,9 +334,18 @@ fn valid_native_range(shape:f64,values:[f64;2])->bool {
 fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
     motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<(u64,f64)>> {
     let shape=if hanzo_ghost_range_contract(r,comp,skill,motion_name,package_name,checks)?{28.}
+        else if zhuxin_lantern_family(skill,motion_name,package_name){21.}
         else if gord_bounce_range_family(skill,motion_name,package_name){22.}
         else if lesley_selector_contract(r,comp,motion,skill,motion_name,package_name,checks)?{14.}
         else if let Some(shape)=native_range_shape(motion_name,package_name){shape}else{return Ok(None)};
+    if shape == 21. {
+        let (rect, _) = native_rect_config(r, comp, skill, checks)?;
+        let config = owner(r, comp, "m_Config", checks)?;
+        let base = typed_field(r, config, "m_BaseType", 8)?;
+        if rect != 1 || i32_at(&capture(r, checks, base, 4)?, 0) != 549 {
+            return Err("Unverified Zhuxin lantern range configuration".into());
+        }
+    }
     if shape==22. {
         let begin=checks.len();
         let(rect,params)=native_rect_config(r,comp,skill,checks)?;
@@ -952,7 +967,8 @@ impl MotionPlan {
         // Read-only discovery of Lesley's target selector. This does not
         // admit the class as a production aim plan or infer Tap/Range/Direction.
         let lesley_audit=skill==5330 && mc.name=="IndicatorMotionPosSelectAndRot" && pc.name=="IndicatorPackage_JianTou_Yuan_SameLengthWithRange";
-        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        let lantern_audit = zhuxin_lantern_family(skill, &mc.name, &pc.name);
+        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!lantern_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
             if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
@@ -965,7 +981,7 @@ impl MotionPlan {
         }
         let mut values=serde_json::Map::new();
         for name in ["m_vDragResult","m_vDragTouchPos","m_vDragDir","m_vActiveDir"] {
-            let at=if base_tap||block_audit||lesley_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
+            let at=if base_tap||block_audit||lesley_audit||lantern_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
             if at<motion || at+12>motion+4096 {return Err("Audit vector outside motion".into());}
             let raw=capture(r,&mut checks,at,12)?;
             values.insert(name.into(),serde_json::json!(source::vec3(&raw)?));
@@ -1122,6 +1138,10 @@ impl MotionPlan {
         } else if hanzo_ghost_range_family(skill,&mc.name,&pc.name) {
             native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Hanzo ghost range contract")?;
             3
+        } else if zhuxin_lantern_family(skill, &mc.name, &pc.name) {
+            native_range_contract(r, comp, motion, package, skill, &mc.name, &pc.name, &mut checks)?
+                .ok_or("Missing Zhuxin lantern range contract")?;
+            3
         } else if gord_bounce_range_family(skill,&mc.name,&pc.name) {
             native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Gord range contract")?;
             3
@@ -1215,7 +1235,7 @@ impl MotionPlan {
             20150 => Some(("IndicatorMotionRot", "IndicatorPackageEasy_ShanXing_Normal")),
             20020 => Some(("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal")),
             8430 => Some(("IndicatorMotionRot", "IndicatorPackageEasy")),
-            _ if attack_geometry || configured_direction || ((gord_bounce_range_family(skill,&name,&package_class.name)||lesley_selector_family(skill,&name,&package_class.name)||hanzo_ghost_range_family(skill,&name,&package_class.name))&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
+            _ if attack_geometry || configured_direction || ((zhuxin_lantern_family(skill,&name,&package_class.name)||gord_bounce_range_family(skill,&name,&package_class.name)||lesley_selector_family(skill,&name,&package_class.name)||hanzo_ghost_range_family(skill,&name,&package_class.name))&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
             _ => None,
         };
         if expected.is_none_or(|(motion, package)| name != motion || package_class.name != package)
@@ -1526,7 +1546,7 @@ impl MotionPlan {
                 return Err("Native visual indicator owner changed during sample".into());
             }
         }
-        let aim = if let Some(path) = &self.circle {
+        let mut aim = if let Some(path) = &self.circle {
             if path.validate(r).is_ok() {
                 let raw = capture_path(r, consumed, path)?;
                 crate::math::trs_chain(&raw, None)
@@ -1628,6 +1648,11 @@ impl MotionPlan {
                     logical.world_range_source=text(if lesley_selector{"IndicatorMotionPosSelectAndRot.m_vDragResult/m_fDragRatio"}else{"IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio"});
                     logical.world_range_source_present=flag(true);
                 }
+            }
+            // The lantern package has separate rings for the caster and aim
+            // area. The valid native drag result is the unambiguous aim point.
+            if self.range_shape == Some(21.) && logical.ready.get() {
+                aim = Some([origin[0] + result[0], origin[1], origin[2] + result[2]]);
             }
             if let Some(p) = aim {
                 logical.visual_plane_y = number(p[1]);
@@ -1739,6 +1764,28 @@ mod tests {
         }
         r.memory.0.borrow_mut()[576..580].copy_from_slice(&0.5f32.to_le_bytes());r.memory.0.borrow_mut()[581]=0;
         let mut f=s::Frame::default();plan.sample(&r,&mut f).unwrap();assert!(f.logical.world_range.missing());
+    }
+    #[test]
+    fn zhuxin_lantern_uses_native_target_without_a_visual_transform_after_valid_drag() {
+        let (r, mut plan) = q_fixture();
+        plan.skill = 12510;
+        plan.name = "IndicatorMotion_MultiArrowsPoint2Circle".into();
+        plan.range_shape = Some(21.);
+        plan.legacy_range = false;
+        {
+            let mut bytes = r.memory.0.borrow_mut();
+            bytes[800..804].copy_from_slice(&21f32.to_le_bytes());
+            bytes[804..808].copy_from_slice(&4.25f32.to_le_bytes());
+        }
+        let mut frame = s::Frame { hero_render_xyz: v3([10., 0.5, 20.]), ..Default::default() };
+        assert!(plan.sample(&r, &mut frame).unwrap().is_none());
+        {
+            let mut bytes = r.memory.0.borrow_mut();
+            bytes[581] = 1;
+            bytes[1036] = 0;
+        }
+        assert_eq!(plan.sample(&r, &mut frame).unwrap(), Some([13., 0.5, 24.]));
+        assert_eq!(frame.logical.visual_plane_y.value, 0.5);
     }
     #[test]
     fn lesley_charge_selector_derives_live_range_without_fixed_range_permission() {

@@ -12,7 +12,7 @@ const NS100: f64 = 100_000_000.;
 const NS250: f64 = 250_000_000.;
 const POINT_SOURCE: &str = "IndicatorMotionPos.m_vDragResult";
 fn direct_source(source: &str) -> bool {
-    matches!(source, Q_SOURCE_A | Q_SOURCE_B | POINT_SOURCE | ATTACK_SOURCE | LESLEY_SOURCE)
+    matches!(source, Q_SOURCE_A | Q_SOURCE_B | POINT_SOURCE | ATTACK_SOURCE | LESLEY_SOURCE | ZHUXIN_LANTERN_SOURCE)
 }
 const Q_SOURCE_A: &str = "IndicatorMotionFaTiaoQiu2.m_vDragResult";
 const Q_SOURCE_B: &str = "IndicatorMotionRotAndPosRot.m_vDragResult";
@@ -20,6 +20,7 @@ const ATTACK_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult";
 const ATTACK_RANGE_SOURCE: &str = "IndicatorMotionPosSelectAndRotATK.m_vDragResult/m_fDragRatio";
 const LESLEY_SOURCE: &str = "IndicatorMotionPosSelectAndRot.m_vDragResult";
 const LESLEY_RANGE_SOURCE: &str = "IndicatorMotionPosSelectAndRot.m_vDragResult/m_fDragRatio";
+const ZHUXIN_LANTERN_SOURCE: &str = "IndicatorMotion_MultiArrowsPoint2Circle.m_vDragResult";
 const RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]";
 const HANZO_GHOST_RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]*[20]";
 fn known_direction_source(hero:i32,skill:i32,source:&str)->bool {
@@ -488,6 +489,8 @@ impl Controller {
                 && self.find_button("attack").is_some_and(|b| b.kind == "attack" && b.aimType == 3),
             LESLEY_SOURCE => frame_skill == 5330 && self.skillBehavior_ == SkillBehavior::Range
                 && self.find_button(&self.activeSlot_).is_some_and(|b| self.lesley_ultimate(b)),
+            ZHUXIN_LANTERN_SOURCE => self.heroId_ == 125 && frame_skill == 12510
+                && self.activeSlot_ == "skill:1" && self.skillBehavior_ == SkillBehavior::Range,
             _ => direct_source(source),
         };
         let same_skill = self.skillTouch_ >= 0
@@ -1545,6 +1548,29 @@ mod tests {
             assert_eq!(c.directRangeSource_, RANGE_SOURCE);
             assert!(c.directRanges_.is_empty(), "generic fixed metadata is a current witness, not a reusable fixed-range cache");
             assert!(c.directStartups_.is_empty(), "a later unknown charge policy must not reuse provisional fixed metadata");
+        }
+    }
+    #[test]
+    fn zhuxin_lantern_feedback_is_scoped_to_the_held_second_skill() {
+        for (hero, skill, slot, allowed) in [
+            (125, 12510, "skill:1", true),
+            (125, 12510, "skill:0", false),
+            (125, 12530, "skill:1", false),
+            (71, 12510, "skill:1", false),
+        ] {
+            let (mut controller, mut frame, mut host) = generic_point_range_fixture(hero, skill);
+            controller.activeSlot_ = slot.into();
+            controller.frameActiveSlot_ = slot.into();
+            frame.logical.joystick.slot = text(slot);
+            frame.logical.source = text(ZHUXIN_LANTERN_SOURCE);
+            frame.logical.world_range = n(4.25);
+            controller.select_logical_coordinates(&mut host, &frame);
+            controller.configure_direct(&mut host, &frame);
+            assert_eq!(controller.logicalInputFresh_, allowed);
+            assert_eq!(controller.direct_.ready != 0, allowed);
+            if allowed {
+                assert_eq!(controller.direct_.world_range, 4.25);
+            }
         }
     }
     #[test]

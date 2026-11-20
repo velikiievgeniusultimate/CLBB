@@ -78,7 +78,7 @@ impl Settings {
             let mut defaults=vec![
                 ("movement.click_mode","2"),("movement.up","87"),("movement.down","83"),
                 ("movement.left","65"),("movement.right","68"),
-                ("bindings.skill:0.key","81"),("bindings.skill:2.key","82"),
+                ("bindings.skill:0.key","81"),("bindings.skill:2.key",if hero==125 {"69"} else {"82"}),
                 ("bindings.attack:minion.key","88"),("bindings.attack:tower.key","67"),
                 ("bindings.extra:1.key","71"),
             ];
@@ -767,7 +767,11 @@ mod tests {
             assert_eq!(s.binding(hero,"extra:1").key,71);
         }
         assert_eq!(s.binding(71,"attack").key,MOUSE|2);assert_eq!(s.binding(71,"skill:1").key,69);
-        assert_eq!(s.binding(125,"skill:1").key,MOUSE|2);assert_eq!(s.binding(125,"attack").key,32);
+        assert_eq!(s.binding(71,"skill:2").key,82);
+        assert_eq!(s.binding(125,"skill:0").key,81);
+        assert_eq!(s.binding(125,"skill:1").key,MOUSE|2);
+        assert_eq!(s.binding(125,"skill:2").key,69);
+        assert_eq!(s.binding(125,"attack").key,32);
         for (k,v)in before {assert_eq!(s.values.get(&k),Some(&v));}
         for hero in [9,13,21,22,25,26,31,40,43,47,55,56,73,77,78,83,84,90,95,97,104,118,122,126,127,131,133] {
             assert_eq!(s.integer("hero.movement.click_mode",hero),0);assert_eq!(s.binding(hero,"attack").key,32);
