@@ -89,6 +89,7 @@ pub struct QueuedSkill {
     pub key: i32,
     pub held: bool,
     pub requestedNs: i64,
+    pub(crate) arrowFollow: bool,
     pub down: SkillIntent,
     pub up: SkillIntent,
 }

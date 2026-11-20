@@ -183,6 +183,10 @@ impl Controller {
                     continue;
                 }
                 if pressed && !auto_repeat {
+                    if self.waiting_for_selena_arrow_follow(&b) {
+                        self.queue_skill(host, &b);
+                        return true;
+                    }
                     if self.classify_skill(&b)==SkillBehavior::Selection {
                         if let Some(reason)=self.selection_start_rejection(&b) {
                             self.auxiliaryHeldKeys_.insert(key);

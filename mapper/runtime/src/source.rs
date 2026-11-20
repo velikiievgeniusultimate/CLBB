@@ -370,6 +370,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // channel. Native UI repetition ends both forms before natural expiry.
         // Normal6130 and Crescent6170 remain directional casts.
         || (hero==61 && slot=="skill:2" && base==6130 && matches!(active,6146|6196))
+        // Holding this native recast follows Selena's flying arrow.
+        || (hero==63 && slot=="skill:1" && base==6320 && active==206320)
 }
 fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
     if is_attack { return "attack"; }

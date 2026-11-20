@@ -44,7 +44,7 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17 | 22 | 27 | 33 | 46 | 59, "skill", "skill:1") => 87,
+            (17 | 22 | 27 | 33 | 46 | 59 | 63, "skill", "skill:1") => 87,
             (22 | 33 | 50, "skill", "skill:2") => 69,
             (27 | 50, "skill", "skill:3") => 82,
             _ => 81,
@@ -227,6 +227,50 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
         key(&mut c, &mut h, now + 2_000_000, code, true);
         assert!(h.active.len() > 1, "a fresh press works as soon as the enhancement expires");
+    }
+}
+
+#[test]
+fn selena_early_repeat_starts_only_a_stationary_follow_while_held() {
+    let arrow = Skill { hero: 63, base: 6320, form: 6320, slot: "skill:1" };
+    let follow = Skill { form: 206320, ..arrow };
+    for end in ["release", "native_expiry", "cancel", "early_release", "no_projectile"] {
+        let (mut c, mut h) = setup(arrow, Some(false), 2, 1);
+        let movement = c.movementTouch_;
+        let at = |ms: i64| START + ms * 1_000_000;
+        c.apply_snapshot(&mut h, &resource_frame(at(60), arrow, false), at(60));
+        c.mark_cooldown_cast(arrow.slot, arrow.form);
+        key(&mut c, &mut h, at(80), 87, true);
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        assert!(c.queuedSkills_[0].arrowFollow);
+
+        if end == "early_release" {
+            key(&mut c, &mut h, at(140), 87, false);
+        }
+        let next = if end == "no_projectile" { arrow } else { follow };
+        let now = if end == "no_projectile" { at(430) } else { at(265) };
+        c.apply_snapshot(&mut h, &resource_frame(now, next, false), now);
+        assert!(c.queuedSkills_.is_empty());
+        if matches!(end, "early_release" | "no_projectile") {
+            assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+            continue;
+        }
+        let contact = c.skillTouch_;
+        assert_eq!(c.skillBehavior_, SkillBehavior::Tap);
+        assert_eq!(c.skillCastMode_, 0);
+        assert_eq!(h.active[&contact], c.find_button(arrow.slot).unwrap().press);
+        c.update_pointer(&mut h, Point::new(0.2, 0.2));
+        c.flush_pointer(&mut h);
+        assert_eq!(h.active[&contact], c.find_button(arrow.slot).unwrap().press);
+        let now = now + 40_000_000;
+        match end {
+            "release" => key(&mut c, &mut h, now, 87, false),
+            "cancel" => key(&mut c, &mut h, now, 84, true),
+            _ => c.apply_snapshot(&mut h, &resource_frame(now, arrow, false), now),
+        }
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        assert!(!c.cooldownCasts_.contains_key("skill:1:206320"));
+        assert!(!c.skillCancelPending_);
     }
 }
 

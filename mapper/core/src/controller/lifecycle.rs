@@ -460,6 +460,27 @@ impl Controller {
     pub(crate) fn waiting_for_kagura_w(&self, b: &Button) -> bool {
         self.heroId_ == 25 && b.slot == "skill:1" && b.skillId == 2520 && self.kaguraThrow_.is_some()
     }
+    fn is_selena_arrow(&self, b: &Button) -> bool {
+        self.heroId_ == 63 && b.kind == "skill" && b.slot == "skill:1" && b.skillId == 6320
+    }
+    pub(crate) fn waiting_for_selena_arrow_follow(&self, b: &Button) -> bool {
+        if !self.is_selena_arrow(b) || self.active_variant(b) != 6320 {
+            return false;
+        }
+        let releasing = self.activeSlot_ == b.slot && self.skillCooldownVariant_ == 6320
+            && self.pendingRelease_ && !self.skillCancelPending_;
+        // The arrow appears after its 264 ms windup. Allow for publication
+        // jitter, but start the held follow only when its native form arrives.
+        let recently_released = self.cooldownCasts_.get("skill:1:6320")
+            .is_some_and(|at| (0..350_000_000).contains(&(self.now_ - at)));
+        releasing || recently_released
+    }
+    pub(crate) fn holding_selena_arrow_follow(&self) -> bool {
+        self.heroId_ == 63 && self.activeSlot_ == "skill:1" && self.skillCooldownVariant_ == 206320
+    }
+    pub(crate) fn end_selena_arrow_follow(&mut self, host: &mut impl Host) {
+        self.finish_skill_inner(host, false, Some("arrow_follow_end"));
+    }
     pub(crate) fn observe_kagura_throw(&mut self, host: &mut impl Host) {
         let Some(mut transition) = self.kaguraThrow_ else { return };
         if self.skillVariantSampleStartNs_ < transition.released_ns {
@@ -489,16 +510,20 @@ impl Controller {
             self.set_status("F7: очередь навыков заполнена — новое нажатие пропущено");
             return;
         }
+        let arrow_follow = self.is_selena_arrow(b)
+            && (self.active_variant(b) == 206320 || self.waiting_for_selena_arrow_follow(b));
         let request = QueuedSkill {
             slot: b.slot.clone(),
             key: b.key,
             held: true,
             requestedNs: self.now_,
+            arrowFollow: arrow_follow,
             down: self.capture_skill_intent(host),
             ..QueuedSkill::default()
         };
         self.queuedSkills_.push(request);
-        let reason = if self.waiting_for_cable(b) { "queued_for_previous_cable_impact" }
+        let reason = if arrow_follow { "queued_for_arrow_follow" }
+            else if self.waiting_for_cable(b) { "queued_for_previous_cable_impact" }
             else if self.waiting_for_kagura_w(b) { "queued_for_kagura_w_unlock" } else { "queued_after_active_gesture" };
         self.trace(host, "skill_queue", reason);
         if self.skillTouch_ >= 0
@@ -532,6 +557,19 @@ impl Controller {
             };
             if !b.available {
                 return;
+            }
+            if self.queuedSkills_[0].arrowFollow {
+                let held = self.queuedSkills_[0].held;
+                if held && self.waiting_for_selena_arrow_follow(&b) {
+                    return;
+                }
+                if !held || !self.is_selena_arrow(&b) || self.active_variant(&b) != 206320 {
+                    let q = self.queuedSkills_.remove(0);
+                    Self::drop_intent(host, &q.down);
+                    Self::drop_intent(host, &q.up);
+                    self.trace(host, "skill_queue", "arrow_follow_unavailable");
+                    continue;
+                }
             }
             if self.waiting_for_kagura_w(&b) || self.waiting_for_cable(&b) {
                 return;
@@ -603,9 +641,11 @@ impl Controller {
                 return false;
             }
         }
-        let state_forbidden = self.state_forbidden(b, self.cooldown_variant(b), 0) == Some(true);
+        let variant = self.cooldown_variant(b);
+        let arrow_follow = self.is_selena_arrow(b) && variant == 206320;
+        let state_forbidden = self.state_forbidden(b, variant, 0) == Some(true);
         self.flush_pointer(host);
-        if b.stopMovement && self.classify_skill(b) != SkillBehavior::AwaitVariant {
+        if b.stopMovement && !arrow_follow && self.classify_skill(b) != SkillBehavior::AwaitVariant {
             self.finish_movement(host, "")
         }
         let id = host.begin(b.press);
@@ -630,19 +670,20 @@ impl Controller {
         self.activeSlot_ = b.slot.clone();
         self.skillKey_ = b.key;
         self.skillCastMode_ = match b.castMode {
+            _ if arrow_follow => 0,
             2 if Self::is_retribution(b) => 1,
             3 if Self::is_retribution(b) => 0,
             mode => mode,
         };
         self.skillKeyHeld_ = true;
-        self.skillCooldownVariant_ = self.cooldown_variant(b);
+        self.skillCooldownVariant_ = variant;
         self.activeConfigSlot_ = self.current_config_slot(b);
         self.skillBindingVariant_ = if self.heroId_ == 25 && b.skillId == 2520 {
             self.active_variant(b)
         } else {
             0
         };
-        self.skillBehavior_ = self.classify_skill(b);
+        self.skillBehavior_ = if arrow_follow { SkillBehavior::Tap } else { self.classify_skill(b) };
         self.directionGeometryFresh_ = false;
         self.pendingDirectionValid_ = false;
         self.skillStarted_.restart(self.now_);
@@ -835,6 +876,10 @@ impl Controller {
         // Aimed basic attacks have no native cancel gesture. Never enter the
         // cancel-ACK wait or move their contact onto a skill cancel button.
         if self.activeSlot_ == "attack" || self.skillTouch_ < 0 || self.skillCancelPending_ {
+            return;
+        }
+        if self.holding_selena_arrow_follow() {
+            self.end_selena_arrow_follow(host);
             return;
         }
         self.charge_cancel_requested();

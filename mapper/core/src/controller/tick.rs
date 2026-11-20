@@ -98,6 +98,14 @@ impl Controller {
             }
         }
         let variant = self.active_variant(&b);
+        if self.holding_selena_arrow_follow() {
+            if !self.skillKeyHeld_ || (variant > 0 && variant != 206320
+                && self.skillVariantSampleStartNs_ >= self.castStartedNs_)
+            {
+                self.end_selena_arrow_follow(host);
+            }
+            return;
+        }
         if self.heroId_ == 25
             && b.skillId == 2520
             && self.skillBindingVariant_ != 0
