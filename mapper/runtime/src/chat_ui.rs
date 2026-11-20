@@ -8,6 +8,15 @@ use crate::{
 };
 
 const DEFAULT_LIMIT: i32 = 60;
+const LOBBY_TEAM_CHANNEL: i32 = 2;
+
+#[derive(Clone, Copy, Debug)]
+#[repr(u32)]
+enum SendState {
+    Unknown,
+    Pending,
+    Ready,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Target {
@@ -17,18 +26,20 @@ pub struct Target {
     pub editing: bool,
     pub point: [f64; 2],
     pub limit: i32,
+    send_state: SendState,
 }
 
 impl Target {
     pub fn encode(self) -> String {
         let [x, y] = self.point.map(|v| (v * 1e6).round() as u32);
         format!(
-            "{} {} {} {} {x} {y} {}",
+            "{} {} {} {} {x} {y} {} {}",
             self.owner,
             self.site,
             self.channel,
             u32::from(self.editing),
-            self.limit
+            self.limit,
+            self.send_state as u32
         )
     }
 }
@@ -77,6 +88,41 @@ fn integer<M: Memory>(r: &mut Reflection<M>, obj: u64, field: &str) -> Option<i3
 
 fn configured_limit(value: Option<i32>) -> Option<i32> {
     value.filter(|n| (1..=4096).contains(n))
+}
+
+fn lobby_send_state<M: Memory>(r: &mut Reflection<M>, chat: u64, channel: i32) -> SendState {
+    // The room's Team tab identifies one recipient. Other tabs can have
+    // conversations within a tab that this source does not identify.
+    if channel != LOBBY_TEAM_CHANNEL {
+        return SendState::Unknown;
+    }
+    let value = r
+        .link(chat, "currentInputValue")
+        .and_then(|p| if p == 0 { Ok(0) } else { r.integer(p + 16) });
+    match value {
+        Ok(0) => SendState::Ready,
+        Ok(1..) => SendState::Pending,
+        _ => SendState::Unknown,
+    }
+}
+
+fn battle_send_state<M: Memory>(
+    r: &mut Reflection<M>,
+    chat: u64,
+    channel: Option<i32>,
+) -> SendState {
+    if !matches!(channel, Some(1 | 2)) {
+        return SendState::Unknown;
+    }
+    let cooldown = r
+        .link(chat, "sendMsgCdCountDown")
+        .and_then(|p| r.field(p, "m_CanCountCd"))
+        .and_then(|addr| r.boolean(addr));
+    match cooldown {
+        Ok(false) => SendState::Ready,
+        Ok(true) => SendState::Pending,
+        Err(_) => SendState::Unknown,
+    }
 }
 
 fn lobby_bar<M: Memory>(r: &mut Reflection<M>, frame: u64) -> Option<[f64; 2]> {
@@ -156,17 +202,17 @@ pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64], in_match: bool) 
             let icon = r.link(ui, "m_sprite_SendMessage1").ok()?;
             (false, point(r, icon).ok()?)
         };
-        let limit = r
-            .link(chat, "m_sendChat")
-            .ok()
-            .and_then(|controller| integer(r, controller, "chatMaxInputNum"));
+        let controller = r.link(chat, "m_sendChat").ok().filter(|&p| p != 0);
+        let limit = controller.and_then(|p| integer(r, p, "chatMaxInputNum"));
+        let channel = controller.and_then(|p| integer(r, p, "m_currentChannel"));
         return Some(Target {
             owner,
             site: 1,
-            channel: integer(r, chat, "m_eCurrentMessageTab").unwrap_or(0),
+            channel: channel.unwrap_or(0),
             editing,
             point,
             limit: configured_limit(limit).unwrap_or(DEFAULT_LIMIT),
+            send_state: battle_send_state(r, chat, channel),
         });
     }
     let open = named(r, top, "name", "UI_Chat");
@@ -187,6 +233,7 @@ pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64], in_match: bool) 
             editing: false,
             point: lobby_bar(r, owner)?,
             limit: DEFAULT_LIMIT,
+            send_state: SendState::Unknown,
         });
     }
     let input = r.link(top, "localInput").ok()?;
@@ -196,12 +243,14 @@ pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64], in_match: bool) 
     let chat_limit = configured_limit(integer(r, top, "maxInputSize")).unwrap_or(DEFAULT_LIMIT);
     let limit = configured_limit(integer(r, input, "characterLimit"))
         .map_or(chat_limit, |n| n.min(chat_limit));
+    let channel = integer(r, top, "_chosenTabType").unwrap_or(0);
     Some(Target {
         owner,
         site: 2,
-        channel: integer(r, top, "_chosenTabType").unwrap_or(0),
+        channel,
         editing: true,
         point: input_point(r, label, send)?,
         limit,
+        send_state: lobby_send_state(r, top, channel),
     })
 }
