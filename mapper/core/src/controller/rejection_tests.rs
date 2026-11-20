@@ -44,7 +44,7 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17 | 22 | 27 | 33 | 46 | 59 | 63, "skill", "skill:1") => 87,
+            (17 | 22 | 27 | 33 | 46 | 59 | 63 | 108, "skill", "skill:1") => 87,
             (22 | 33 | 50, "skill", "skill:2") => 69,
             (27 | 50, "skill", "skill:3") => 82,
             _ => 81,
@@ -198,6 +198,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let jawhead_q = Skill { hero: 54, base: 5410, form: 5410, slot: "skill:0" };
     let uranus_w = Skill { hero: 59, base: 5920, form: 5920, slot: "skill:1" };
     let change_q = Skill { hero: 61, base: 6110, form: 6110, slot: "skill:0" };
+    let aulus_w = Skill { hero: 108, base: 10820, form: 10820, slot: "skill:1" };
     let cici_q = Skill { hero: 123, base: 12310, form: 12310, slot: "skill:0" };
     for (skill, code, form) in [
         (miya, 81, 111), (layla_q, 81, 201812), (freya, 69, 2254),
@@ -211,6 +212,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         (jawhead_q, 81, 5417),
         (uranus_w, 87, 5921),
         (change_q, 81, 6110), (Skill { form: 6150, ..change_q }, 81, 6150),
+        (aulus_w, 87, 10820), (Skill { form: 10824, ..aulus_w }, 87, 10824),
         (cici_q, 81, 12370),
     ] {
         let (mut c, mut h) = setup(skill, Some(false), 1, 0);

@@ -274,6 +274,7 @@ impl Controller {
             (59, "skill:1", 5920) => &[5921], // Uranus's active shield.
             (61, "skill:0", 6110) => &[6110, 6150], // Chang'e's meteor channel.
             (64, "skill:0", 6410) => &[6417], // Aldous's enhanced attack.
+            (108, "skill:1", 10820) => &[10820, 10824], // Aulus's ultimate locks W.
             (123, "skill:0", 12310) => &[12370], // Cici's active yo-yo.
             _ => &[],
         };
