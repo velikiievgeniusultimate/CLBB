@@ -45,8 +45,8 @@ impl Host for TestHost {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
             (17 | 22 | 27 | 33 | 46, "skill", "skill:1") => 87,
-            (22 | 33, "skill", "skill:2") => 69,
-            (27, "skill", "skill:3") => 82,
+            (22 | 33 | 50, "skill", "skill:2") => 69,
+            (27 | 50, "skill", "skill:3") => 82,
             _ => 81,
         };
         let aim_type = if (hero, button.skillId) == (33, 3320) { 1 } else { self.aim_type };
@@ -191,12 +191,18 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let sun_r = Skill { hero: 27, base: 2730, form: 2730, slot: "skill:3" };
     let odette_q = Skill { hero: 46, base: 4610, form: 4610, slot: "skill:0" };
     let odette_w = Skill { hero: 46, base: 4620, form: 4620, slot: "skill:1" };
+    let zhask_q = Skill { hero: 50, base: 5010, form: 5010, slot: "skill:0" };
+    let zhask_e = Skill { hero: 50, base: 5030, form: 5030, slot: "skill:2" };
+    let zhask_r = Skill { hero: 50, base: 5040, form: 5040, slot: "skill:3" };
     for (skill, code, form) in [
         (miya, 81, 111), (freya, 69, 2254),
         (sun_q, 81, 2710), (sun_q, 81, 2705), (sun_q, 81, 2708),
         (sun_w, 87, 2706), (sun_w, 87, 2707),
         (sun_r, 82, 2709), (sun_r, 82, 2739),
         (odette_q, 81, 4610), (odette_w, 87, 4620),
+        (zhask_q, 81, 5010), (zhask_q, 81, 5013),
+        (zhask_e, 69, 5030), (zhask_e, 69, 105040),
+        (zhask_r, 82, 5040), (zhask_r, 82, 5076),
     ] {
         let (mut c, mut h) = setup(skill, Some(false), 1, 0);
         let movement = c.movementTouch_;

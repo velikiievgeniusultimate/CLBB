@@ -265,6 +265,10 @@ impl Controller {
             // Odette's song locks both base spells without changing their IDs.
             (46, "skill:0", 4610) => &[4610],
             (46, "skill:1", 4620) => &[4620],
+            // Zhask's control locks can span the normal and merged forms.
+            (50, "skill:0", 5010) => &[5010, 5013],
+            (50, "skill:2", 5030) => &[5030, 105040],
+            (50, "skill:3", 5040) => &[5040, 5076],
             (64, "skill:0", 6410) => &[6417], // Aldous's enhanced attack.
             _ => &[],
         };
