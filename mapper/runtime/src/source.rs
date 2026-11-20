@@ -1043,6 +1043,7 @@ fn auto_charge_capacity(hero: i32, slot: &str, base: i32, active: i32) -> Option
         (24, "skill:2", 2430, 2430) => Some(2),
         (55, "skill:0", 5510, 5510) => Some(5),
         (57, "skill:0", 5710, 5710 | 5714) => Some(2),
+        (86, "skill:1", 8620, 8620) => Some(5),
         _ => None,
     }
 }
@@ -2886,6 +2887,7 @@ mod tests {
         assert_eq!(auto_charge_capacity(13, "skill:2", 1330, 1330), Some(3));
         assert_eq!(auto_charge_capacity(24, "skill:2", 2430, 2430), Some(2));
         assert_eq!(auto_charge_capacity(55, "skill:0", 5510, 5510), Some(5));
+        assert_eq!(auto_charge_capacity(86, "skill:1", 8620, 8620), Some(5));
         for active in [5710, 5714] {
             assert_eq!(auto_charge_capacity(57, "skill:0", 5710, active), Some(2));
         }
@@ -2902,10 +2904,12 @@ mod tests {
             (23, "skill:2", 2430), (24, "skill:1", 2430), (24, "skill:2", 2420),
             (54, "skill:0", 5510), (55, "skill:1", 5510), (55, "skill:0", 5520),
             (58, "skill:0", 5710), (57, "skill:1", 5710), (57, "skill:0", 5714),
+            (85, "skill:1", 8620), (86, "skill:0", 8620),
         ] {
             assert_eq!(auto_charge_capacity(hero, slot, base, base), None);
         }
         assert_eq!(auto_charge_capacity(57, "skill:0", 5710, 5729), None);
+        assert_eq!(auto_charge_capacity(86, "skill:1", 8620, 8610), None);
     }
     #[test]
     fn natalia_self_cast_is_plain_only_in_her_owned_ultimate_slot() {
