@@ -47,7 +47,7 @@
       #clbb-code-dialog p { margin:0 0 16px; color:#e4d6de; font:inherit; }
       #clbb-code-dialog button { min-height:36px; border:1px solid #e86a96; border-radius:6px; padding:6px 15px;
         color:white; background:#74334d; cursor:pointer; font:600 14px system-ui,sans-serif; }
-      #clbb-password-info { display:block; min-height:28px; margin:4px 0 0 auto; padding:2px 6px;
+      #clbb-password-info { display:block; min-height:28px; margin:0 10px 0 auto; transform:translateY(-85%); padding:2px 6px;
         border:0; color:#e4ecfc; background:transparent; text-decoration:underline; cursor:pointer; font:14px/1.4 system-ui,sans-serif; }`;
     document.head.append(style);
 
