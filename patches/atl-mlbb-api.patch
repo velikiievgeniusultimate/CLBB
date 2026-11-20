@@ -567,7 +567,7 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..34a72dc 100644
+index 3eb505c..f1e7f69 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
 @@ -1,5 +1,6 @@
@@ -577,10 +577,106 @@ index 3eb505c..34a72dc 100644
  
  #include "../defines.h"
  #include "../util.h"
-@@ -8,6 +9,31 @@
+@@ -8,6 +9,127 @@
  /* main app window */
  extern GtkWindow *window;
  
++/* Unity opens an Android EditText and one confirmation button for its soft
++ * keyboard. The button completes the game's edit session and sends chat. */
++typedef struct {
++	GtkWidget *text, *confirm;
++	unsigned texts, buttons;
++} TextDialog;
++
++static void find_text_controls(GtkWidget *widget, TextDialog *result)
++{
++	if (!widget || !gtk_widget_get_visible(widget))
++		return;
++	if (GTK_IS_TEXT(widget)) {
++		result->text = widget;
++		result->texts++;
++	} else if (GTK_IS_BUTTON(widget)) {
++		result->confirm = widget;
++		result->buttons++;
++	} else {
++		for (GtkWidget *child = gtk_widget_get_first_child(widget); child;
++		     child = gtk_widget_get_next_sibling(child))
++			find_text_controls(child, result);
++	}
++}
++
++static void text_dialog_unmap(GtkWidget *dialog, gpointer unused)
++{
++	GtkWindow *owner = gtk_window_get_transient_for(GTK_WINDOW(dialog));
++	if (owner && g_object_get_data(G_OBJECT(owner), "atl-text-dialog") == dialog)
++		g_object_set_data(G_OBJECT(owner), "atl-text-dialog", NULL);
++}
++
++static gboolean is_unity_dialog(JNIEnv *env, jobject dialog)
++{
++	jclass type = (*env)->GetObjectClass(env, dialog);
++	jstring name = J__Class__getName(env, type);
++	const char *utf8 = name ? (*env)->GetStringUTFChars(env, name, NULL) : NULL;
++	gboolean unity = utf8 && g_str_has_prefix(utf8, "com.unity3d.player.");
++	if (utf8)
++		(*env)->ReleaseStringUTFChars(env, name, utf8);
++	(*env)->DeleteLocalRef(env, name);
++	(*env)->DeleteLocalRef(env, type);
++	return unity;
++}
++
++static GtkWidget *text_dialog_prepare(GtkWindow *dialog)
++{
++	if (!g_object_get_data(G_OBJECT(dialog), "atl-unity-dialog"))
++		return NULL;
++	GtkWidget *content = gtk_window_get_child(dialog);
++	GtkWindow *owner = gtk_window_get_transient_for(dialog);
++	if (!content || !owner)
++		return NULL;
++	TextDialog controls = {0};
++	find_text_controls(content, &controls);
++	if (controls.texts != 1 || controls.buttons != 1)
++		return NULL;
++	gtk_window_set_modal(dialog, TRUE);
++	g_object_set_data(G_OBJECT(owner), "atl-text-dialog", dialog);
++	g_object_set_data_full(G_OBJECT(dialog), "atl-editor-last-submit", g_new0(gint64, 1), g_free);
++	return controls.text;
++}
++
++gboolean atl_text_input_active(GtkWindow *owner)
++{
++	GtkWidget *dialog = g_object_get_data(G_OBJECT(owner), "atl-text-dialog");
++	if (dialog && gtk_widget_get_mapped(dialog))
++		return TRUE;
++	GtkWidget *focus = gtk_window_get_focus(owner);
++	return GTK_IS_EDITABLE(focus) && gtk_widget_get_mapped(focus) &&
++	       gtk_editable_get_editable(GTK_EDITABLE(focus));
++}
++
++gboolean atl_text_dialog_submit(GtkWidget *text)
++{
++	GtkRoot *root = gtk_widget_get_root(text);
++	if (!GTK_IS_WINDOW(root) || !g_object_get_data(G_OBJECT(root), "atl-unity-dialog"))
++		return FALSE;
++	GtkWindow *dialog = GTK_WINDOW(root);
++	GtkWindow *owner = gtk_window_get_transient_for(dialog);
++	if (!owner || g_object_get_data(G_OBJECT(owner), "atl-text-dialog") != dialog)
++		return FALSE;
++	gint64 *last_submit = g_object_get_data(G_OBJECT(dialog), "atl-editor-last-submit");
++	gint64 now = g_get_monotonic_time();
++	if (!last_submit || now - *last_submit < 200 * G_TIME_SPAN_MILLISECOND)
++		return TRUE;
++	TextDialog controls = {0};
++	find_text_controls(gtk_window_get_child(dialog), &controls);
++	if (controls.texts != 1 || controls.buttons != 1 || controls.text != text ||
++	    !gtk_widget_get_mapped(controls.confirm) || !gtk_widget_is_sensitive(controls.confirm))
++		return FALSE;
++	/* Android dismisses asynchronously. Collapse repeated Enter before it closes. */
++	*last_submit = now;
++	g_signal_emit_by_name(controls.confirm, "clicked");
++	return TRUE;
++}
++
 +/* Dialog decor uses Android logical coordinates just like the main activity.
 + * Reuse the launcher's viewport so large logical displays fit the desktop. */
 +static void set_dialog_content(JNIEnv *env, GtkWindow *dialog, GtkWidget *content)
@@ -609,17 +705,21 @@ index 3eb505c..34a72dc 100644
  static gboolean on_close_request(GtkWidget *dialog, jobject jobj)
  {
  	printf("on_close_request\n");
-@@ -56,7 +82,8 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
+@@ -56,7 +178,12 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
  	GtkWidget *decor_view = GTK_WIDGET(_PTR(decor_view_ptr));
  	GtkWidget *dialog = gtk_window_new();
  	gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
 -	gtk_window_set_child(GTK_WINDOW(dialog), gtk_widget_get_parent(decor_view));
++	if (is_unity_dialog(env, this)) {
++		g_object_set_data(G_OBJECT(dialog), "atl-unity-dialog", GINT_TO_POINTER(1));
++		g_signal_connect(dialog, "unmap", G_CALLBACK(text_dialog_unmap), NULL);
++	}
 +	set_dialog_content(env, GTK_WINDOW(dialog), gtk_widget_get_parent(decor_view));
 +	gtk_window_set_default_size(GTK_WINDOW(dialog), 960, 540);
  	g_signal_connect(GTK_WINDOW(dialog), "close-request", G_CALLBACK(on_close_request), _REF(this));
  	return _INTPTR(g_object_ref(dialog));
  }
-@@ -74,7 +101,7 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,13 +201,16 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
@@ -628,6 +728,15 @@ index 3eb505c..34a72dc 100644
  }
  
  JNIEXPORT void JNICALL Java_android_app_Dialog_nativeShow(JNIEnv *env, jobject this, jlong ptr)
+ {
+ 	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
++	GtkWidget *editor = text_dialog_prepare(dialog);
+ 	gtk_window_present(dialog);
++	if (editor)
++		gtk_widget_grab_focus(editor);
+ }
+ 
+ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeClose(JNIEnv *env, jobject this, jlong ptr)
 diff --git a/src/api-impl-jni/audio/android_media_AudioManager.c b/src/api-impl-jni/audio/android_media_AudioManager.c
 index d0e27de..a80def3 100644
 --- a/src/api-impl-jni/audio/android_media_AudioManager.c
@@ -2819,6 +2928,117 @@ index ef0513d..2ea8a44 100644
  	jsize data_len = (*env)->GetStringUTFLength(env, data_jstr);
  	jsize data_jlen = (*env)->GetStringLength(env, data_jstr);
  	char *data = malloc(data_len + 1); // + 1 for NUL
+diff --git a/src/api-impl-jni/widgets/android_widget_EditText.c b/src/api-impl-jni/widgets/android_widget_EditText.c
+index d53bc4f..76fd9c9 100644
+--- a/src/api-impl-jni/widgets/android_widget_EditText.c
++++ b/src/api-impl-jni/widgets/android_widget_EditText.c
+@@ -7,10 +7,42 @@
+ 
+ #include "../generated_headers/android_widget_EditText.h"
+ 
++extern gboolean atl_text_dialog_submit(GtkWidget *text);
++
++static jstring text_to_java(JNIEnv *env, const char *text)
++{
++	glong length = 0;
++	gunichar2 *utf16 = g_utf8_to_utf16(text, -1, NULL, &length, NULL);
++	if (!utf16)
++		return NULL;
++	jstring value = (*env)->NewString(env, utf16, length);
++	g_free(utf16);
++	return value;
++}
++
++static char *text_from_java(JNIEnv *env, jstring text)
++{
++	if (!text)
++		return g_strdup("");
++	const jchar *utf16 = (*env)->GetStringChars(env, text, NULL);
++	if (!utf16)
++		return NULL;
++	char *value = g_utf16_to_utf8(utf16, (*env)->GetStringLength(env, text), NULL, NULL, NULL);
++	(*env)->ReleaseStringChars(env, text, utf16);
++	return value;
++}
++
++static void submit_on_activate(GtkText *text, gpointer unused)
++{
++	if (atl_text_dialog_submit(GTK_WIDGET(text)))
++		g_signal_stop_emission_by_name(text, "activate");
++}
++
+ JNIEXPORT jlong JNICALL Java_android_widget_EditText_native_1constructor(JNIEnv *env, jobject this, jobject context, jobject attrs)
+ {
+ 	GtkWidget *wrapper = g_object_ref(wrapper_widget_new());
+ 	GtkWidget *gtk_text = gtk_text_new();
++	g_signal_connect(gtk_text, "activate", G_CALLBACK(submit_on_activate), NULL);
+ 	wrapper_widget_set_child(WRAPPER_WIDGET(wrapper), gtk_text);
+ 	wrapper_widget_set_jobject(WRAPPER_WIDGET(wrapper), env, this);
+ 	wrapper_widget_register_invalidation_listener(WRAPPER_WIDGET(wrapper));
+@@ -21,7 +53,7 @@ JNIEXPORT jstring JNICALL Java_android_widget_EditText_native_1getText(JNIEnv *e
+ {
+ 	GtkText *gtk_text = GTK_TEXT(_PTR(widget_ptr));
+ 	const char *text = gtk_entry_buffer_get_text(gtk_text_get_buffer(gtk_text));
+-	return _JSTRING(text);
++	return text_to_java(env, text);
+ }
+ 
+ struct changed_callback_data {
+@@ -34,12 +66,18 @@ static void changed_cb(GtkEditable *self, jobject listener)
+ {
+ 	JNIEnv *env = get_jni_env();
+ 
+-	const char *text = gtk_editable_get_text(self);
+-	jobject text_obj = J_new__SpannableStringBuilder(env, _JSTRING(text));
+-	J__TextWatcher__onTextChanged(env, listener, text_obj, 0, 0, strlen(text));
+-	if ((*env)->ExceptionCheck(env))
+-		(*env)->ExceptionDescribe(env);
+-	J__TextWatcher__afterTextChanged(env, listener, text_obj);
++	jstring text = text_to_java(env, gtk_editable_get_text(self));
++	if (!text)
++		goto out;
++	jobject editable = J_new__SpannableStringBuilder(env, text);
++	if (editable && !(*env)->ExceptionCheck(env)) {
++		J__TextWatcher__onTextChanged(env, listener, editable, 0, 0, (*env)->GetStringLength(env, text));
++		if (!(*env)->ExceptionCheck(env))
++			J__TextWatcher__afterTextChanged(env, listener, editable);
++	}
++	(*env)->DeleteLocalRef(env, editable);
++	(*env)->DeleteLocalRef(env, text);
++out:
+ 	if ((*env)->ExceptionCheck(env))
+ 		(*env)->ExceptionDescribe(env);
+ }
+@@ -102,22 +140,21 @@ JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setOnEditorActionLis
+ 
+ JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setText(JNIEnv *env, jobject this, jlong widget_ptr, jstring text_jstr)
+ {
+-	const char *gtk_text = (*env)->GetStringUTFChars(env, text_jstr, NULL);
+-	jsize length = (*env)->GetStringUTFLength(env, text_jstr);
+-	gtk_entry_buffer_set_text(gtk_text_get_buffer(GTK_TEXT(_PTR(widget_ptr))), gtk_text, length);
+-	(*env)->ReleaseStringUTFChars(env, text_jstr, gtk_text);
++	g_autofree char *text = text_from_java(env, text_jstr);
++	if (text)
++		gtk_entry_buffer_set_text(gtk_text_get_buffer(GTK_TEXT(_PTR(widget_ptr))), text, -1);
+ }
+ 
+ JNIEXPORT void JNICALL Java_android_widget_EditText_native_1setHint(JNIEnv *env, jobject this, jlong widget_ptr, jstring text_jstr)
+ {
+-	const char *text = (*env)->GetStringUTFChars(env, text_jstr, NULL);
+-	gtk_text_set_placeholder_text(GTK_TEXT(_PTR(widget_ptr)), text);
+-	(*env)->ReleaseStringUTFChars(env, text_jstr, text);
++	g_autofree char *text = text_from_java(env, text_jstr);
++	if (text)
++		gtk_text_set_placeholder_text(GTK_TEXT(_PTR(widget_ptr)), text);
+ }
+ 
+ JNIEXPORT jstring JNICALL Java_android_widget_EditText_native_1getHint(JNIEnv *env, jobject this, jlong widget_ptr)
+ {
+ 	GtkText *gtk_text = GTK_TEXT(_PTR(widget_ptr));
+ 	const char *text = gtk_text_get_placeholder_text(gtk_text);
+-	return _JSTRING(text);
++	return text ? text_to_java(env, text) : NULL;
+ }
 diff --git a/src/api-impl/android/app/Activity.java b/src/api-impl/android/app/Activity.java
 index 4adf5b4..9c695b3 100644
 --- a/src/api-impl/android/app/Activity.java
@@ -7762,10 +7982,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..fc69841
+index 0000000..7f56a24
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1447 @@
+@@ -0,0 +1,1469 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -7794,6 +8014,7 @@ index 0000000..fc69841
 +extern const char *clbb_view_touch_status(void);
 +extern int clbb_view_cancel_mouse(GtkWidget *, int);
 +extern int clbb_view_has_active_contacts(void);
++extern gboolean atl_text_input_active(GtkWindow *owner);
 +typedef float (*ClbbGain)(void);
 +static _Atomic(ClbbGain) master_gain;
 +static _Atomic(ClbbGain) game_gain;
@@ -7876,7 +8097,7 @@ index 0000000..fc69841
 +    void (*suspend)(void *, int);
 +    int (*configure_pacing)(unsigned int, int);
 +    GHashTable *keys, *claimed;
-+    gboolean dispatching, locked, closing;
++    gboolean dispatching, locked, closing, text_input;
 +    Window fence, fence_parent;
 +    ClbbPointerFence pointer_fence;
 +    gint64 fence_refresh_at;
@@ -8172,11 +8393,28 @@ index 0000000..fc69841
 +    }
 +    return TRUE;
 +}
++static gboolean refresh_text_input(ClbbHost *h) {
++    gboolean active = atl_text_input_active(h->window);
++    if (active != h->text_input) {
++        h->text_input = active;
++        g_hash_table_remove_all(h->keys);
++        g_hash_table_remove_all(h->claimed);
++        if (active) {
++            unlock(h);
++            h->agent_until = 0;
++            h->dispatching = TRUE;
++            h->suspend(h->runtime, 1);
++            h->dispatching = FALSE;
++        }
++    }
++    return active;
++}
++
 +static gboolean on_event(GtkEventControllerLegacy *controller, GdkEvent *event,
 +                         gpointer data) {
 +    (void)controller;
 +    ClbbHost *h = data;
-+    if (h->dispatching || h->closing)
++    if (h->dispatching || h->closing || refresh_text_input(h))
 +        return FALSE;
 +    GdkEventType type = gdk_event_get_event_type(event);
 +    if(type==GDK_FOCUS_CHANGE && !gdk_focus_event_get_in(event)) unlock(h);
@@ -8642,7 +8880,8 @@ index 0000000..fc69841
 +    live_route_callbacks(m->library);apply_frame_pacing(h);
 +    h->suspend(h->runtime,0);
 +    h->event(h->runtime,0,0,0,0,h->x,h->y);
-+    h->suspend(h->runtime,!gtk_window_is_active(h->window)||clbb_settings_is_visible(h->settings));
++    h->suspend(h->runtime, !gtk_window_is_active(h->window) || clbb_settings_is_visible(h->settings) ||
++               atl_text_input_active(h->window));
 +    old_destroy(old_runtime);
 +    if(previous){previous->runtime=NULL;g_ptr_array_add(h->retired_modules,previous);}
 +    h->reload_generation++;g_free(h->reload_status);h->reload_status=g_strdup("committed");
@@ -8679,14 +8918,15 @@ index 0000000..fc69841
 +        if(redraw)gtk_widget_queue_draw(h->cursor_layer);
 +    }
 +    GtkWidget *surface = game_surface(GTK_WIDGET(h->window));
-+    gboolean active = (gtk_window_is_active(h->window) ||
++    gboolean editing = refresh_text_input(h);
++    gboolean active = !editing && (gtk_window_is_active(h->window) ||
 +                       h->agent_until > g_get_monotonic_time()) &&
 +                      !clbb_settings_is_visible(h->settings);
 +    if (h->agent_until && h->agent_until <= g_get_monotonic_time()) {
 +        h->agent_until = 0;
 +        gtk_widget_queue_draw(h->cursor_layer);
 +    }
-+    if (!gtk_window_is_active(h->window) || clbb_settings_is_visible(h->settings))
++    if (editing || !gtk_window_is_active(h->window) || clbb_settings_is_visible(h->settings))
 +        unlock(h);
 +    else if (h->locked)
 +        refresh_confine(h);
@@ -8834,6 +9074,8 @@ index 0000000..fc69841
 +            _exit(0);
 +        } else if (count==2 && !strcmp(args[0],"read") && !strcmp(args[1],"diagnostics.reload")) {
 +            reply=live_diagnostics(h);
++        } else if (count == 2 && !strcmp(args[0], "read") && !strcmp(args[1], "diagnostics.text_entry")) {
++            reply = g_strdup(atl_text_input_active(h->window) ? "true" : "false");
 +        } else if (count==3 && !strcmp(args[0],"reload-mapper")) {
 +            reply=live_request(h,args[1],args[2]);
 +        } else if (count==1 && !strcmp(args[0],"rollback-mapper")) {
