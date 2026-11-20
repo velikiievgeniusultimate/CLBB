@@ -60,7 +60,7 @@ fn list<M: Memory>(r: &Reflection<M>, checks: &mut Checks, object: u64) -> Resul
     Ok(raw.chunks_exact(8).map(|b| u64_at(b, 0)).collect())
 }
 
-fn button_widget<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks, object: u64) -> Result<u64> {
+pub(crate) fn button_widget<M: Memory>(r: &mut Reflection<M>, checks: &mut Checks, object: u64) -> Result<u64> {
     owner(r, checks, object)?;
     if r.class_name(r.pointer(object)?)? != "GameObject" { return Err("Statistics button is not a GameObject".into()); }
     let native = link(r, checks, object, "m_CachedPtr")?;

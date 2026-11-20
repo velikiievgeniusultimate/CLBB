@@ -1,6 +1,7 @@
 //! Locations of the game's own chat buttons and input fields.
 use crate::{
     account_chooser::named,
+    optional_ui::button_widget,
     platform::Memory,
     reflection::{Reflection, Result},
     unity::{Widget, matrices, onscreen, ui_matrix_offset},
@@ -33,6 +34,11 @@ fn point<M: Memory>(r: &mut Reflection<M>, obj: u64) -> Result<[f64; 2]> {
     if !widget.visible(r)? {
         return Err("Chat control hidden".into());
     }
+    project(r, &widget)
+}
+
+fn project<M: Memory>(r: &mut Reflection<M>, widget: &Widget) -> Result<[f64; 2]> {
+    let obj = widget.object;
     let camera = r.link(obj, "mCam")?;
     let native = r.link(camera, "m_CachedPtr")?;
     let bytes = r.read(native, 4096)?;
@@ -43,6 +49,21 @@ fn point<M: Memory>(r: &mut Reflection<M>, obj: u64) -> Result<[f64; 2]> {
         return Err("Chat control outside the game surface".into());
     }
     Ok(p)
+}
+
+fn input_point<M: Memory>(r: &mut Reflection<M>, label: u64, send_button: u64) -> Option<[f64; 2]> {
+    let mut checks = Vec::new();
+    let sprite = button_widget(r, &mut checks, send_button).ok()?;
+    let widget = Widget::new(r, sprite).ok()?;
+    if !widget.visible(r).ok()? {
+        return None;
+    }
+    // Textless labels have no draw call even while the input is clickable.
+    let label = Widget::new(r, label).ok()?;
+    let picked = project(r, &label).ok()?;
+    crate::platform::matches_reads(&r.memory, &checks)
+        .ok()?
+        .then_some(picked)
 }
 
 fn integer<M: Memory>(r: &mut Reflection<M>, obj: u64, field: &str) -> Option<i32> {
@@ -120,7 +141,8 @@ pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64], in_match: bool) 
         let chat = r.link(owner, "uiBattleChatInfo").ok()?;
         let ui = r.link(chat, "m_UIFrameInfo").ok()?;
         let field = r.link(ui, "m_zLabel_InputChat").ok()?;
-        let (editing, point) = if let Ok(p) = point(r, field) {
+        let send = r.link(ui, "m_button_Send").ok()?;
+        let (editing, point) = if let Some(p) = input_point(r, field, send) {
             (true, p)
         } else {
             let icon = r.link(ui, "m_sprite_SendMessage1").ok()?;
@@ -155,11 +177,13 @@ pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64], in_match: bool) 
     }
     let input = r.link(top, "localInput").ok()?;
     let label = r.link(input, "label").ok()?;
+    let ui = r.link(top, "m_FrameUI").ok()?;
+    let send = r.link(ui, "m_Button_Send").ok()?;
     Some(Target {
         owner,
         site: 2,
         channel: integer(r, top, "_chosenTabType").unwrap_or(0),
         editing: true,
-        point: point(r, label).ok()?,
+        point: input_point(r, label, send)?,
     })
 }

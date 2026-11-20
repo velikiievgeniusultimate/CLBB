@@ -567,7 +567,7 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..390d0b7 100644
+index 3eb505c..25609ee 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
 @@ -1,5 +1,7 @@
@@ -983,7 +983,7 @@ index 3eb505c..390d0b7 100644
  	return _INTPTR(g_object_ref(dialog));
  }
  
-@@ -74,26 +463,38 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,26 +463,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
@@ -1010,6 +1010,7 @@ index 3eb505c..390d0b7 100644
 +	InlineChat *chat = inline_chat(owner);
 +	if (chat && chat->dialog == dialog) {
 +		g_object_set_data(G_OBJECT(owner), "atl-chat-editor", NULL);
++		gtk_window_destroy(dialog);
 +		return;
 +	}
  	gtk_window_close(dialog);
@@ -8303,10 +8304,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..77497ea
+index 0000000..5cdb801
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1596 @@
+@@ -0,0 +1,1618 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -8418,7 +8419,7 @@ index 0000000..77497ea
 +    int (*write)(void *, const char *, const char *);
 +    void (*suspend)(void *, int);
 +    int (*configure_pacing)(unsigned int, int);
-+    GHashTable *keys, *claimed;
++    GHashTable *keys, *claimed, *chat_keys;
 +    gboolean dispatching, locked, closing, text_input;
 +    Window fence, fence_parent;
 +    ClbbPointerFence pointer_fence;
@@ -8723,6 +8724,13 @@ index 0000000..77497ea
 +    gboolean active = atl_text_input_active(h->window);
 +    if (active != h->text_input) {
 +        h->text_input = active;
++        if (active && atl_chat_active(h->window)) {
++            GHashTableIter iter;
++            gpointer key;
++            g_hash_table_iter_init(&iter, h->keys);
++            while (g_hash_table_iter_next(&iter, &key, NULL))
++                g_hash_table_insert(h->chat_keys, key, GINT_TO_POINTER(1));
++        }
 +        g_hash_table_remove_all(h->keys);
 +        g_hash_table_remove_all(h->claimed);
 +        if (active) {
@@ -8810,8 +8818,21 @@ index 0000000..77497ea
 +        return TRUE;
 +    }
 +    if (edge == h->chat_send_edge && !editing) {
-+        if (!down) h->chat_send_edge = 0;
++        if (!down) {
++            h->chat_send_edge = 0;
++            g_hash_table_remove(h->chat_keys, GUINT_TO_POINTER(edge));
++        }
 +        return TRUE;
++    }
++    if (keyboard) {
++        gpointer hardware = GUINT_TO_POINTER(edge);
++        int pressed = GPOINTER_TO_INT(g_hash_table_lookup(h->chat_keys, hardware));
++        if (!down)
++            g_hash_table_remove(h->chat_keys, hardware);
++        if (pressed == 1 || (pressed && !editing))
++            return TRUE;
++        if (editing && down && atl_chat_active(h->window))
++            g_hash_table_insert(h->chat_keys, hardware, GINT_TO_POINTER(2));
 +    }
 +    if (editing) {
 +        if (keyboard && atl_chat_active(h->window)) {
@@ -9396,6 +9417,7 @@ index 0000000..77497ea
 +    if (!gtk_window_is_active(GTK_WINDOW(object))) {
 +        unlock(h);
 +        h->chat_open_edge = h->chat_send_edge = 0;
++        g_hash_table_remove_all(h->chat_keys);
 +        g_hash_table_remove_all(h->keys);
 +        g_hash_table_remove_all(h->claimed);
 +        if (!h->dispatching && h->agent_until <= g_get_monotonic_time()) {
@@ -9884,6 +9906,7 @@ index 0000000..77497ea
 +    atomic_store_explicit(&voice_gain, (ClbbGain)dlsym(h->library, "clbb_audio_voice_gain"), memory_order_relaxed);
 +    h->keys = g_hash_table_new(g_direct_hash, g_direct_equal);
 +    h->claimed = g_hash_table_new(g_direct_hash, g_direct_equal);
++    h->chat_keys = g_hash_table_new(g_direct_hash, g_direct_equal);
 +    h->account_gate = clbb_account_gate_new(GTK_OVERLAY(overlay), h->viewport, read_setting, tap_game_control, h);
 +    ClbbSettingsCallbacks cb = {read_setting, write_setting, visibility, h};
 +    h->settings = clbb_settings_create(GTK_OVERLAY(overlay), &cb);
