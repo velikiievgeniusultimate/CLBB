@@ -12,9 +12,9 @@ static const char *checks[] = {
     "LoadPage('login-new','en','clbb-ui-check,'+btoa(JSON.stringify({userToken:'',passwdUrl:'https://mtacc.mobilelegends.com/',encodeParam:''})),'clbb-ui-check');true}",
     "if(location.pathname==='/v3.0/inapp/loginbyemail' && document.querySelectorAll('input').length>=2 && "
     "!document.querySelector('input[type=password]') && document.querySelector('#clbb-login-method button')){"
-    "document.querySelector('#clbb-login-method button').click();true}",
+    "document.querySelector('#clbb-login-method [data-clbb-page=login-new]').click();true}",
     "if(location.pathname==='/v3.0/inapp/login-new' && document.querySelector('input[type=password]') && "
-    "document.querySelector('#clbb-login-method button')){document.querySelector('#clbb-login-method button').click();true}",
+    "document.querySelector('#clbb-login-method [data-clbb-page=loginbyemail]')){document.querySelector('#clbb-login-method [data-clbb-page=loginbyemail]').click();true}",
     "location.pathname==='/v3.0/inapp/loginbyemail' && document.querySelectorAll('input').length>=2 && "
     "!document.querySelector('input[type=password]') && !!document.querySelector('#clbb-login-method button')",
 };

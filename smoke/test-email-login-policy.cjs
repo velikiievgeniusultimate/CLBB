@@ -19,6 +19,7 @@ function setup(url, language = 'en') {
     }
     const document = { body: element(), documentElement: {lang: language}, createElement: element, getElementById: id => ids.get(id) };
     location.replace = value => navigations.push(value);
+    location.reload = () => navigations.push('reload');
     const window = {
         LoadPage(...args) { calls.push({args, self: this}); return 42; },
         addEventListener(key, callback) { events.set(key, callback); },
@@ -49,23 +50,24 @@ for (const path of ['/', '/v3.0/', '/v3.0/index.html']) {
     t.window.LoadPage('login-new');
     assert.deepEqual(t.calls.map(call => call.args[0]), ['loginbyemail', 'login-new']);
 }
-for (const [page, destination] of [['login-new','loginbyemail'], ['login','loginbyemail'], ['loginbyemail','login-new']]) {
+for (const page of ['login-new', 'login', 'loginbyemail']) {
     const t = setup(origin + prefix + page + '?fixture=1#keep', 'ru-RU');
     const bar = t.document.body.children[0];
-    const [notice, button] = bar.children;
+    const [notice, code, password] = bar.children;
     assert.equal(t.navigations.length, 0);
     assert.equal(notice.hidden, true);
-    assert.equal(button.textContent, page === 'loginbyemail' ? 'Войти по паролю' : 'Войти по коду из письма');
+    assert.equal(code.textContent, 'Войти по коду из письма');
+    assert.equal(password.textContent, 'Войти по паролю');
     vm.runInContext(policy, t.context);
     assert.deepEqual(t.document.body.children, [bar]);
-    if (page !== 'loginbyemail') {
-        t.events.get('clbb-password-unavailable')();
-        assert.equal(notice.hidden, false);
-        assert.match(notice.textContent, /405/);
-        assert.deepEqual(t.navigations, []);
-    } else assert.equal(t.events.size, 0);
-    button.events.get('click')();
-    assert.deepEqual(t.navigations, [origin + prefix + destination + '?fixture=1#keep']);
+    t.events.get('clbb-login-unavailable')();
+    assert.equal(notice.hidden, false);
+    assert.match(notice.textContent, /MOONTON.*405/);
+    assert.deepEqual(t.navigations, []);
+    code.events.get('click')();
+    password.events.get('click')();
+    assert.deepEqual(t.navigations, ['loginbyemail', 'login-new'].map(destination =>
+        destination === page ? 'reload' : origin + prefix + destination + '?fixture=1#keep'));
 }
 for (const url of ['http://mtacc.mobilelegends.com/', 'https://mtacc.mobilelegends.com.evil.invalid/',
     'https://mtacc.mobilelegends.com:444'+prefix+'login', 'https://sample@mtacc.mobilelegends.com'+prefix+'login',
