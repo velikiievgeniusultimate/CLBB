@@ -336,6 +336,7 @@ impl Controller {
             // X.Borg's base ultimate is disabled without Firaga Armor.
             (83, "skill:2", 8330) => &[8330],
             (93, "skill:1", 9320) => &[9320], // Atlas is already separated from his armor.
+            (94, "skill:3", 9440) => &[109408], // Popol's ultimate is still active.
             (108, "skill:1", 10820) => &[10820, 10824], // Aulus's ultimate locks W.
             (123, "skill:0", 12310) => &[12370], // Cici's active yo-yo.
             _ => &[],

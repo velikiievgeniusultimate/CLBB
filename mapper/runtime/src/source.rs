@@ -368,6 +368,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Carmilla starts her speed buff with a tap. The follow-up 9222
         // has its own native directional indicator.
         || (hero == 92 && slot == "skill:1" && base == 9220 && active == 9220)
+        // Popol calls Kupa back and shields himself with a tap, including
+        // the enhanced knock-up while the ultimate is active.
+        || (hero == 94 && slot == "skill:1" && base == 9420 && matches!(active, 9420 | 9423))
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
@@ -470,6 +473,16 @@ mod control_kind_tests {
         for (slot, base) in [("skill:0", 9210), ("skill:1", 9220), ("skill:2", 9230)] {
             assert!(!verified_button_only_form(92, slot, base, 9280));
         }
+    }
+    #[test]
+    fn popol_shield_is_a_tap_before_and_during_the_ultimate() {
+        use super::verified_button_only_form;
+        for active in [9420, 9423] {
+            assert!(verified_button_only_form(94, "skill:1", 9420, active));
+            assert!(!verified_button_only_form(94, "skill:2", 9430, active));
+            assert!(!verified_button_only_form(93, "skill:1", 9420, active));
+        }
+        assert!(!verified_button_only_form(94, "skill:1", 9420, 9424));
     }
     #[test]
     fn granger_rhapsody_stop_is_only_its_current_native_recast() {
