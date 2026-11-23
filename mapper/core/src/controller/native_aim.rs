@@ -11,8 +11,9 @@ use std::collections::BTreeSet;
 const NS100: f64 = 100_000_000.;
 const NS250: f64 = 250_000_000.;
 const POINT_SOURCE: &str = "IndicatorMotionPos.m_vDragResult";
+const BARATS_MISSILE_SOURCE: &str = "IndicatorMotionPosWithRot.m_vDragResult";
 fn direct_source(source: &str) -> bool {
-    matches!(source, Q_SOURCE_A | Q_SOURCE_B | POINT_SOURCE | ATTACK_SOURCE | LESLEY_SOURCE | ZHUXIN_LANTERN_SOURCE)
+    matches!(source, Q_SOURCE_A | Q_SOURCE_B | POINT_SOURCE | ATTACK_SOURCE | LESLEY_SOURCE | ZHUXIN_LANTERN_SOURCE | BARATS_MISSILE_SOURCE)
 }
 const Q_SOURCE_A: &str = "IndicatorMotionFaTiaoQiu2.m_vDragResult";
 const Q_SOURCE_B: &str = "IndicatorMotionRotAndPosRot.m_vDragResult";
@@ -489,6 +490,8 @@ impl Controller {
                 && self.find_button("attack").is_some_and(|b| b.kind == "attack" && b.aimType == 3),
             LESLEY_SOURCE => frame_skill == 5330 && self.skillBehavior_ == SkillBehavior::Range
                 && self.find_button(&self.activeSlot_).is_some_and(|b| self.lesley_ultimate(b)),
+            BARATS_MISSILE_SOURCE => self.heroId_ == 99 && frame_skill == 9920
+                && self.activeSlot_ == "skill:1" && self.skillBehavior_ == SkillBehavior::Range,
             ZHUXIN_LANTERN_SOURCE => self.heroId_ == 125 && frame_skill == 12510
                 && self.activeSlot_ == "skill:1" && self.skillBehavior_ == SkillBehavior::Range,
             _ => direct_source(source),
@@ -1656,6 +1659,29 @@ mod tests {
             assert_eq!(c.directRangeSource_, RANGE_SOURCE);
             assert!(c.directRanges_.is_empty(), "generic fixed metadata is a current witness, not a reusable fixed-range cache");
             assert!(c.directStartups_.is_empty(), "a later unknown charge policy must not reuse provisional fixed metadata");
+        }
+    }
+    #[test]
+    fn barats_missile_feedback_is_scoped_to_the_held_second_skill() {
+        for (hero, skill, slot, allowed) in [
+            (99, 9920, "skill:1", true),
+            (99, 9920, "skill:0", false),
+            (99, 9910, "skill:1", false),
+            (125, 9920, "skill:1", false),
+        ] {
+            let (mut controller, mut frame, mut host) = generic_point_range_fixture(hero, skill);
+            controller.activeSlot_ = slot.into();
+            controller.frameActiveSlot_ = slot.into();
+            frame.logical.joystick.slot = text(slot);
+            frame.logical.source = text(BARATS_MISSILE_SOURCE);
+            frame.logical.world_range = n(6.4);
+            controller.select_logical_coordinates(&mut host, &frame);
+            controller.configure_direct(&mut host, &frame);
+            assert_eq!(controller.logicalInputFresh_, allowed);
+            assert_eq!(controller.direct_.ready != 0, allowed);
+            if allowed {
+                assert_eq!(controller.direct_.world_range, 6.4);
+            }
         }
     }
     #[test]

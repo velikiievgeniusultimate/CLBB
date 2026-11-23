@@ -293,6 +293,10 @@ fn verified_direction_geometry(skill:i32,motion:&str,package:&str,configured_dir
     native_template(motion,package)==Some(2)||configured_direction
         ||(skill==8430&&motion=="IndicatorMotionRot"&&package=="IndicatorPackageEasy")
 }
+fn barats_missile_range_family(skill: i32, motion: &str, package: &str) -> bool {
+    skill == 9920 && motion == "IndicatorMotionPosWithRot" && package == "IndicatorPackageEasy_Yuan"
+}
+
 fn gord_bounce_range_family(skill:i32,motion:&str,package:&str)->bool {
     skill==2310 && motion=="IndicatorMotionPos" && package=="IndicatorPackage_BulletDirctionBomb"
 }
@@ -344,6 +348,18 @@ fn valid_native_range(shape:f64,values:[f64;2])->bool {
 /// the distance while preserving the same typed configuration/array owner.
 fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
     motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<(u64,f64)>> {
+    if barats_missile_range_family(skill, motion_name, package_name) {
+        let range = native_range_contract_for_shape(r, comp, motion, package, skill, 3., checks)?;
+        let config = owner(r, comp, "m_Config", checks)?;
+        let rect_at = typed_field(r, config, "m_RectType", 8)?;
+        let base_at = typed_field(r, config, "m_BaseType", 8)?;
+        let rect = i32_at(&capture(r, checks, rect_at, 4)?, 0);
+        let base = i32_at(&capture(r, checks, base_at, 4)?, 0);
+        if (rect, base) != (1, 1) {
+            return Err("Unverified Barats missile range configuration".into());
+        }
+        return Ok(Some(range));
+    }
     let shape=if hanzo_ghost_range_contract(r,comp,skill,motion_name,package_name,checks)?{28.}
         else if zhuxin_lantern_family(skill,motion_name,package_name){21.}
         else if gord_bounce_range_family(skill,motion_name,package_name){22.}
@@ -980,7 +996,8 @@ impl MotionPlan {
         // admit the class as a production aim plan or infer Tap/Range/Direction.
         let lesley_audit=skill==5330 && mc.name=="IndicatorMotionPosSelectAndRot" && pc.name=="IndicatorPackage_JianTou_Yuan_SameLengthWithRange";
         let lantern_audit = zhuxin_lantern_family(skill, &mc.name, &pc.name);
-        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!lantern_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        let barats_audit = barats_missile_range_family(skill, &mc.name, &pc.name);
+        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!lantern_audit&&!barats_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
             if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
@@ -993,7 +1010,7 @@ impl MotionPlan {
         }
         let mut values=serde_json::Map::new();
         for name in ["m_vDragResult","m_vDragTouchPos","m_vDragDir","m_vActiveDir"] {
-            let at=if base_tap||block_audit||lesley_audit||lantern_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
+            let at=if base_tap||block_audit||lesley_audit||lantern_audit||barats_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
             if at<motion || at+12>motion+4096 {return Err("Audit vector outside motion".into());}
             let raw=capture(r,&mut checks,at,12)?;
             values.insert(name.into(),serde_json::json!(source::vec3(&raw)?));
@@ -1154,6 +1171,10 @@ impl MotionPlan {
             native_range_contract(r, comp, motion, package, skill, &mc.name, &pc.name, &mut checks)?
                 .ok_or("Missing Zhuxin lantern range contract")?;
             3
+        } else if barats_missile_range_family(skill, &mc.name, &pc.name) {
+            native_range_contract(r, comp, motion, package, skill, &mc.name, &pc.name, &mut checks)?
+                .ok_or("Missing Barats missile range contract")?;
+            3
         } else if gord_bounce_range_family(skill,&mc.name,&pc.name) {
             native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Gord range contract")?;
             3
@@ -1247,7 +1268,7 @@ impl MotionPlan {
             20150 => Some(("IndicatorMotionRot", "IndicatorPackageEasy_ShanXing_Normal")),
             20020 => Some(("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal")),
             8430 => Some(("IndicatorMotionRot", "IndicatorPackageEasy")),
-            _ if attack_geometry || configured_direction || ((zhuxin_lantern_family(skill,&name,&package_class.name)||gord_bounce_range_family(skill,&name,&package_class.name)||lesley_selector_family(skill,&name,&package_class.name)||hanzo_ghost_range_family(skill,&name,&package_class.name))&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
+            _ if attack_geometry || configured_direction || ((zhuxin_lantern_family(skill,&name,&package_class.name)||gord_bounce_range_family(skill,&name,&package_class.name)||barats_missile_range_family(skill,&name,&package_class.name)||lesley_selector_family(skill,&name,&package_class.name)||hanzo_ghost_range_family(skill,&name,&package_class.name))&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
             _ => None,
         };
         if expected.is_none_or(|(motion, package)| name != motion || package_class.name != package)
@@ -1285,7 +1306,8 @@ impl MotionPlan {
         }else if camera_direction{(None,Some(typed_field(r,package,"<m_gMain>k__BackingField",18)?),None)}else{(None,None,None)};
         let circle_field = typed_field(r,package, "m_gYuan",18).ok().or_else(|| {
             (point_visual_fallback(&name,&package_class.name) ||
-                 (gord_bounce_range_family(skill,&name,&package_class.name)&&range_contract.is_some()))
+                 ((gord_bounce_range_family(skill,&name,&package_class.name)
+                  || barats_missile_range_family(skill, &name, &package_class.name)) && range_contract.is_some()))
                 .then(||typed_field(r,package,"<m_gMain>k__BackingField",18).ok()).flatten()
         });
         let circle_owner = circle_field.and_then(|a| r.pointer(a).ok()).unwrap_or(0);
@@ -2740,6 +2762,28 @@ mod tests {
         }
         for pair in [("IndicatorMotionRot",p),(m,"IndicatorPackageEasy")] {
             let mut r=fixture();assert_eq!(native_range_contract(&mut r,128,256,384,2310,pair.0,pair.1,&mut Vec::new()).unwrap(),None);
+        }
+    }
+    #[test]
+    fn barats_missile_range_requires_its_own_point_with_rotation() {
+        let mut r = base_tap_fixture();
+        let m = "IndicatorMotionPosWithRot";
+        let p = "IndicatorPackageEasy_Yuan";
+        for (at, value) in [(1056, 9920i32), (1060, 1), (1072, 1)] {
+            r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        for (at, value) in [(1568, 3f32), (1572, 6.4)] {
+            r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        let mut checks = Vec::new();
+        assert_eq!(native_range_contract(&mut r, 128, 256, 384, 9920, m, p, &mut checks).unwrap(), Some((1568, 3.)));
+        assert_eq!(native_range_contract(&mut r, 128, 256, 384, 9921, m, p, &mut Vec::new()).unwrap(), None);
+        r.memory.0.borrow_mut()[1572..1576].copy_from_slice(&7f32.to_le_bytes());
+        assert!(check(&r, &checks).is_ok(), "runtime distance must stay live");
+        for at in [1060, 1072] {
+            r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&0i32.to_le_bytes());
+            assert!(native_range_contract(&mut r, 128, 256, 384, 9920, m, p, &mut Vec::new()).is_err());
+            r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&1i32.to_le_bytes());
         }
     }
     #[test]
