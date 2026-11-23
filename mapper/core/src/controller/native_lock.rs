@@ -1,38 +1,32 @@
 //! Recover a contact the game left unclaimed while its exact skill was locked.
 use super::{
-    Button, Controller, Host, SkillBehavior, charge_lifecycle::game_clock, snapshot::Frame,
+    Button, Controller, Host, SkillBehavior, SkillVariant, charge_lifecycle::game_clock,
+    snapshot::Frame,
 };
 
 #[derive(Clone, Copy)]
 pub(super) struct NativeLock {
     cast_locked: bool,
     state_forbidden: bool,
+    cast_lock_ended: bool,
     last_tick: u32,
     idle_ticks: u8,
 }
 
 impl Controller {
-    fn native_lock_flags(&self, button: &Button, minimum: i64) -> (bool, bool) {
+    fn native_lock_variant(&self, button: &Button, minimum: i64) -> Option<&SkillVariant> {
         if self.skillVariantSampleStartNs_ <= 0
             || self.skillVariantSampleStartNs_ < minimum
             || !(0..=100_000_000).contains(&(self.now_ - self.skillVariantSampleNs_))
         {
-            return (false, false);
+            return None;
         }
-        self.skillVariants_
-            .iter()
-            .find(|row| {
-                row.slot == button.slot
-                    && row.base == button.skillId
-                    && row.active == self.skillCooldownVariant_
-                    && row.charge_skill != Some(true)
-            })
-            .map_or((false, false), |row| {
-                (
-                    row.cast_locked == Some(true),
-                    row.state_forbidden == Some(true),
-                )
-            })
+        self.skillVariants_.iter().find(|row| {
+            row.slot == button.slot
+                && row.base == button.skillId
+                && row.active == self.skillCooldownVariant_
+                && row.charge_skill != Some(true)
+        })
     }
 
     pub(super) fn arm_native_lock(&mut self, button: &Button) {
@@ -50,11 +44,16 @@ impl Controller {
         let Some(last_tick) = self.frameGameClock_ else {
             return;
         };
-        let (cast_locked, state_forbidden) = self.native_lock_flags(button, 0);
+        let Some(row) = self.native_lock_variant(button, 0) else {
+            return;
+        };
+        let cast_locked = row.cast_locked == Some(true);
+        let state_forbidden = row.state_forbidden == Some(true);
         if cast_locked || state_forbidden {
             self.nativeLock_ = Some(NativeLock {
                 cast_locked,
                 state_forbidden,
+                cast_lock_ended: false,
                 last_tick,
                 idle_ticks: 0,
             });
@@ -90,10 +89,16 @@ impl Controller {
         let Some(button) = self.find_button(&self.activeSlot_) else {
             return;
         };
-        let (cast_locked, state_forbidden) = self.native_lock_flags(button, self.castStartedNs_);
-        proof.cast_locked &= cast_locked;
-        proof.state_forbidden &= state_forbidden;
-        if proof.cast_locked || proof.state_forbidden {
+        let Some(row) = self.native_lock_variant(button, self.castStartedNs_) else {
+            return;
+        };
+        // A held DOWN rejected under the lock can outlive it. Keep this
+        // evidence for cancellation only, provided the same slot stays idle.
+        proof.cast_lock_ended = row.cast_locked == Some(false)
+            && (proof.cast_lock_ended || proof.cast_locked && proof.idle_ticks == 2);
+        proof.cast_locked &= row.cast_locked == Some(true);
+        proof.state_forbidden &= row.state_forbidden == Some(true);
+        if proof.cast_locked || proof.state_forbidden || proof.cast_lock_ended {
             if clock > proof.last_tick {
                 proof.last_tick = clock;
                 proof.idle_ticks = (proof.idle_ticks + 1).min(2);
@@ -114,6 +119,7 @@ impl Controller {
                 && (!proof.cast_locked
                     || self.skillKeyHeld_
                         && (self.skillCastMode_ != 1 || self.skillBehavior_ == SkillBehavior::Tap))
+            || proof.cast_lock_ended && self.frameCoreSampleStartNs_ < self.skillCancelSentNs_
         {
             return false;
         }
@@ -137,6 +143,8 @@ impl Controller {
         // and avoid a synthetic cooldown or an Android-wide ACTION_CANCEL.
         let reason = if proof.cast_locked {
             "native_cast_lock_without_capture"
+        } else if proof.cast_lock_ended {
+            "native_cast_lock_ended_without_capture"
         } else {
             "native_state_forbid_without_capture"
         };

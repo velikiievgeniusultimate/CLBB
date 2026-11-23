@@ -330,6 +330,9 @@ impl Controller {
             // Leomord's icon stays on the HUD while the horse approaches
             // and while mounted, despite both forms being native-locked.
             (67, "skill:2", 6730) => &[206738, 6738],
+            // Rough Waves locks these same buttons while Kadita is submerged.
+            (75, "skill:0", 7510) => &[7510],
+            (75, "skill:1", 7520) => &[7520],
             (108, "skill:1", 10820) => &[10820, 10824], // Aulus's ultimate locks W.
             (123, "skill:0", 12310) => &[12370], // Cici's active yo-yo.
             _ => &[],

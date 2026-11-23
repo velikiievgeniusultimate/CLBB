@@ -44,7 +44,7 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17 | 22 | 27 | 33 | 46 | 59 | 63 | 64 | 108, "skill", "skill:1") => 87,
+            (17 | 22 | 27 | 33 | 46 | 59 | 63 | 64 | 75 | 108, "skill", "skill:1") => 87,
             (22 | 33 | 50 | 64 | 67, "skill", "skill:2") => 69,
             (27 | 50, "skill", "skill:3") => 82,
             _ => 81,
@@ -202,6 +202,8 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let aldous_w = Skill { hero: 64, base: 6420, form: 6420, slot: "skill:1" };
     let aldous_e = Skill { hero: 64, base: 6430, form: 6430, slot: "skill:2" };
     let leomord_e = Skill { hero: 67, base: 6730, form: 6730, slot: "skill:2" };
+    let kadita_q = Skill { hero: 75, base: 7510, form: 7510, slot: "skill:0" };
+    let kadita_w = Skill { hero: 75, base: 7520, form: 7520, slot: "skill:1" };
     let aulus_w = Skill { hero: 108, base: 10820, form: 10820, slot: "skill:1" };
     let cici_q = Skill { hero: 123, base: 12310, form: 12310, slot: "skill:0" };
     for (skill, code, form) in [
@@ -220,6 +222,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         (aldous_w, 87, 6420), (Skill { form: 6421, ..aldous_w }, 87, 6421),
         (aldous_e, 69, 6430), (aldous_e, 69, 6431),
         (leomord_e, 69, 206738), (leomord_e, 69, 6738),
+        (kadita_q, 81, 7510), (kadita_w, 87, 7520),
         (aulus_w, 87, 10820), (Skill { form: 10824, ..aulus_w }, 87, 10824),
         (cici_q, 81, 12370),
     ] {
@@ -913,4 +916,50 @@ fn locks_cannot_retire_a_buffered_or_unverifiable_action() {
         assert!(c.pendingRelease_, "{case}");
         assert!(h.ended.is_empty(), "{case}");
     }
+}
+
+#[test]
+fn cancel_after_native_unlock_retires_only_the_original_unclaimed_contact() {
+    for cancel_key in [84, 70] {
+        let (mut c, mut h) = setup(UNLISTED, Some(false), 3, 0);
+        let movement = c.movementTouch_;
+        native_sample(&mut c, &mut h, native_lock_frame(60, 100, true, false));
+        key(&mut c, &mut h, START + 61_000_000, 81, true);
+        let finger = c.skillTouch_;
+        native_sample(&mut c, &mut h, native_lock_frame(70, 120, true, false));
+        native_sample(&mut c, &mut h, native_lock_frame(90, 140, true, false));
+        native_sample(&mut c, &mut h, native_lock_frame(120, 160, false, false));
+        assert!(h.active.contains_key(&finger), "hold can still be accepted");
+        key(&mut c, &mut h, START + 121_000_000, cancel_key, true);
+        assert!(c.skillCancelPending_ && h.active.contains_key(&finger));
+        native_sample(&mut c, &mut h, native_lock_frame(130, 180, false, false));
+        assert_eq!(h.ended, [finger]);
+        assert!(!c.skillCancelPending_);
+        assert!(h.active.contains_key(&movement));
+        assert!(c.cooldownCasts_.is_empty());
+        assert_eq!(c.queuedSkills_.len(), usize::from(cancel_key == 70));
+        assert!(h.traces.iter().any(|(event, reason)| event == "release"
+            && reason == "native_cast_lock_ended_without_capture"));
+        key(&mut c, &mut h, START + 131_000_000, 81, false);
+        assert!(!h.active.contains_key(&finger));
+    }
+}
+
+#[test]
+fn a_buffer_received_after_unlock_still_uses_normal_native_cancellation() {
+    let (mut c, mut h) = setup(UNLISTED, Some(false), 3, 0);
+    native_sample(&mut c, &mut h, native_lock_frame(60, 100, true, false));
+    key(&mut c, &mut h, START + 61_000_000, 81, true);
+    let finger = c.skillTouch_;
+    native_sample(&mut c, &mut h, native_lock_frame(70, 120, true, false));
+    native_sample(&mut c, &mut h, native_lock_frame(90, 140, true, false));
+    native_sample(&mut c, &mut h, native_lock_frame(120, 160, false, false));
+    let mut captured = native_lock_frame(130, 180, false, false);
+    captured.ui.active_slot = text(UNLISTED.slot);
+    captured.skill_id = n(f64::from(UNLISTED.form));
+    native_sample(&mut c, &mut h, captured);
+    key(&mut c, &mut h, START + 131_000_000, 84, true);
+    native_sample(&mut c, &mut h, native_lock_frame(145, 190, false, false));
+    assert!(c.skillActivationObserved_ && c.skillCancelPending_);
+    assert!(h.active.contains_key(&finger), "wait for the actual cancellation of the buffered cast");
 }
