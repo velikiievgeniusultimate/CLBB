@@ -17,6 +17,7 @@ mod charge_lifecycle;
 mod cable;
 mod movement;
 mod native_aim;
+mod native_lock;
 mod selection;
 pub mod snapshot;
 mod tick;
@@ -210,6 +211,8 @@ pub struct Controller {
     pub(crate) skillExpectedAim_: bool,
     pub(crate) skillActivationObserved_: bool,
     pub(crate) skillStateForbiddenAtDown_: bool,
+    nativeLock_: Option<native_lock::NativeLock>,
+    frameGameClock_: Option<u32>,
     pub(crate) chargeGesture_: Option<charge_lifecycle::ChargeGesture>,
     cableChain_: cable::CableChain,
     pub(crate) pendingRelease_: bool,

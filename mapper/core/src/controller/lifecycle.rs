@@ -784,6 +784,7 @@ impl Controller {
             self.freeze_selection_intent(host);
         }
         self.arm_charge_gesture(b);
+        self.arm_native_lock(b);
         self.changed_ = true;
         true
     }
@@ -844,7 +845,7 @@ impl Controller {
     pub(super) fn end_unconfirmed_cable(&mut self, host: &mut impl Host) {
         self.finish_skill_inner(host, false, Some("cable_capture_unavailable_end_at_last_point"));
     }
-    fn finish_skill_inner(&mut self, host: &mut impl Host, cancel: bool, end_at_last_point: Option<&str>) {
+    pub(super) fn finish_skill_inner(&mut self, host: &mut impl Host, cancel: bool, end_at_last_point: Option<&str>) {
         let cast = !cancel && end_at_last_point.is_none();
         host.timer(Timer::Tap, None);
         if cancel && !(self.skillCancelPending_ && self.skillCancelAcknowledged_) {
@@ -898,6 +899,7 @@ impl Controller {
         self.chargeGesture_ = None;
         self.skillActivationObserved_ = false;
         self.skillStateForbiddenAtDown_ = false;
+        self.nativeLock_ = None;
         self.skillCancelPending_ = false;
         self.skillCancelAcknowledged_ = false;
         self.skillCancelSentNs_ = 0;

@@ -18,11 +18,14 @@ impl Controller {
         if self.skillTouch_ < 0 {
             return;
         }
+        if self.skillCancelPending_ && self.skillCancelAcknowledged_ {
+            self.finish_skill(host, true);
+            return;
+        }
+        if self.finish_native_lock(host) {
+            return;
+        }
         if self.skillCancelPending_ {
-            if self.skillCancelAcknowledged_ {
-                self.finish_skill(host, true);
-                return;
-            }
             if self.skillCancelSentNs_ == 0 {
                 if let Some(point) = self.selection_cancel_point() {
                     if !self.send_skill_cancel_point(host, point) {

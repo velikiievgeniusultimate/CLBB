@@ -338,6 +338,7 @@ impl Controller {
             self.skillActivationObserved_ = true;
         }
         self.observe_charge_gesture(host, f);
+        self.observe_native_lock(f);
         self.sample_skill_cancel(host, f);
         self.sample_auxiliary_cancel(host,f);
         self.tick(host);

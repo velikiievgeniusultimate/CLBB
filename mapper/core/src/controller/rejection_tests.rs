@@ -797,3 +797,120 @@ fn rejected_predecessor_keeps_existing_dependent_queue_cancellation_policy() {
     assert_eq!(rejected(&h), 1);
     assert_eq!(h.active.len(), 1, "only movement remains");
 }
+
+const UNLISTED: Skill = Skill { hero: 936, base: 93610, form: 93617, slot: "skill:0" };
+
+fn native_lock_frame(ms: i64, tick: u32, cast_locked: bool, state_forbidden: bool) -> snapshot::Frame {
+    let mut f = frame(START + ms * 1_000_000, UNLISTED, Some(state_forbidden));
+    f.skill_state.buttons[0].cast_locked = flag(cast_locked);
+    f.ui.cancel_uv = v2(0.9, 0.3);
+    f.ui.active_slot = text("");
+    f.skill_id = n(0.);
+    f.game_clock_ms = n(f64::from(tick));
+    f
+}
+
+fn native_sample(c: &mut Controller, h: &mut TestHost, f: snapshot::Frame) {
+    c.apply_snapshot(h, &f, f.time_ns.value as i64);
+}
+
+#[test]
+fn unlisted_locked_range_retires_only_its_finger_and_dispatches_the_successor() {
+    let (mut c, mut h) = setup(UNLISTED, Some(false), 3, 0);
+    let movement = c.movementTouch_;
+    native_sample(&mut c, &mut h, native_lock_frame(60, 100, true, false));
+    key(&mut c, &mut h, START + 61_000_000, 81, true);
+    let finger = c.skillTouch_;
+    key(&mut c, &mut h, START + 62_000_000, 81, false);
+    key(&mut c, &mut h, START + 63_000_000, 70, true);
+    key(&mut c, &mut h, START + 64_000_000, 70, false);
+    assert_eq!(c.queuedSkills_.len(), 1);
+    assert!(!c.queuedSkills_[0].held);
+
+    for ms in [65, 75, 85] {
+        native_sample(&mut c, &mut h, native_lock_frame(ms, 120, true, false));
+        assert!(h.active.contains_key(&finger), "sampling one tick repeatedly is not proof");
+    }
+    native_sample(&mut c, &mut h, native_lock_frame(95, 140, true, false));
+    assert_eq!(h.ended, [finger]);
+    assert!(h.active.contains_key(&movement));
+    assert!(c.cooldownCasts_.is_empty());
+    assert_eq!(c.queuedSkills_.len(), 1);
+    assert!(h.traces.iter().any(|(event, reason)| event == "release" && reason == "native_cast_lock_without_capture"));
+    native_sample(&mut c, &mut h, native_lock_frame(105, 150, true, false));
+    assert!(h.traces.iter().any(|(event, reason)| event == "skill_queue" && reason == "dispatched_with_fresh_form"));
+    assert!(c.cooldownCasts_.contains_key("extra:2:20150"), "the successor's saved UP commits its cast");
+    assert!(c.queuedSkills_.is_empty());
+}
+
+#[test]
+fn native_lock_cancel_does_not_wait_for_an_ack_from_an_unclaimed_direction() {
+    let (mut c, mut h) = setup(UNLISTED, Some(false), 2, 0);
+    native_sample(&mut c, &mut h, native_lock_frame(60, 100, false, true));
+    key(&mut c, &mut h, START + 61_000_000, 81, true);
+    let finger = c.skillTouch_;
+    native_sample(&mut c, &mut h, native_lock_frame(70, 120, false, true));
+    key(&mut c, &mut h, START + 71_000_000, 84, true);
+    assert!(c.skillCancelPending_ && h.active.contains_key(&finger));
+    native_sample(&mut c, &mut h, native_lock_frame(90, 140, false, true));
+    assert_eq!(h.ended, [finger]);
+    assert!(!c.skillCancelPending_);
+    assert!(c.cooldownCasts_.is_empty());
+    assert!(h.traces.iter().any(|(event, reason)| event == "release" && reason == "native_state_forbid_without_capture"));
+    native_sample(&mut c, &mut h, native_lock_frame(110, 150, false, false));
+    assert!(c.apply_input(&mut h, Input::Key { code: 81, down: true, repeat: true }, START + 111_000_000));
+    key(&mut c, &mut h, START + 112_000_000, 81, false);
+    assert_eq!(c.skillTouch_, -1);
+    key(&mut c, &mut h, START + 113_000_000, 81, true);
+    assert!(h.active.contains_key(&c.skillTouch_));
+}
+
+#[test]
+fn confirmed_lock_retires_instant_aim_but_does_not_delay_a_normal_quick_tap() {
+    for (aim, release_ms) in [(1, 77), (3, 90)] {
+        let (mut c, mut h) = setup(UNLISTED, Some(false), aim, 1);
+        native_sample(&mut c, &mut h, native_lock_frame(60, 100, true, false));
+        key(&mut c, &mut h, START + 61_000_000, 81, true);
+        let finger = c.skillTouch_;
+        native_sample(&mut c, &mut h, native_lock_frame(70, 120, true, false));
+        native_sample(&mut c, &mut h, native_lock_frame(release_ms, 140, true, false));
+        assert_eq!(h.ended, [finger]);
+        let reason = if aim == 1 { "cast" } else { "native_cast_lock_without_capture" };
+        assert!(h.traces.iter().any(|(event, seen)| event == "release" && seen == reason));
+    }
+}
+
+#[test]
+fn locks_cannot_retire_a_buffered_or_unverifiable_action() {
+    for case in ["hud_capture", "native_indicator", "uncertain_hud", "no_indicator_read", "wrong_form", "unlocked", "stale", "foreign_epoch", "forbid_only"] {
+        let (mut c, mut h) = setup(UNLISTED, Some(false), 3, 0);
+        native_sample(&mut c, &mut h, native_lock_frame(60, 100, case != "forbid_only", case == "forbid_only"));
+        key(&mut c, &mut h, START + 61_000_000, 81, true);
+        let finger = c.skillTouch_;
+        let mut f = native_lock_frame(70, 120, true, false);
+        match case {
+            "hud_capture" => f.ui.active_slot = text(UNLISTED.slot),
+            "native_indicator" => f.skill_id = n(UNLISTED.form as f64),
+            "uncertain_hud" => f.ui.active_slot = snapshot::Text::default(),
+            "no_indicator_read" => f.skill_id = snapshot::Number::default(),
+            "wrong_form" => f.skill_state.buttons[0].active_skill_id = n(93618.),
+            "unlocked" => f.skill_state.buttons[0].cast_locked = flag(false),
+            "stale" => f.skill_state.sample_start_ns = n(START as f64 - 600_000_000.),
+            "foreign_epoch" => f.skill_state.token = text("different-match"),
+            "forbid_only" => {
+                f.skill_state.buttons[0].cast_locked = flag(false);
+                f.skill_state.buttons[0].state_forbidden = flag(true);
+            }
+            _ => unreachable!(),
+        }
+        native_sample(&mut c, &mut h, f);
+        // An exclusively StateForbid-at-DOWN range follows the legacy policy
+        // only if the release sample still has StateForbid.
+        native_sample(&mut c, &mut h, native_lock_frame(90, 140, true, false));
+        native_sample(&mut c, &mut h, native_lock_frame(110, 160, true, false));
+        key(&mut c, &mut h, START + 111_000_000, 81, false);
+        assert!(h.active.contains_key(&finger), "{case}");
+        assert!(c.pendingRelease_, "{case}");
+        assert!(h.ended.is_empty(), "{case}");
+    }
+}

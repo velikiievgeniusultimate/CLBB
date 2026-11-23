@@ -818,6 +818,9 @@ impl UiPlan {
             hero_id: number(hero as f64),
             time_ns: number(now as f64),
             resolution_px: v2(size),
+            // An empty slot explicitly proves neither native button family is held.
+            // A missing slot can also mean the held widget was not identified.
+            active_slot: if held[0] || held[1] { s::Text::default() } else { text("") },
             ..Default::default()
         };
         let mut variants = s::VariantState {

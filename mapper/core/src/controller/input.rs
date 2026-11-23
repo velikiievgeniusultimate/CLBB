@@ -91,7 +91,7 @@ impl Controller {
                 return true;
             }
             self.skillKeyHeld_ = false;
-            if self.finish_rejected_range(host) {
+            if self.finish_native_lock(host) || self.finish_rejected_range(host) {
                 return true;
             }
             if self.skillBehavior_ == SkillBehavior::Tap {
