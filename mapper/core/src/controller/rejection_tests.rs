@@ -207,6 +207,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let xborg_e = Skill { hero: 83, base: 8330, form: 8330, slot: "skill:2" };
     let atlas_w = Skill { hero: 93, base: 9320, form: 9320, slot: "skill:1" };
     let popol_r = Skill { hero: 94, base: 9440, form: 9440, slot: "skill:3" };
+    let khaleed_q = Skill { hero: 98, base: 9810, form: 9810, slot: "skill:0" };
     let aulus_w = Skill { hero: 108, base: 10820, form: 10820, slot: "skill:1" };
     let cici_q = Skill { hero: 123, base: 12310, form: 12310, slot: "skill:0" };
     for (skill, code, form) in [
@@ -229,6 +230,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         (xborg_e, 69, 8330),
         (atlas_w, 87, 9320),
         (popol_r, 82, 109408),
+        (khaleed_q, 81, 209810),
         (aulus_w, 87, 10820), (Skill { form: 10824, ..aulus_w }, 87, 10824),
         (cici_q, 81, 12370),
     ] {
