@@ -296,6 +296,17 @@ fn held_indicator_behavior_id(base:i32, future:i32, actual:i32, charge:bool, hel
 fn kimmy_attack_identity(hero:i32,base:i32,active:i32)->bool {
     hero==71 && matches!(base,7100|107100|207100) && matches!(active,7100|107100|207100)
 }
+// Atlas can open the same charged reticle while his armor is separated.
+// The entry form looks like a tap in the registry, but owns the base
+// ultimate's positional indicator as soon as the button is held.
+fn atlas_charge_entry_template_id(hero: i32, slot: &str, base: i32, active: i32) -> i32 {
+    if (hero, slot, base, active) == (93, "skill:2", 9330, 9390) {
+        base
+    } else {
+        active
+    }
+}
+
 fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
     // Badang's successful wall dash exposes its ordinary wall-removal button
     // through the SAME owned slot/data. There is intentionally no aim registry
@@ -522,6 +533,20 @@ mod control_kind_tests {
             assert_eq!(held_indicator_behavior_id(7810,7871,actual,charge,held),7871);
         }
         assert_eq!(held_indicator_behavior_id(7720,7725,7720,false,true),7725);
+    }
+    #[test]
+    fn atlas_armor_separation_entry_uses_only_the_owned_ultimate_template() {
+        use super::atlas_charge_entry_template_id;
+        assert_eq!(atlas_charge_entry_template_id(93, "skill:2", 9330, 9390), 9330);
+        for (hero, slot, base, active) in [
+            (92, "skill:2", 9330, 9390),
+            (93, "skill:1", 9330, 9390),
+            (93, "skill:2", 9320, 9390),
+            (93, "skill:2", 9330, 9330),
+            (93, "skill:2", 9330, 9360),
+        ] {
+            assert_eq!(atlas_charge_entry_template_id(hero, slot, base, active), active);
+        }
     }
     #[test]
     fn specialized_hero_button_keeps_skill_slot() {
@@ -1813,6 +1838,7 @@ impl<M: Memory> Source<M> {
                 .map(|v|v.active_skill_id.int()).filter(|id|*id>0).unwrap_or(entry.skill_id.int());
             let id=if !choice_family {held_indicator_behavior_id(entry.skill_id.int(),id,skill,
                 control_holds.get(entry.slot.as_str())==Some(&true),ui.active_slot.as_str()==entry.slot.as_str())}else{id};
+            let id = atlas_charge_entry_template_id(hero, entry.slot.as_str(), entry.skill_id.int(), id);
             if id<=0 {continue;}
             if !choice_family && hero == 84 && entry.slot.as_str() == "skill:2" && id == 8430 {
                 // Ling's ultimate rotates its blade landing arrangement even

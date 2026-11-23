@@ -44,7 +44,7 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17 | 22 | 27 | 33 | 46 | 59 | 63 | 64 | 75 | 83 | 108, "skill", "skill:1") => 87,
+            (17 | 22 | 27 | 33 | 46 | 59 | 63 | 64 | 75 | 83 | 93 | 108, "skill", "skill:1") => 87,
             (22 | 33 | 50 | 64 | 67 | 83, "skill", "skill:2") => 69,
             (27 | 50, "skill", "skill:3") => 82,
             _ => 81,
@@ -205,6 +205,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let kadita_q = Skill { hero: 75, base: 7510, form: 7510, slot: "skill:0" };
     let kadita_w = Skill { hero: 75, base: 7520, form: 7520, slot: "skill:1" };
     let xborg_e = Skill { hero: 83, base: 8330, form: 8330, slot: "skill:2" };
+    let atlas_w = Skill { hero: 93, base: 9320, form: 9320, slot: "skill:1" };
     let aulus_w = Skill { hero: 108, base: 10820, form: 10820, slot: "skill:1" };
     let cici_q = Skill { hero: 123, base: 12310, form: 12310, slot: "skill:0" };
     for (skill, code, form) in [
@@ -225,6 +226,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         (leomord_e, 69, 206738), (leomord_e, 69, 6738),
         (kadita_q, 81, 7510), (kadita_w, 87, 7520),
         (xborg_e, 69, 8330),
+        (atlas_w, 87, 9320),
         (aulus_w, 87, 10820), (Skill { form: 10824, ..aulus_w }, 87, 10824),
         (cici_q, 81, 12370),
     ] {
