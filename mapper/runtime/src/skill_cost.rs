@@ -106,6 +106,7 @@ pub(crate) struct ResourcePlan {
     energy: u64,
     energy_max: u64,
     energy_modifier: u64,
+    granger_pistol: Option<[u64; 2]>,
     catalog: Option<Catalog>,
     retry_ns: i64,
 }
@@ -148,8 +149,18 @@ impl Resources {
     }
 }
 
+fn granger_rhapsody_shortage(energy: i32, maximum: i32) -> Option<bool> {
+    // Rhapsody starts only above 420 pistol energy. Its stop recast
+    // remains usable after the first bullets have spent that energy.
+    (maximum > 420 && (0..=maximum).contains(&energy)).then_some(energy <= 420)
+}
+
 impl ResourcePlan {
-    pub(crate) fn discover<M: Memory>(r: &mut Reflection<M>, actor: u64) -> Result<Self> {
+    pub(crate) fn discover<M: Memory>(
+        r: &mut Reflection<M>,
+        actor: u64,
+        hero: i32,
+    ) -> Result<Self> {
         let mut checks = Vec::new();
         let mut at = |name, kind| {
             typed_field(r, &mut checks, actor, name, &[kind]).map(|(address, _)| address)
@@ -162,6 +173,14 @@ impl ResourcePlan {
             energy: at("<m_Xp>k__BackingField", 8)?,
             energy_max: at("_XpMax", 8)?,
             energy_modifier: at("<m_XpCostPer>k__BackingField", 8)?,
+            granger_pistol: if hero == 79 {
+                at("<m_Xp1>k__BackingField", 8)
+                    .ok()
+                    .zip(at("_Xp1Max", 8).ok())
+                    .map(|(energy, maximum)| [energy, maximum])
+            } else {
+                None
+            },
             catalog: None,
             retry_ns: 0,
         })
@@ -176,6 +195,28 @@ impl ResourcePlan {
         state: &mut CooldownState,
         consumed: &mut Checks,
     ) {
+        if hero == 79
+            && let Some([energy, maximum]) = self.granger_pistol
+            && let Some(row) = state.buttons[..state.count.min(32) as usize]
+                .iter_mut()
+                .find(|row| {
+                    row.slot.as_str() == "skill:0"
+                        && row.base_skill_id.int() == 7910
+                        && row.active_skill_id.int() == 7910
+                })
+        {
+            let checkpoint = consumed.len();
+            let shortage = (|| {
+                let current = i32_at(&capture(r, consumed, energy, 4).ok()?, 0);
+                let capacity = i32_at(&capture(r, consumed, maximum, 4).ok()?, 0);
+                granger_rhapsody_shortage(current, capacity)
+            })();
+            if let Some(shortage) = shortage {
+                row.resource_shortage = flag(shortage);
+            } else {
+                consumed.truncate(checkpoint);
+            }
+        }
         // Hylos pays with health when he cannot afford the mana cost.
         if hero == 49 {
             return;
@@ -260,6 +301,19 @@ impl ResourcePlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rhapsody_requires_more_than_420_valid_pistol_energy() {
+        for energy in [0, 86, 401, 419, 420] {
+            assert_eq!(granger_rhapsody_shortage(energy, 800), Some(true));
+        }
+        for energy in [421, 464, 800] {
+            assert_eq!(granger_rhapsody_shortage(energy, 800), Some(false));
+        }
+        for (energy, maximum) in [(-1, 800), (801, 800), (0, 0), (0, 420)] {
+            assert_eq!(granger_rhapsody_shortage(energy, maximum), None);
+        }
+    }
 
     #[test]
     fn costs_use_their_own_resource_and_allow_an_exact_balance() {

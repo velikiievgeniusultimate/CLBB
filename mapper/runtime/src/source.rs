@@ -1520,7 +1520,7 @@ impl<M: Memory> Source<M> {
         let skill = r.field(indicator, "m_iCurSkillID")?;
         let clock = r.field(manager, "m_uiFrameTime")?;
         let ui = UiPlan::new(r, show, hero)?;
-        let resources = crate::skill_cost::ResourcePlan::discover(r, actor).ok();
+        let resources = crate::skill_cost::ResourcePlan::discover(r, actor, r.integer(hero)?).ok();
         let mut motions = std::collections::HashMap::new();
         for id in [2510, 2511, 2520, 20020, 20150, 8410] {
             if let Ok(m) = crate::aim::MotionPlan::discover(r, indicator, id) {
