@@ -371,6 +371,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Popol calls Kupa back and shields himself with a tap, including
         // the enhanced knock-up while the ultimate is active.
         || (hero == 94 && slot == "skill:1" && base == 9420 && matches!(active, 9420 | 9423))
+        // Mathilda can use Guiding Wind as a tap during Circling Eagle.
+        // The ordinary 10220 dash retains its native directional indicator.
+        || (hero == 102 && slot == "skill:1" && base == 10220 && active == 10297)
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
@@ -483,6 +486,15 @@ mod control_kind_tests {
             assert!(!verified_button_only_form(93, "skill:1", 9420, active));
         }
         assert!(!verified_button_only_form(94, "skill:1", 9420, 9424));
+    }
+    #[test]
+    fn mathilda_guiding_wind_taps_only_during_circling_eagle() {
+        use super::verified_button_only_form;
+        assert!(verified_button_only_form(102, "skill:1", 10220, 10297));
+        assert!(!verified_button_only_form(102, "skill:1", 10220, 10220));
+        assert!(!verified_button_only_form(102, "skill:1", 10224, 10297));
+        assert!(!verified_button_only_form(102, "skill:2", 10230, 10234));
+        assert!(!verified_button_only_form(53, "skill:1", 10220, 10297));
     }
     #[test]
     fn granger_rhapsody_stop_is_only_its_current_native_recast() {
