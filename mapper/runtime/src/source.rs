@@ -296,6 +296,18 @@ fn held_indicator_behavior_id(base:i32, future:i32, actual:i32, charge:bool, hel
 fn kimmy_attack_identity(hero:i32,base:i32,active:i32)->bool {
     hero==71 && matches!(base,7100|107100|207100) && matches!(active,7100|107100|207100)
 }
+fn beatrix_attack_type(hero: i32, base: i32, active: i32) -> Option<u8> {
+    if hero != 105 || base != 10500 {
+        return None;
+    }
+    match active {
+        10500 | 10550 => Some(2),
+        10560 => Some(3),
+        // The native reload button occupies the same attack slot.
+        10570 | 10590 => Some(1),
+        _ => None,
+    }
+}
 // Atlas can open the same charged reticle while his armor is separated.
 // The entry form looks like a tap in the registry, but owns the base
 // ultimate's positional indicator as soon as the button is held.
@@ -374,6 +386,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Mathilda can use Guiding Wind as a tap during Circling Eagle.
         // The ordinary 10220 dash retains its native directional indicator.
         || (hero == 102 && slot == "skill:1" && base == 10220 && active == 10297)
+        // A center tap opens Beatrix's native weapon menu.
+        || (hero == 105 && slot == "skill:3" && base == 2010580 && active == 2010580)
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
@@ -408,6 +422,10 @@ fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
 // The granted ally button is not owned by the recipient's hero identity.
 fn mathilda_ally_control(class: &str, index: i32, base: i32) -> bool {
     class == "KeySkillDyExtra" && index == 4 && base == 10224
+}
+
+pub(crate) fn beatrix_weapon_menu(hero: i32, class: &str, index: i32, base: i32) -> bool {
+    hero == 105 && class == "KeySkillToggleChoose" && index == 0 && base == 2010580
 }
 
 fn cecilion_pair_control(hero: i32, class: &str, index: i32, base: i32) -> bool {
@@ -456,6 +474,26 @@ fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
 
 #[cfg(test)]
 mod control_kind_tests {
+    #[test]
+    fn beatrix_attack_type_requires_its_own_current_weapon() {
+        use super::beatrix_attack_type;
+        for (active, aim_type) in [(10500, 2), (10550, 2), (10560, 3), (10570, 1), (10590, 1)] {
+            assert_eq!(beatrix_attack_type(105, 10500, active), Some(aim_type));
+            assert_eq!(beatrix_attack_type(104, 10500, active), None);
+            assert_eq!(beatrix_attack_type(105, 10501, active), None);
+        }
+        assert_eq!(beatrix_attack_type(105, 10500, 10510), None);
+    }
+    #[test]
+    fn beatrix_weapon_menu_has_a_separate_owned_slot() {
+        use super::{beatrix_weapon_menu, verified_button_only_form};
+        assert!(beatrix_weapon_menu(105, "KeySkillToggleChoose", 0, 2010580));
+        assert!(verified_button_only_form(105, "skill:3", 2010580, 2010580));
+        assert!(!beatrix_weapon_menu(104, "KeySkillToggleChoose", 0, 2010580));
+        assert!(!beatrix_weapon_menu(105, "SkillButton", 0, 2010580));
+        assert!(!beatrix_weapon_menu(105, "KeySkillToggleChoose", 1, 2010580));
+        assert!(!verified_button_only_form(105, "skill:0", 2010510, 2010510));
+    }
     #[test]
     fn cecilion_pair_button_has_its_own_non_aimed_slot() {
         use super::{cecilion_pair_control, verified_button_only_form};
@@ -699,6 +737,16 @@ impl UiPlan {
                     kind = "skill";
                     index = 3;
                     cecilion_pair = true;
+                }
+            }
+            if class.name == "KeySkillToggleChoose" && skill != 0 {
+                let hero = r.integer(local_hero_address)?;
+                let base = r.integer(skill)?;
+                if beatrix_weapon_menu(hero, &class.name, native_index, base) {
+                    checks.push((local_hero_address, hero.to_le_bytes().to_vec()));
+                    checks.push((skill, base.to_le_bytes().to_vec()));
+                    kind = "skill";
+                    index = 3;
                 }
             }
             if kind=="skill" && class.name=="KeySkillLockDeadHero" && skill!=0 {
@@ -1754,30 +1802,42 @@ impl<M: Memory> Source<M> {
         }
         let plain_owner=plan.ui.buttons.iter().find(|b|b.slot=="attack")
             .and_then(|b|r.pointer(b.object).and_then(|c|r.class(c)).ok()).is_some_and(|c|c.name=="CommonAttack");
-        let aimed_attack=hero!=71 && attack_mode==Some(true)&&plain_owner;
-        if let Some(mode)=attack_mode {control_types.insert("attack".into(),if mode&&plain_owner {3}else{1});}
-        if hero==71 {
-            // Her native shooting joystick is independent of the shared
-            // target-selection preference. Unknown configurations stay unknown.
-            control_types.remove("attack");
+        let aimed_attack = !matches!(hero, 71 | 105) && attack_mode == Some(true) && plain_owner;
+        let mut beatrix_point_attack = false;
+        if matches!(hero, 71 | 105) {
+            // These weapons have their own native attack behavior regardless
+            // of the shared precise-targeting preference.
             let attack=ui.buttons.iter().take(ui.button_count.min(32)as usize)
                 .find(|b|b.slot.as_str()=="attack" && b.kind.as_str()=="attack" && b.active.get());
             let active=attack.and_then(|b|skill_state.buttons.iter().take(skill_state.count.min(32)as usize)
                 .find(|v|v.slot.as_str()=="attack" && v.base_skill_id.int()==b.skill_id.int())
                 .map(|v|(b.skill_id.int(),v.active_skill_id.int())));
-            if let Some((base,id))=active.filter(|(base,id)|kimmy_attack_identity(hero,*base,*id)) {
-                let _=base;
+            let weapon = active.and_then(|(base, id)| {
+                let expected = if kimmy_attack_identity(hero, base, id) { Some(2) }
+                    else { beatrix_attack_type(hero, base, id) }?;
+                Some((id, expected))
+            });
+            if let Some((id, expected)) = weapon {
                 if plan.behaviors.get(&id).is_some_and(|(c,_)|check(r,c).is_err()) {
                     plan.behaviors.remove(&id);plan.behavior_retry.remove(&id);
                 }
                 if !plan.behaviors.contains_key(&id) && now>=*plan.behavior_retry.get(&id).unwrap_or(&0) {
-                    if let Ok(value)=crate::aim::MotionPlan::discover_kimmy_attack_behavior(r,plan.indicator,id) {plan.behaviors.insert(id,value);}
+                    let behavior = if hero == 71 {
+                        crate::aim::MotionPlan::discover_kimmy_attack_behavior(r, plan.indicator, id)
+                    } else {
+                        crate::aim::MotionPlan::discover_behavior(r, plan.indicator, id)
+                    };
+                    if let Ok(value) = behavior { plan.behaviors.insert(id, value); }
                     else {plan.behavior_retry.insert(id,now.saturating_add(20_000_000));}
                 }
-                if let Some((proof,2))=plan.behaviors.get(&id) {
-                    consumed.extend(proof.iter().cloned());control_types.insert("attack".into(),2);
+                if let Some((proof, kind)) = plan.behaviors.get(&id).filter(|(_, kind)| *kind == expected) {
+                    consumed.extend(proof.iter().cloned());
+                    control_types.insert("attack".into(), *kind);
+                    beatrix_point_attack = hero == 105 && id == 10560 && *kind == 3;
                 }
             }
+        } else if let Some(mode) = attack_mode {
+            control_types.insert("attack".into(), if mode && plain_owner { 3 } else { 1 });
         }
 
         let mut selection_observations=Vec::new();
@@ -2032,7 +2092,8 @@ impl<M: Memory> Source<M> {
             }
             if let Some(m) = plan.motions.get_mut(&skill) {
                 m.refresh_visual(r);
-                let allow_fixed_range=control_holds.get(frame.ui.active_slot.as_str())==Some(&false);
+                let allow_fixed_range = control_holds.get(frame.ui.active_slot.as_str()) == Some(&false)
+                    || (beatrix_point_attack && attack_binding && skill == 10560);
                 match m.sample_bracketed_with_fixed_range(r, &mut frame, &mut consumed,allow_fixed_range) {
                     Ok(p) => aim = p,
                     Err(_) => {

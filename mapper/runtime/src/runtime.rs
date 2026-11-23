@@ -621,8 +621,10 @@ impl Host for Adapter {
         if spell.is_none() && config == "extra:2" && crate::settings::plain_spell_id(button.skillId) {
             binding.cast_mode = self.settings.integer(&format!("hero.bindings.extra:2:{}.cast_mode",button.skillId), hero);
         }
-        if hero==71 && button.kind=="attack" && button.slot=="attack" && binding.aim_type!=2 {
-            binding.key=0;
+        if button.kind == "attack" && button.slot == "attack"
+            && ((hero == 71 && binding.aim_type != 2) || (hero == 105 && binding.aim_type == 0))
+        {
+            binding.key = 0;
         }
         if self.conflict_blocks(binding.key, hero) { binding.key=0; }
         binding

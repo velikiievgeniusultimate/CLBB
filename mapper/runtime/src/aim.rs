@@ -506,6 +506,28 @@ fn camera_lock_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion
     }
     Ok(true)
 }
+fn beatrix_sniper_ultimate_family(skill: i32, motion: &str, package: &str) -> bool {
+    skill == 2010530 && motion == "IndicatorMotionSwing"
+        && package == "IndicatorPackage_JianTou_OtherRanger"
+}
+
+// The sniper's swing indicator still returns a unit direction on native drag.
+fn beatrix_sniper_ultimate_contract<M: Memory>(
+    r: &mut Reflection<M>, comp: u64, skill: i32, motion: &str, package: &str,
+    checks: &mut Checks,
+) -> Result<bool> {
+    if !beatrix_sniper_ultimate_family(skill, motion, package) {
+        return Ok(false);
+    }
+    let (rect, shape) = native_rect_config(r, comp, skill, checks)?;
+    let config = owner(r, comp, "m_Config", checks)?;
+    let base = typed_field(r, config, "m_BaseType", 8)?;
+    if rect != 11 || shape != [16., 14.] || i32_at(&capture(r, checks, base, 4)?, 0) != 482 {
+        return Err("Unverified Beatrix sniper direction configuration".into());
+    }
+    Ok(true)
+}
+
 // The recast arrow is rooted at Yve's placed crystal while its indicator is
 // active. The original positional cast keeps its own ground geometry.
 fn yve_crystal_origin_contract<M: Memory>(
@@ -1020,7 +1042,8 @@ impl MotionPlan {
         let lesley_audit=skill==5330 && mc.name=="IndicatorMotionPosSelectAndRot" && pc.name=="IndicatorPackage_JianTou_Yuan_SameLengthWithRange";
         let lantern_audit = zhuxin_lantern_family(skill, &mc.name, &pc.name);
         let barats_audit = barats_missile_range_family(skill, &mc.name, &pc.name);
-        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!lantern_audit&&!barats_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        let beatrix_audit = beatrix_sniper_ultimate_family(skill, &mc.name, &pc.name);
+        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!lantern_audit&&!barats_audit&&!beatrix_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
             if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
@@ -1207,6 +1230,7 @@ impl MotionPlan {
         }
         else if base_tap {1}
         else if shadow_direction || camera_direction || melissa_dash_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?
+            || beatrix_sniper_ultimate_contract(r, comp, skill, &mc.name, &pc.name, &mut checks)?
             || grock_configuration_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?==Some(2) {2}
         else if fixed_part_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&mc.name,&pc.name,&mut checks)? {2}
@@ -1278,6 +1302,7 @@ impl MotionPlan {
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let configured_direction=shadow_direction || camera_direction || melissa_dash_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
+            || beatrix_sniper_ultimate_contract(r, comp, skill, &name, &package_class.name, &mut checks)?
             || grock_configuration_contract(r,comp,skill,&name,&package_class.name,&mut checks)?==Some(2) || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
         let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,configured_direction);
@@ -1629,7 +1654,12 @@ impl MotionPlan {
             frame.direction_input = s::Direction {
                 ready: flag(true),
                 coherent: flag(true),
-                source: text(match self.name.as_str(){"IndicatorMotionHookLine"=>"IndicatorMotionHookLine.m_vDragResult","IndicatorMotionCameraLock"=>"IndicatorMotionCameraLock.m_vDragResult",_=>"IndicatorMotionRot.m_vDragResult"}),
+                source: text(match self.name.as_str() {
+                    "IndicatorMotionHookLine" => "IndicatorMotionHookLine.m_vDragResult",
+                    "IndicatorMotionCameraLock" => "IndicatorMotionCameraLock.m_vDragResult",
+                    "IndicatorMotionSwing" => "IndicatorMotionSwing.m_vDragResult",
+                    _ => "IndicatorMotionRot.m_vDragResult",
+                }),
                 token: frame.token,
                 hero_id: frame.hero_id,
                 slot: frame.ui.active_slot,
@@ -2607,6 +2637,22 @@ mod tests {
         r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&6f32.to_le_bytes());
         assert!(check(&r,&checks).is_err());
         assert!(additional_direction_contract(&mut r,128,4210,"IndicatorMotionRot","IndicatorPackage_Multi_JianTou",&mut Vec::new()).is_err());
+    }
+    #[test]
+    fn beatrix_sniper_swing_requires_its_own_config() {
+        let mut r = base_tap_fixture();
+        let m = "IndicatorMotionSwing";
+        let p = "IndicatorPackage_JianTou_OtherRanger";
+        for (at, value) in [(1056, 2010530i32), (1060, 11), (1072, 482)] {
+            r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        for (at, value) in [(1568, 16f32), (1572, 14.)] {
+            r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        assert!(beatrix_sniper_ultimate_contract(&mut r, 128, 2010530, m, p, &mut Vec::new()).unwrap());
+        assert!(!beatrix_sniper_ultimate_contract(&mut r, 128, 2010550, m, p, &mut Vec::new()).unwrap());
+        r.memory.0.borrow_mut()[1060..1064].copy_from_slice(&1i32.to_le_bytes());
+        assert!(beatrix_sniper_ultimate_contract(&mut r, 128, 2010530, m, p, &mut Vec::new()).is_err());
     }
     #[test]
     fn yve_crystal_recast_origin_requires_its_own_arrow_config() {

@@ -4,8 +4,8 @@ const ALDOUS_SKILLS: [(&str, i32); 3] = [("skill:0", 6410), ("skill:1", 6420), (
 
 impl Controller {
     pub(crate) fn intrinsic_direction_attack(&self,b:&Button)->bool {
-        self.heroId_==71 && b.kind=="attack" && b.slot=="attack"
-            && matches!(b.skillId,7100|107100|207100) && b.aimType==2
+        b.kind == "attack" && b.slot == "attack" && b.aimType == 2
+            && matches!((self.heroId_, b.skillId), (71, 7100 | 107100 | 207100) | (105, 10500))
     }
     pub(crate) fn aimed_attack(&self,b:&Button)->bool {
         b.kind=="attack" && b.slot=="attack" && (b.aimType==3 || self.intrinsic_direction_attack(b))

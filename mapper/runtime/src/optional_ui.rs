@@ -504,13 +504,15 @@ impl OptionalUi {
                 }
                 let at = r.field(button, "m_iIndex")?;
                 let index = i32_at(&capture(r, &mut family.checks, at, 4)?, 0);
-                if class.name=="KeySkillLockDeadHero" {
+                if matches!(class.name.as_str(), "KeySkillLockDeadHero" | "KeySkillToggleChoose") {
                     let hero=i32_at(&capture(r,&mut family.checks,self.local_hero_address,4)?,0);
                     let data=link(r,&mut family.checks,button,"m_SkillData")?;
                     owner(r,&mut family.checks,data)?;
                     let base_at=r.field(data,"m_InitSkillID")?;
                     let base=i32_at(&capture(r,&mut family.checks,base_at,4)?,0);
-                    if crate::source::additional_hero_skill_index(hero,&class.name,index,base).is_some() {
+                    if crate::source::additional_hero_skill_index(hero,&class.name,index,base).is_some()
+                        || crate::source::beatrix_weapon_menu(hero, &class.name, index, base)
+                    {
                         let max_at=r.field(button,"m_iMaxSkillLevel")?;
                         let maximum=i32_at(&capture(r,&mut family.checks,max_at,4)?,0);
                         let add=link(r,&mut family.checks,button,"m_SkillAddBtn")?;

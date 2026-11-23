@@ -25,7 +25,8 @@ const ZHUXIN_LANTERN_SOURCE: &str = "IndicatorMotion_MultiArrowsPoint2Circle.m_v
 const RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]";
 const HANZO_GHOST_RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]*[20]";
 fn known_direction_source(hero:i32,skill:i32,source:&str)->bool {
-    source=="IndicatorMotionRot.m_vDragResult" || (hero==31&&skill==3190&&source=="IndicatorMotionCameraLock.m_vDragResult") || (hero==21&&skill==2126&&source=="IndicatorMotionHookLine.m_vDragResult") || (hero==84&&skill==8410&&source=="KeySkilleCheckMesh.currentDirect")
+    (hero == 105 && skill == 2010530 && source == "IndicatorMotionSwing.m_vDragResult")
+        || source=="IndicatorMotionRot.m_vDragResult" || (hero==31&&skill==3190&&source=="IndicatorMotionCameraLock.m_vDragResult") || (hero==21&&skill==2126&&source=="IndicatorMotionHookLine.m_vDragResult") || (hero==84&&skill==8410&&source=="KeySkilleCheckMesh.currentDirect")
 }
 const ANGLE_COS: f64 = 0.9999904807207345; // cos(0.25 degrees)
 

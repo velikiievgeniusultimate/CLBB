@@ -72,19 +72,27 @@ impl Settings {
     // personal defaults, not changes to shared bindings. Reset still restores
     // ordinary inheritance, and later loads never overwrite user choices.
     fn install_directional_hero_defaults(&mut self)->bool {
-        const MARK:&str="migration.directional_hero_defaults.v1";
-        if self.values.contains_key(MARK) {return false;}
-        for hero in [71,125] {
+        const MARK: &str = "migration.directional_hero_defaults.v1";
+        const BEATRIX_MARK: &str = "migration.beatrix_keyboard_defaults.v1";
+        let seed_existing = !self.values.contains_key(MARK);
+        let seed_beatrix = !self.values.contains_key(BEATRIX_MARK);
+        if !seed_existing && !seed_beatrix { return false; }
+        for hero in [71, 125, 105] {
+            if (hero == 105 && !seed_beatrix) || (hero != 105 && !seed_existing) {
+                continue;
+            }
             let mut defaults=vec![
                 ("movement.click_mode","2"),("movement.up","87"),("movement.down","83"),
                 ("movement.left","65"),("movement.right","68"),
-                ("bindings.skill:0.key","81"),("bindings.skill:2.key",if hero==125 {"69"} else {"82"}),
-                ("bindings.attack:minion.key","88"),("bindings.attack:tower.key","67"),
+                ("bindings.skill:0.key","81"),("bindings.skill:2.key",if hero==71 {"82"} else {"69"}),
+                ("bindings.attack:minion.key","88"),("bindings.attack:tower.key",if hero==105 {"72"} else {"67"}),
                 ("bindings.extra:1.key","71"),
             ];
             if hero==71 {defaults.extend([("bindings.attack.key","33554434"),("bindings.skill:1.key","69"),
                 ("bindings.attack.cast_mode","0"),("bindings.attack.stop_movement","false")]);}
-            else {defaults.extend([("bindings.skill:1.key","33554434"),("bindings.skill:1.cast_mode","0"),
+            else if hero == 105 {
+                defaults.extend([("bindings.attack.key", "33554434"), ("bindings.skill:1.key", "67")]);
+            } else {defaults.extend([("bindings.skill:1.key","33554434"),("bindings.skill:1.cast_mode","0"),
                 ("bindings.skill:1.stop_movement","false")]);}
             for (field,value)in defaults {
                 let own=format!("heroes.{hero}.{field}");let flag=format!("{own}.override");
@@ -93,7 +101,9 @@ impl Settings {
                 }
             }
         }
-        self.values.insert(MARK.into(),"1".into());true
+        if seed_existing { self.values.insert(MARK.into(), "1".into()); }
+        if seed_beatrix { self.values.insert(BEATRIX_MARK.into(), "1".into()); }
+        true
     }
     fn migrate_field_inheritance(&mut self) -> bool {
         if self.values.contains_key("migration.field_inheritance") { return false; }
@@ -778,6 +788,24 @@ mod tests {
         }
         s.values.insert("heroes.71.bindings.attack.key.override".into(),"false".into());
         assert_eq!(s.binding(71,"attack").key,32);assert!(!s.install_directional_hero_defaults());
+    }
+    #[test]
+    fn beatrix_keyboard_profile_seeds_after_the_previous_profiles() {
+        let mut s = Settings::default();
+        s.values.insert("migration.directional_hero_defaults.v1".into(), "1".into());
+        assert!(s.install_directional_hero_defaults());
+        assert_eq!(s.integer("hero.movement.click_mode", 105), 2);
+        for (field, key) in [("up", 87), ("down", 83), ("left", 65), ("right", 68)] {
+            assert_eq!(s.integer(&format!("hero.movement.{field}"), 105), key);
+        }
+        for (slot, key) in [("attack", MOUSE | 2), ("skill:0", 81), ("skill:1", 67),
+            ("skill:2", 69), ("skill:3", 82), ("attack:minion", 88), ("attack:tower", 72), ("extra:1", 71)] {
+            assert_eq!(s.binding(105, slot).key, key, "{slot}");
+        }
+        assert_eq!(s.binding(104, "attack").key, 32);
+        s.set("hero.bindings.attack.key", "78", 105).unwrap();
+        assert!(!s.install_directional_hero_defaults());
+        assert_eq!(s.binding(105, "attack").key, 78);
     }
     #[test]
     fn requested_profiles_preserve_existing_personal_values_and_explicit_inheritance() {
