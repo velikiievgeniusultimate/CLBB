@@ -647,7 +647,9 @@ impl UiPlan {
                 None
             };
             let timer = r.field(button, "m_CdCoolDown").ok();
-            let cast_lock = if matches!(kind, "skill" | "item") {
+            let cast_lock = if matches!(kind, "skill" | "item")
+                || (kind == "extra" && slot == "extra:2" && class.name == "KeySkillExtra")
+            {
                 crate::control_audit::cast_lock_address(r, button)
             } else {
                 None
@@ -952,8 +954,10 @@ impl UiPlan {
                     button.skill_charges.and_then(|[count,max]| {
                         charge_pool_empty(integer(r, consumed, count).ok()?, integer(r, consumed, max).ok()?, capacity)
                     }).and_then(|empty| if empty { Some(true) } else { timer_blocked })
-                } else if button.slot == "item:active" && skill == 25790 && variant == 23442 {
-                    // Conceal's locked icon can still have an idle cooldown timer.
+                } else if (button.slot == "item:active" && skill == 25790 && variant == 23442)
+                    || (hero == 64 && button.slot == "extra:2" && skill == 20100 && variant == 20100)
+                {
+                    // Conceal and Flicker in Aldous's flight may be locked with an idle timer.
                     match optional_flag(r, consumed, button.cast_lock).value {
                         1 => Some(true),
                         0 => timer_blocked,
