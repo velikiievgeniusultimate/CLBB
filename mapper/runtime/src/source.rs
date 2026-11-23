@@ -245,6 +245,7 @@ pub struct ButtonPlan {
     pub timer: Option<u64>,
     pub widget: Option<Widget>,
     johnson_interactive: Option<u64>,
+    require_visible_icon: bool,
 }
 pub struct UiPlan {
     pub object: u64,
@@ -351,6 +352,11 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Hanekage returns to the separately observed body through an ordinary
         // repeat; initial6930 remains a directional entry and has its own lock.
         || (hero==69 && slot=="skill:2" && base==6930 && active==69300)
+        // Cecilion summons a nearby allied Carmilla without an aiming indicator.
+        || (hero == 91 && slot == "skill:3" && base == 9160 && matches!(active, 9160 | 9165))
+        // Carmilla starts her speed buff with a tap. The follow-up 9222
+        // has its own native directional indicator.
+        || (hero == 92 && slot == "skill:1" && base == 9220 && active == 9220)
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
@@ -385,6 +391,16 @@ fn control_kind(is_attack: bool, ancestry: &[String]) -> &'static str {
 // The granted ally button is not owned by the recipient's hero identity.
 fn mathilda_ally_control(class: &str, index: i32, base: i32) -> bool {
     class == "KeySkillDyExtra" && index == 4 && base == 10224
+}
+
+fn carmilla_exit_duplicate(hero: i32, slot: &str, base: i32, active: i32) -> bool {
+    // When attached to Cecilion, the HUD mirrors the same aimed exit on
+    // all three buttons. Keep one binding on the existing ultimate slot.
+    hero == 92 && active == 9280 && matches!((slot, base), ("skill:0", 9210) | ("skill:1", 9220))
+}
+
+fn cecilion_pair_control(hero: i32, class: &str, index: i32, base: i32) -> bool {
+    hero == 91 && class == "KeySkillEquip" && index == 0 && base == 9160
 }
 
 // Native auxiliary hero controls need not use the ordinal of their visual
@@ -429,6 +445,30 @@ fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
 
 #[cfg(test)]
 mod control_kind_tests {
+    #[test]
+    fn cecilion_pair_button_has_its_own_non_aimed_slot() {
+        use super::{cecilion_pair_control, verified_button_only_form};
+        assert!(cecilion_pair_control(91, "KeySkillEquip", 0, 9160));
+        assert!(verified_button_only_form(91, "skill:3", 9160, 9160));
+        assert!(verified_button_only_form(91, "skill:3", 9160, 9165));
+        assert!(!verified_button_only_form(91, "skill:3", 9160, 9166));
+        assert!(!cecilion_pair_control(92, "KeySkillEquip", 0, 9160));
+        assert!(!cecilion_pair_control(91, "KeySkillExtra", 0, 20000));
+        assert!(!cecilion_pair_control(91, "KeySkillEquip", 3, 25790));
+        assert!(!verified_button_only_form(91, "skill:2", 9130, 9160));
+    }
+    #[test]
+    fn carmilla_keeps_one_exit_and_the_two_normal_second_skill_forms() {
+        use super::{carmilla_exit_duplicate, verified_button_only_form};
+        assert!(carmilla_exit_duplicate(92, "skill:0", 9210, 9280));
+        assert!(carmilla_exit_duplicate(92, "skill:1", 9220, 9280));
+        assert!(!carmilla_exit_duplicate(92, "skill:2", 9230, 9280));
+        assert!(!carmilla_exit_duplicate(91, "skill:0", 9210, 9280));
+        assert!(!carmilla_exit_duplicate(92, "skill:0", 9210, 9210));
+        assert!(verified_button_only_form(92, "skill:1", 9220, 9220));
+        assert!(!verified_button_only_form(92, "skill:1", 9220, 9222));
+        assert!(!verified_button_only_form(92, "skill:2", 9230, 9280));
+    }
     #[test]
     fn granger_rhapsody_stop_is_only_its_current_native_recast() {
         use super::verified_button_only_form;
@@ -608,6 +648,18 @@ impl UiPlan {
             }
             let native_index=index;
             let mut index=index;
+            let mut cecilion_pair = false;
+            if kind == "extra" && class.name == "KeySkillEquip" && index == 0 && skill != 0 {
+                let hero = r.integer(local_hero_address)?;
+                let base = r.integer(skill)?;
+                if cecilion_pair_control(hero, &class.name, index, base) {
+                    checks.push((local_hero_address, hero.to_le_bytes().to_vec()));
+                    checks.push((skill, base.to_le_bytes().to_vec()));
+                    kind = "skill";
+                    index = 3;
+                    cecilion_pair = true;
+                }
+            }
             if kind=="skill" && class.name=="KeySkillLockDeadHero" && skill!=0 {
                 let hero=r.integer(local_hero_address)?;
                 let base=r.integer(skill)?;
@@ -697,6 +749,7 @@ impl UiPlan {
                 timer,
                 widget: None,
                 johnson_interactive,
+                require_visible_icon: cecilion_pair || johnson_interactive.is_some(),
             });
         }
         let info = link(r, object, "m_UIFrameInfo", &mut checks)?;
@@ -842,10 +895,14 @@ impl UiPlan {
             ..Default::default()
         };
         for button in &mut self.buttons {
-            if let Some(address) = button.johnson_interactive {
+            if button.require_visible_icon {
                 let visible = (|| -> Result<bool> {
                     let mut visibility = Vec::new();
-                    if !boolean(r, &mut visibility, address)? { return Ok(false); }
+                    if let Some(address) = button.johnson_interactive
+                        && !boolean(r, &mut visibility, address)?
+                    {
+                        return Ok(false);
+                    }
                     let icon = link(r, button.object, "m_SkillIcon", &mut visibility)?;
                     for name in ["mIsActive", "mIsVisibleByAlpha", "mIsVisibleByPanel", "mEnabled"] {
                         let field = r.field(icon, name)?;
@@ -882,6 +939,13 @@ impl UiPlan {
             } else {
                 0
             };
+            let variant = match button.variant {
+                Some(a) => integer(r, consumed, a)?,
+                None => 0,
+            };
+            if carmilla_exit_duplicate(hero, &button.slot, skill, variant) {
+                continue;
+            }
             let active = button.object == current;
             let center = if active && unity::onscreen(wheel) {
                 wheel
@@ -922,10 +986,6 @@ impl UiPlan {
                     radius_uv: v2(radius),
                 };
             }
-            let variant = match button.variant {
-                Some(a) => integer(r, consumed, a)?,
-                None => 0,
-            };
             let mut cast_locked = s::Flag::default();
             if button.kind == "skill" || button.kind == "attack" {
                 cast_locked = optional_flag(r, consumed, button.cast_lock);

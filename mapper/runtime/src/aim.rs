@@ -181,11 +181,15 @@ fn layla_ultimate_direction_template(skill:i32,motion:&str,package:&str,rect:i32
         && rect==2 && params==[6.,16.]
 }
 
-// Terizla's third swing uses the two-part direction package with RectType0.
-fn terizla_final_swing_template(skill: i32, motion: &str, package: &str, rect: i32, params: &[f64]) -> bool {
-    skill == 8222 && motion == "IndicatorMotionRot"
-        && package == "IndicatorPackage_TwoPartAndPos_Direction"
-        && rect == 0 && params == [11., 4.25]
+// Measured RectType0 layouts for Terizla's final swing and Cecilion's claws.
+fn two_part_position_direction_rect_zero(skill: i32, motion: &str, package: &str, rect: i32, params: &[f64]) -> bool {
+    let extent = match skill {
+        8222 => 4.25,
+        9120 => 6.,
+        _ => return false,
+    };
+    motion == "IndicatorMotionRot" && package == "IndicatorPackage_TwoPartAndPos_Direction"
+        && rect == 0 && params == [11., extent]
 }
 
 // Harley Q: actual expanded description and native 22-value fan layout.
@@ -562,7 +566,7 @@ fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     } else {false};
     if !additional_direction_template(motion,package,rect,&params)
         && !layla_ultimate_direction_template(skill,motion,package,rect,&params)
-        && !terizla_final_swing_template(skill, motion, package, rect, &params)
+        && !two_part_position_direction_rect_zero(skill, motion, package, rect, &params)
         && !harley && !helcurt && !kadita {
         return Err("Unverified additional direction configuration".into());
     }
@@ -2247,19 +2251,22 @@ mod tests {
         assert_eq!(native_template(m,p),None);
     }
     #[test]
-    fn terizla_final_swing_admits_only_the_observed_direction_variant() {
+    fn rect_zero_two_part_direction_requires_an_observed_skill_and_extent() {
         let motion = "IndicatorMotionRot";
         let package = "IndicatorPackage_TwoPartAndPos_Direction";
         let shape = [11., 4.25];
         assert!(!additional_direction_template(motion, package, 0, &shape));
-        assert!(terizla_final_swing_template(8222, motion, package, 0, &shape));
+        assert!(two_part_position_direction_rect_zero(8222, motion, package, 0, &shape));
+        assert!(two_part_position_direction_rect_zero(9120, motion, package, 0, &[11., 6.]));
+        assert!(!two_part_position_direction_rect_zero(9120, motion, package, 0, &shape));
+        assert!(!two_part_position_direction_rect_zero(9110, motion, package, 0, &[11., 6.]));
         for skill in [8220, 8221, 8223] {
-            assert!(!terizla_final_swing_template(skill, motion, package, 0, &shape));
+            assert!(!two_part_position_direction_rect_zero(skill, motion, package, 0, &shape));
         }
-        assert!(!terizla_final_swing_template(8222, motion, package, 1, &shape));
-        assert!(!terizla_final_swing_template(8222, motion, package, 0, &[11., 4.]));
-        assert!(!terizla_final_swing_template(8222, "IndicatorMotionPos", package, 0, &shape));
-        assert!(!terizla_final_swing_template(8222, motion, "IndicatorPackage_TwoPart_Direction", 0, &shape));
+        assert!(!two_part_position_direction_rect_zero(8222, motion, package, 1, &shape));
+        assert!(!two_part_position_direction_rect_zero(8222, motion, package, 0, &[11., 4.]));
+        assert!(!two_part_position_direction_rect_zero(8222, "IndicatorMotionPos", package, 0, &shape));
+        assert!(!two_part_position_direction_rect_zero(8222, motion, "IndicatorPackage_TwoPart_Direction", 0, &shape));
     }
     #[test]
     fn kadita_waves_require_exact_owned_configuration() {
