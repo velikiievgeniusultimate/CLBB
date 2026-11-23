@@ -963,3 +963,34 @@ fn a_buffer_received_after_unlock_still_uses_normal_native_cancellation() {
     assert!(c.skillActivationObserved_ && c.skillCancelPending_);
     assert!(h.active.contains_key(&finger), "wait for the actual cancellation of the buffered cast");
 }
+
+#[test]
+fn holding_empty_badang_q_does_not_create_a_contact_or_cast_on_recharge() {
+    let badang_q = Skill { hero: 77, base: 7710, form: 7710, slot: "skill:0" };
+    let (mut c, mut h) = setup(badang_q, Some(false), 2, 0);
+    let movement = c.movementTouch_;
+    let ms = |offset: i64| START + offset * 1_000_000;
+    // The source publishes an effective cooldown for a validated empty pool
+    // even if the native timer is idle and the cast lock flags are both false.
+    for offset in (60..=1260).step_by(80) {
+        let now = ms(offset);
+        let mut f = resource_frame(now, badang_q, false);
+        f.ui.cooldown_state.buttons[0].on_cooldown = flag(true);
+        c.apply_snapshot(&mut h, &f, now);
+        if offset == 60 {
+            key(&mut c, &mut h, now + 1_000_000, 81, true);
+            key(&mut c, &mut h, now + 2_000_000, 84, true);
+            key(&mut c, &mut h, now + 3_000_000, 84, false);
+        }
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        assert!(!c.skillCancelPending_ && c.queuedSkills_.is_empty());
+    }
+    let recovered = resource_frame(ms(1300), badang_q, false);
+    c.apply_snapshot(&mut h, &recovered, ms(1300));
+    assert!(c.apply_input(&mut h, Input::Key { code: 81, down: true, repeat: true }, ms(1301)));
+    key(&mut c, &mut h, ms(1302), 81, false);
+    assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+    assert!(c.cooldownCasts_.is_empty());
+    key(&mut c, &mut h, ms(1303), 81, true);
+    assert!(h.active.contains_key(&c.skillTouch_));
+}

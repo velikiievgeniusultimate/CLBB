@@ -660,14 +660,12 @@ impl UiPlan {
                 None
             };
             let skill_charges = if kind == "skill" && class.name == "SkillButtonAutoCharge" && skill != 0 {
-                let base = r.integer(skill)?;
-                if auto_charge_capacity(r.integer(local_hero_address)?, &slot, base, base).is_some() {
-                    let address = |name| {
-                        class.fields.get(name).filter(|f| !f.is_static && f.kind == 8 && f.offset <= 1_048_576)
-                            .map(|f| button + f.offset)
-                    };
-                    address("m_iOvelap").zip(address("m_iMaxOvelap")).map(|(count,max)| [count,max])
-                } else { None }
+                let address = |name| {
+                    class.fields.get(name)
+                        .filter(|f| !f.is_static && f.kind == 8 && f.offset <= 1_048_576)
+                        .and_then(|f| button.checked_add(f.offset))
+                };
+                address("m_iOvelap").zip(address("m_iMaxOvelap")).map(|(count, maximum)| [count, maximum])
             } else { None };
             let charge = if kind == "skill" {
                 crate::control_audit::ChargePlan::discover(r, button, data, local_show).ok()
@@ -949,14 +947,14 @@ impl UiPlan {
                     .and_then(|timer_link| pointer(r, consumed, timer_link).ok())
                     .filter(|timer| *timer != 0)
                     .and_then(|timer| read_cooldown(r, timer, clock, consumed).ok());
-                // The cooldown timer alone does not report an empty charge pool.
-                // Preserve the usual cooldown gate and treat an uncertain count
-                // as unknown for this exact owned skill form.
-                let capacity = auto_charge_capacity(hero, &button.slot, skill, variant);
-                let blocked = if let Some(capacity) = capacity {
-                    button.skill_charges.and_then(|[count,max]| {
-                        charge_pool_empty(integer(r, consumed, count).ok()?, integer(r, consumed, max).ok()?, capacity)
-                    }).and_then(|empty| if empty { Some(true) } else { timer_blocked })
+                // Auto-charge buttons can use the timer for a short interval
+                // between casts while their charge pool refills independently.
+                let blocked = if let Some([count, maximum]) = button.skill_charges {
+                    (|| auto_charge_cooldown(
+                        integer(r, consumed, count).ok()?,
+                        integer(r, consumed, maximum).ok()?,
+                        timer_blocked,
+                    ))()
                 } else if (button.slot == "item:active" && skill == 25790 && variant == 23442)
                     || (hero == 64 && button.slot == "extra:2" && skill == 20100 && variant == 20100)
                 {
@@ -1046,19 +1044,11 @@ impl UiPlan {
         Ok((ui, variants, cancel_state))
     }
 }
-fn auto_charge_capacity(hero: i32, slot: &str, base: i32, active: i32) -> Option<i32> {
-    match (hero, slot, base, active) {
-        (13, "skill:2", 1330, 1330) => Some(3),
-        (24, "skill:2", 2430, 2430) => Some(2),
-        (55, "skill:0", 5510, 5510) => Some(5),
-        (57, "skill:0", 5710, 5710 | 5714) => Some(2),
-        (86, "skill:1", 8620, 8620) => Some(5),
-        _ => None,
+fn auto_charge_cooldown(count: i32, maximum: i32, timer: Option<bool>) -> Option<bool> {
+    if maximum <= 0 || !(0..=maximum).contains(&count) {
+        return None;
     }
-}
-
-fn charge_pool_empty(count: i32, maximum: i32, capacity: i32) -> Option<bool> {
-    (maximum == capacity && (0..=maximum).contains(&count)).then_some(count == 0)
+    if count == 0 { Some(true) } else { timer }
 }
 
 fn read_cooldown<M: Memory>(
@@ -2905,33 +2895,19 @@ mod tests {
         }
     }
     #[test]
-    fn exact_auto_charge_skills_reject_invalid_counts_without_admitting_a_cast() {
-        assert_eq!(auto_charge_capacity(13, "skill:2", 1330, 1330), Some(3));
-        assert_eq!(auto_charge_capacity(24, "skill:2", 2430, 2430), Some(2));
-        assert_eq!(auto_charge_capacity(55, "skill:0", 5510, 5510), Some(5));
-        assert_eq!(auto_charge_capacity(86, "skill:1", 8620, 8620), Some(5));
-        for active in [5710, 5714] {
-            assert_eq!(auto_charge_capacity(57, "skill:0", 5710, active), Some(2));
-        }
-        for capacity in [2, 3, 5] {
-            assert_eq!(charge_pool_empty(0, capacity, capacity), Some(true));
-            for count in 1..=capacity {
-                assert_eq!(charge_pool_empty(count, capacity, capacity), Some(false));
-            }
-            for (count, maximum) in [(-1, capacity), (capacity + 1, capacity), (0, 0), (1, 1)] {
-                assert_eq!(charge_pool_empty(count, maximum, capacity), None);
+    fn native_charge_pool_blocks_empty_even_when_the_timer_is_ready_or_missing() {
+        for capacity in [1, 2, 3, 5] {
+            for timer in [None, Some(false), Some(true)] {
+                assert_eq!(auto_charge_cooldown(0, capacity, timer), Some(true));
+                for count in 1..=capacity {
+                    assert_eq!(auto_charge_cooldown(count, capacity, timer), timer);
+                }
+                assert_eq!(auto_charge_cooldown(-1, capacity, timer), None);
+                assert_eq!(auto_charge_cooldown(capacity + 1, capacity, timer), None);
             }
         }
-        for (hero, slot, base) in [
-            (23, "skill:2", 2430), (24, "skill:1", 2430), (24, "skill:2", 2420),
-            (54, "skill:0", 5510), (55, "skill:1", 5510), (55, "skill:0", 5520),
-            (58, "skill:0", 5710), (57, "skill:1", 5710), (57, "skill:0", 5714),
-            (85, "skill:1", 8620), (86, "skill:0", 8620),
-        ] {
-            assert_eq!(auto_charge_capacity(hero, slot, base, base), None);
-        }
-        assert_eq!(auto_charge_capacity(57, "skill:0", 5710, 5729), None);
-        assert_eq!(auto_charge_capacity(86, "skill:1", 8620, 8610), None);
+        assert_eq!(auto_charge_cooldown(0, 0, Some(false)), None);
+        assert_eq!(auto_charge_cooldown(0, -1, Some(false)), None);
     }
     #[test]
     fn natalia_self_cast_is_plain_only_in_her_owned_ultimate_slot() {
