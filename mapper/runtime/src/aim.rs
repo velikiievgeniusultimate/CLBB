@@ -181,6 +181,13 @@ fn layla_ultimate_direction_template(skill:i32,motion:&str,package:&str,rect:i32
         && rect==2 && params==[6.,16.]
 }
 
+// Terizla's third swing uses the two-part direction package with RectType0.
+fn terizla_final_swing_template(skill: i32, motion: &str, package: &str, rect: i32, params: &[f64]) -> bool {
+    skill == 8222 && motion == "IndicatorMotionRot"
+        && package == "IndicatorPackage_TwoPartAndPos_Direction"
+        && rect == 0 && params == [11., 4.25]
+}
+
 // Harley Q: actual expanded description and native 22-value fan layout.
 // RectType1 is not the previously observed generic multi-arrow RectType0.
 // Admit this exact skill/config only; no other hero gains direction semantics.
@@ -555,6 +562,7 @@ fn additional_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,skill:i
     } else {false};
     if !additional_direction_template(motion,package,rect,&params)
         && !layla_ultimate_direction_template(skill,motion,package,rect,&params)
+        && !terizla_final_swing_template(skill, motion, package, rect, &params)
         && !harley && !helcurt && !kadita {
         return Err("Unverified additional direction configuration".into());
     }
@@ -2237,6 +2245,21 @@ mod tests {
         // Neither the broad class allowlist nor feedback-plan discovery is
         // expanded: this Tap must pass the separate owner/configuration gate.
         assert_eq!(native_template(m,p),None);
+    }
+    #[test]
+    fn terizla_final_swing_admits_only_the_observed_direction_variant() {
+        let motion = "IndicatorMotionRot";
+        let package = "IndicatorPackage_TwoPartAndPos_Direction";
+        let shape = [11., 4.25];
+        assert!(!additional_direction_template(motion, package, 0, &shape));
+        assert!(terizla_final_swing_template(8222, motion, package, 0, &shape));
+        for skill in [8220, 8221, 8223] {
+            assert!(!terizla_final_swing_template(skill, motion, package, 0, &shape));
+        }
+        assert!(!terizla_final_swing_template(8222, motion, package, 1, &shape));
+        assert!(!terizla_final_swing_template(8222, motion, package, 0, &[11., 4.]));
+        assert!(!terizla_final_swing_template(8222, "IndicatorMotionPos", package, 0, &shape));
+        assert!(!terizla_final_swing_template(8222, motion, "IndicatorPackage_TwoPart_Direction", 0, &shape));
     }
     #[test]
     fn kadita_waves_require_exact_owned_configuration() {
