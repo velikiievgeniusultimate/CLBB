@@ -393,12 +393,6 @@ fn mathilda_ally_control(class: &str, index: i32, base: i32) -> bool {
     class == "KeySkillDyExtra" && index == 4 && base == 10224
 }
 
-fn carmilla_exit_duplicate(hero: i32, slot: &str, base: i32, active: i32) -> bool {
-    // When attached to Cecilion, the HUD mirrors the same aimed exit on
-    // all three buttons. Keep one binding on the existing ultimate slot.
-    hero == 92 && active == 9280 && matches!((slot, base), ("skill:0", 9210) | ("skill:1", 9220))
-}
-
 fn cecilion_pair_control(hero: i32, class: &str, index: i32, base: i32) -> bool {
     hero == 91 && class == "KeySkillEquip" && index == 0 && base == 9160
 }
@@ -458,16 +452,13 @@ mod control_kind_tests {
         assert!(!verified_button_only_form(91, "skill:2", 9130, 9160));
     }
     #[test]
-    fn carmilla_keeps_one_exit_and_the_two_normal_second_skill_forms() {
-        use super::{carmilla_exit_duplicate, verified_button_only_form};
-        assert!(carmilla_exit_duplicate(92, "skill:0", 9210, 9280));
-        assert!(carmilla_exit_duplicate(92, "skill:1", 9220, 9280));
-        assert!(!carmilla_exit_duplicate(92, "skill:2", 9230, 9280));
-        assert!(!carmilla_exit_duplicate(91, "skill:0", 9210, 9280));
-        assert!(!carmilla_exit_duplicate(92, "skill:0", 9210, 9210));
+    fn carmilla_second_skill_starts_with_a_tap_and_keeps_followup_aim() {
+        use super::verified_button_only_form;
         assert!(verified_button_only_form(92, "skill:1", 9220, 9220));
         assert!(!verified_button_only_form(92, "skill:1", 9220, 9222));
-        assert!(!verified_button_only_form(92, "skill:2", 9230, 9280));
+        for (slot, base) in [("skill:0", 9210), ("skill:1", 9220), ("skill:2", 9230)] {
+            assert!(!verified_button_only_form(92, slot, base, 9280));
+        }
     }
     #[test]
     fn granger_rhapsody_stop_is_only_its_current_native_recast() {
@@ -939,13 +930,6 @@ impl UiPlan {
             } else {
                 0
             };
-            let variant = match button.variant {
-                Some(a) => integer(r, consumed, a)?,
-                None => 0,
-            };
-            if carmilla_exit_duplicate(hero, &button.slot, skill, variant) {
-                continue;
-            }
             let active = button.object == current;
             let center = if active && unity::onscreen(wheel) {
                 wheel
@@ -986,6 +970,10 @@ impl UiPlan {
                     radius_uv: v2(radius),
                 };
             }
+            let variant = match button.variant {
+                Some(a) => integer(r, consumed, a)?,
+                None => 0,
+            };
             let mut cast_locked = s::Flag::default();
             if button.kind == "skill" || button.kind == "attack" {
                 cast_locked = optional_flag(r, consumed, button.cast_lock);
