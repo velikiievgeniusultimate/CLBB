@@ -269,6 +269,7 @@ impl Controller {
                 self.cableChain_.observe(receipt, f.game_clock_ms.value as u32, self.frameCoreSampleStartNs_);
             }
         }
+        self.observe_xborg_armor_change(host, f);
         // UI ownership is acceptance even when an animation/buffered cast has
         // not produced a logical target yet. Never infer rejection later merely
         // because that indicator disappears or becomes temporarily forbidden.

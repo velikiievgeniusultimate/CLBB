@@ -44,8 +44,8 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17 | 22 | 27 | 33 | 46 | 59 | 63 | 64 | 75 | 108, "skill", "skill:1") => 87,
-            (22 | 33 | 50 | 64 | 67, "skill", "skill:2") => 69,
+            (17 | 22 | 27 | 33 | 46 | 59 | 63 | 64 | 75 | 83 | 108, "skill", "skill:1") => 87,
+            (22 | 33 | 50 | 64 | 67 | 83, "skill", "skill:2") => 69,
             (27 | 50, "skill", "skill:3") => 82,
             _ => 81,
         };
@@ -204,6 +204,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let leomord_e = Skill { hero: 67, base: 6730, form: 6730, slot: "skill:2" };
     let kadita_q = Skill { hero: 75, base: 7510, form: 7510, slot: "skill:0" };
     let kadita_w = Skill { hero: 75, base: 7520, form: 7520, slot: "skill:1" };
+    let xborg_e = Skill { hero: 83, base: 8330, form: 8330, slot: "skill:2" };
     let aulus_w = Skill { hero: 108, base: 10820, form: 10820, slot: "skill:1" };
     let cici_q = Skill { hero: 123, base: 12310, form: 12310, slot: "skill:0" };
     for (skill, code, form) in [
@@ -223,6 +224,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         (aldous_e, 69, 6430), (aldous_e, 69, 6431),
         (leomord_e, 69, 206738), (leomord_e, 69, 6738),
         (kadita_q, 81, 7510), (kadita_w, 87, 7520),
+        (xborg_e, 69, 8330),
         (aulus_w, 87, 10820), (Skill { form: 10824, ..aulus_w }, 87, 10824),
         (cici_q, 81, 12370),
     ] {
@@ -993,4 +995,52 @@ fn holding_empty_badang_q_does_not_create_a_contact_or_cast_on_recharge() {
     assert!(c.cooldownCasts_.is_empty());
     key(&mut c, &mut h, ms(1303), 81, true);
     assert!(h.active.contains_key(&c.skillTouch_));
+}
+
+#[test]
+fn xborg_armor_change_releases_only_the_revoked_aim_and_preserves_a_queued_successor() {
+    for (slot, base, old, current, code, queued) in [
+        ("skill:0", 8310, 8315, 8310, 81, false),
+        ("skill:0", 8310, 8315, 8310, 81, true),
+        ("skill:1", 8320, 8320, 8325, 87, false),
+    ] {
+        let skill = Skill { hero: 83, slot, base, form: old };
+        let (mut c, mut h) = setup(skill, Some(false), 2, 0);
+        let movement = c.movementTouch_;
+        let ms = |offset: i64| START + offset * 1_000_000;
+        let sample = |time, form, owner: Option<i32>| {
+            let mut f = frame(ms(time), Skill { form, ..skill }, Some(false));
+            f.ui.cancel_uv = v2(0.9, 0.3);
+            f.ui.active_slot = text(if owner.is_some() { slot } else { "" });
+            f.skill_id = n(f64::from(owner.unwrap_or(0)));
+            f
+        };
+        key(&mut c, &mut h, ms(61), code, true);
+        let finger = c.skillTouch_;
+        native_sample(&mut c, &mut h, sample(70, old, Some(old)));
+        if queued {
+            key(&mut c, &mut h, ms(71), 70, true);
+            key(&mut c, &mut h, ms(72), 70, false);
+            assert!(c.skillCancelPending_);
+        }
+        // An idle HUD alone, or an active native reticle on the same slot,
+        // must never terminate a skill merely because a sample changed.
+        native_sample(&mut c, &mut h, sample(75, old, None));
+        native_sample(&mut c, &mut h, sample(80, current, Some(old)));
+        assert!(h.active.contains_key(&finger));
+        native_sample(&mut c, &mut h, sample(90, current, None));
+        assert_eq!(h.ended, [finger]);
+        assert!(!c.skillCancelPending_ && c.cooldownCasts_.is_empty());
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        assert_eq!(c.queuedSkills_.len(), usize::from(queued));
+        assert!(h.traces.iter().any(|(event, reason)| event == "release" && reason == "xborg_armor_form_changed"));
+        key(&mut c, &mut h, ms(91), code, false);
+        if queued {
+            native_sample(&mut c, &mut h, sample(100, current, None));
+            assert!(c.cooldownCasts_.contains_key("extra:2:20150"));
+        } else {
+            key(&mut c, &mut h, ms(92), code, true);
+            assert!(h.active.contains_key(&c.skillTouch_));
+        }
+    }
 }

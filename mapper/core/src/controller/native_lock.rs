@@ -123,24 +123,6 @@ impl Controller {
         {
             return false;
         }
-        if self.skillCancelSentNs_ == 0 {
-            let Some(point) = self.selection_cancel_point() else {
-                return false;
-            };
-            if !self.send_skill_cancel_point(host, point) {
-                return false;
-            }
-        }
-        if self.skillKeyHeld_
-            && !self
-                .queuedSkills_
-                .iter()
-                .any(|q| q.key == self.skillKey_ && q.held)
-        {
-            self.cooldownIgnoredKeys_.insert(self.skillKey_);
-        }
-        // Lift only this finger at the cancel point. Preserve newer intents
-        // and avoid a synthetic cooldown or an Android-wide ACTION_CANCEL.
         let reason = if proof.cast_locked {
             "native_cast_lock_without_capture"
         } else if proof.cast_lock_ended {
@@ -148,7 +130,6 @@ impl Controller {
         } else {
             "native_state_forbid_without_capture"
         };
-        self.finish_skill_inner(host, false, Some(reason));
-        true
+        self.end_revoked_skill(host, reason)
     }
 }

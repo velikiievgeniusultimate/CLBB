@@ -210,6 +210,7 @@ pub struct Controller {
     pub(crate) skillKeyHeld_: bool,
     pub(crate) skillExpectedAim_: bool,
     pub(crate) skillActivationObserved_: bool,
+    xborgFormOwned_: bool,
     pub(crate) skillStateForbiddenAtDown_: bool,
     nativeLock_: Option<native_lock::NativeLock>,
     frameGameClock_: Option<u32>,

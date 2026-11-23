@@ -333,6 +333,8 @@ impl Controller {
             // Rough Waves locks these same buttons while Kadita is submerged.
             (75, "skill:0", 7510) => &[7510],
             (75, "skill:1", 7520) => &[7520],
+            // X.Borg's base ultimate is disabled without Firaga Armor.
+            (83, "skill:2", 8330) => &[8330],
             (108, "skill:1", 10820) => &[10820, 10824], // Aulus's ultimate locks W.
             (123, "skill:0", 12310) => &[12370], // Cici's active yo-yo.
             _ => &[],
@@ -765,6 +767,7 @@ impl Controller {
         self.skillNudged_ = false;
         self.skillExpectedAim_ = false;
         self.skillActivationObserved_ = false;
+        self.xborgFormOwned_ = false;
         self.skillStateForbiddenAtDown_ = state_forbidden;
         self.traceDesiredValid_ = false;
         self.observedSkillId_ = 0;
@@ -836,6 +839,52 @@ impl Controller {
         self.finish_skill(host, true);
         true
     }
+    pub(super) fn end_revoked_skill(&mut self, host: &mut impl Host, reason: &str) -> bool {
+        if self.skillCancelSentNs_ == 0 {
+            let Some(point) = self.selection_cancel_point() else { return false };
+            if !self.send_skill_cancel_point(host, point) {
+                return false;
+            }
+        }
+        if self.skillKeyHeld_ && !self.queuedSkills_.iter().any(|q| q.key == self.skillKey_ && q.held) {
+            self.cooldownIgnoredKeys_.insert(self.skillKey_);
+        }
+        // Lift one retired finger at the cancel point and retain newer intents.
+        self.finish_skill_inner(host, false, Some(reason));
+        true
+    }
+
+    pub(super) fn observe_xborg_armor_change(&mut self, host: &mut impl Host, frame: &snapshot::Frame) {
+        if self.heroId_ != 83 || self.skillTouch_ < 0
+            || self.skillBehavior_ != SkillBehavior::Direction
+            || self.frameCoreSampleStartNs_ < self.castStartedNs_
+        {
+            return;
+        }
+        let Some(button) = self.find_button(&self.activeSlot_) else { return };
+        let replacement = match (button.slot.as_str(), button.skillId, self.skillCooldownVariant_) {
+            ("skill:0", 8310, 8310) => 8315,
+            ("skill:0", 8310, 8315) => 8310,
+            ("skill:1", 8320, 8320) => 8325,
+            ("skill:1", 8320, 8325) => 8320,
+            _ => return,
+        };
+        let current = self.active_variant(button);
+        if self.frameActiveSlot_ == self.activeSlot_ && self.coreSkill_ == self.skillCooldownVariant_ {
+            self.xborgFormOwned_ = true;
+        }
+        if self.xborgFormOwned_
+            && frame.ui.active_slot.present == 1 && frame.ui.active_slot.size == 0
+            && frame.skill_id.is_number() && frame.skill_id.value == 0.
+            && self.skillVariantSampleStartNs_ >= self.castStartedNs_
+            && current == replacement
+        {
+            // Armor changes close the old aim while retaining the same HUD
+            // button and base ID. That vanished preview cannot ACK a cancel.
+            self.end_revoked_skill(host, "xborg_armor_form_changed");
+        }
+    }
+
     pub(crate) fn finish_skill(&mut self, host: &mut impl Host, cancel: bool) {
         self.finish_skill_inner(host, cancel, None);
     }
@@ -901,6 +950,7 @@ impl Controller {
         self.selection_=Default::default();
         self.chargeGesture_ = None;
         self.skillActivationObserved_ = false;
+        self.xborgFormOwned_ = false;
         self.skillStateForbiddenAtDown_ = false;
         self.nativeLock_ = None;
         self.skillCancelPending_ = false;
