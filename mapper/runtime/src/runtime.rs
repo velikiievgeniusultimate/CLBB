@@ -473,6 +473,9 @@ impl Adapter {
                 format!("spell:{}", b.skill_id.int())
             } else { slot.to_owned() };
             add(self.settings.binding(hero,&binding_slot).key,slot.into());
+            if hero == 105 && slot == "attack" && b.skill_id.int() == 10500 {
+                add(self.settings.binding(hero, "attack:quick").key, "Быстрая атака".into());
+            }
         }
         if sample.linked.is_some() { for n in 0..2 {let slot=format!("combo:{n}");add(self.settings.binding(hero,&slot).key,slot);} }
         add(self.settings.integer("hero.cancel_key",hero),"Отмена навыка".into());

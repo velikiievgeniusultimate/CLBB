@@ -388,6 +388,7 @@ impl Settings {
             "skill:2" | "combo:0" => 69,
             "skill:3" | "combo:1" => 82,
             "attack" => 32,
+            "attack:quick" if hero == 105 => 32,
             "attack:minion" => 65,
             "attack:tower" => 83,
             "extra:0" => 66,

@@ -84,7 +84,10 @@ mod tests {
         fn resolve_world(&mut self, _: u64) -> Option<Point> { None }
         fn release_resolver(&mut self, _: u64) {}
         fn navigation(&mut self, _: Point, p: Point, _: bool) -> Result<Vec<Point>, String> { Ok(vec![p]) }
-        fn binding(&mut self, _: i32, b: &Button, _: &str) -> Binding {
+        fn binding(&mut self, hero: i32, b: &Button, config: &str) -> Binding {
+            if hero == 105 && config == "attack:quick" {
+                return Binding { key: 32, aim_type: self.attack_aim, ..Default::default() };
+            }
             Binding { key: if b.slot=="extra:1" || b.slot=="item:active" || b.slot=="ally:mathilda" || b.slot=="ally:johnson" {68} else if b.slot=="extra:2" {70} else if b.kind == "attack" { self.attack_key } else { 81 },
                 aim_type: if b.kind=="attack" { self.attack_aim } else {2},
                 cast_mode: match b.kind.as_str() { "attack" => self.attack_mode, "item" => self.item_mode, _ => 0 },
@@ -134,6 +137,36 @@ mod tests {
     fn key(c: &mut Controller, h: &mut TestHost, ms: i64, code: i32, down: bool) {
         assert!(c.apply_input(h, Input::Key { code, down, repeat: false }, T + ms * MS));
     }
+    #[test]
+    fn beatrix_quick_attack_taps_the_native_button_without_stealing_aim() {
+        let mut c = Controller::new();
+        let mut h = TestHost { attack_key: 33554434, attack_aim: 2, ..Default::default() };
+        let mut f = frame(0, Some(false));
+        f.hero_id = n(105.);
+        f.ui.hero_id = f.hero_id;
+        f.ui.buttons[0].skill_id = n(10500.);
+        c.apply_input(&mut h, Input::Enabled(true), T);
+        send(&mut c, &mut h, f);
+        c.apply_input(&mut h, Input::Pointer(Point::new(0.42, 0.21)), T + MS);
+
+        key(&mut c, &mut h, 2, 32, true);
+        assert_eq!(h.active.values().copied().collect::<Vec<_>>(), [Point::new(0.92, 0.89)]);
+        assert_eq!(c.skillTouch_, -1);
+        key(&mut c, &mut h, 3, 33554434, true);
+        key(&mut c, &mut h, 4, 33554434, false);
+        c.apply_input(&mut h, Input::Timer(Timer::Auxiliary), T + 19 * MS);
+        assert!(h.active.is_empty());
+        key(&mut c, &mut h, 20, 32, false);
+
+        key(&mut c, &mut h, 21, 33554434, true);
+        let aim = c.skillTouch_;
+        assert!(aim >= 0);
+        key(&mut c, &mut h, 22, 32, true);
+        key(&mut c, &mut h, 23, 32, false);
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [aim]);
+        assert_eq!(c.activeSlot_, "attack");
+    }
+
     fn setup(hold: Option<bool>) -> (Controller, TestHost) {
         let mut c = Controller::new();
         let mut h = TestHost { attack_key: 32, ..Default::default() };

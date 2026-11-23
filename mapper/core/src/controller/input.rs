@@ -166,8 +166,34 @@ impl Controller {
         let johnson_available = self.buttons_.iter()
             .any(|button| button.available && button.key == key && button.slot == "ally:johnson");
         let mut unavailable = false;
-        for b in self.buttons_.clone() {
+        for mut b in self.buttons_.clone() {
             if johnson_available && b.slot == "ally:mathilda" { continue; }
+            if self.heroId_ == 105 && b.slot == "attack" && b.kind == "attack" && b.skillId == 10500 {
+                let quick = host.binding(self.heroId_, &b, "attack:quick");
+                if key != 0 && key == quick.key {
+                    if pressed && !auto_repeat {
+                        self.auxiliaryHeldKeys_.insert(key);
+                        // Both bindings target the same widget. Never send a
+                        // second finger while that button is already held.
+                        let attacking = self.skillTouch_ >= 0 && self.activeSlot_ == "attack"
+                            || self.frameActiveSlot_ == "attack"
+                            || self.auxiliaryHolds_.iter().any(|hold| hold.slot == "attack")
+                            || self.auxiliaryTaps_.iter().any(|tap| tap.key == key || tap.key == b.key);
+                        if quick.aim_type != 0 && !attacking {
+                            b.key = key;
+                            b.castMode = 1;
+                            self.begin_auxiliary_tap(host, &b);
+                        }
+                    }
+                    return true;
+                }
+                if pressed && !auto_repeat && key != 0 && key == b.key
+                    && self.auxiliaryTaps_.iter().any(|tap| tap.key == quick.key)
+                {
+                    self.auxiliaryHeldKeys_.insert(key);
+                    return true;
+                }
+            }
             let mut matches = key != 0 && b.key == key;
             if self.heroId_ == 25
                 && b.skillId == 2520
