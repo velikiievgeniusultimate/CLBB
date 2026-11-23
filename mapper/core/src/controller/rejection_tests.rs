@@ -45,7 +45,7 @@ impl Host for TestHost {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
             (17 | 22 | 27 | 33 | 46 | 59 | 63 | 64 | 108, "skill", "skill:1") => 87,
-            (22 | 33 | 50 | 64, "skill", "skill:2") => 69,
+            (22 | 33 | 50 | 64 | 67, "skill", "skill:2") => 69,
             (27 | 50, "skill", "skill:3") => 82,
             _ => 81,
         };
@@ -201,6 +201,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let aldous_q = Skill { hero: 64, base: 6410, form: 6410, slot: "skill:0" };
     let aldous_w = Skill { hero: 64, base: 6420, form: 6420, slot: "skill:1" };
     let aldous_e = Skill { hero: 64, base: 6430, form: 6430, slot: "skill:2" };
+    let leomord_e = Skill { hero: 67, base: 6730, form: 6730, slot: "skill:2" };
     let aulus_w = Skill { hero: 108, base: 10820, form: 10820, slot: "skill:1" };
     let cici_q = Skill { hero: 123, base: 12310, form: 12310, slot: "skill:0" };
     for (skill, code, form) in [
@@ -218,6 +219,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         (aldous_q, 81, 6417),
         (aldous_w, 87, 6420), (Skill { form: 6421, ..aldous_w }, 87, 6421),
         (aldous_e, 69, 6430), (aldous_e, 69, 6431),
+        (leomord_e, 69, 206738), (leomord_e, 69, 6738),
         (aulus_w, 87, 10820), (Skill { form: 10824, ..aulus_w }, 87, 10824),
         (cici_q, 81, 12370),
     ] {
