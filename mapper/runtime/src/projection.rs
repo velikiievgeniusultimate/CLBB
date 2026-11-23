@@ -379,6 +379,14 @@ mod tests {
 /// Remote cast pivot, separate from the local player's movement position.
 #[derive(Clone,Copy,Debug,serde::Serialize,serde::Deserialize)]
 pub struct DirectionOrigin {pub skill:i32,pub point:[f64;3]}
+
+pub(crate) fn remote_direction_owner(skill: i32) -> Option<(i32, &'static str)> {
+    match skill {
+        3190 => Some((31, "skill:2")),
+        10125 => Some((101, "skill:1")),
+        _ => None,
+    }
+}
 pub fn direction_from_origin(view:&[f64;16],projection:&[f64;16],origin:[f64;3],pointer:Point)->Option<Point>{
     if origin.iter().any(|v|!v.is_finite()){return None;}
     let target=ray(&inverse_product(projection,view)?,pointer)?.at_plane(origin[1])?;

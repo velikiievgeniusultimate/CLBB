@@ -544,9 +544,9 @@ impl Host for Adapter {
         self.ray(p)?.at_plane(plane)
     }
     fn skill_direction_world(&mut self,p:Point,skill:i32)->Option<Point> {
-        if skill==3190 {
+        if let Some((hero_id, slot)) = projection::remote_direction_owner(skill) {
             let sample=self.fresh()?;
-            if sample.frame.hero_id.int()!=31||sample.frame.skill_id.int()!=skill||sample.frame.ui.active_slot.as_str()!="skill:2" {return None;}
+            if sample.frame.hero_id.int()!=hero_id||sample.frame.skill_id.int()!=skill||sample.frame.ui.active_slot.as_str()!=slot {return None;}
             let origin=sample.direction_origin.filter(|o|o.skill==skill)?;
             let direction=projection::direction_from_origin(&sample.frame.view_matrix.values.map(|n|n.value),&sample.projection,origin.point,p)?;
             let hero=sample.frame.hero_render_xyz.values.map(|n|n.value);

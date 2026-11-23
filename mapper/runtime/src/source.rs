@@ -2032,7 +2032,9 @@ impl<M: Memory> Source<M> {
                 }
             }
         }
-        let direction_origin=if hero==31 && skill==3190 && frame.ui.active_slot.as_str()=="skill:2" {
+        let direction_origin=if crate::projection::remote_direction_owner(skill)
+            .is_some_and(|(owner, slot)| hero == owner && frame.ui.active_slot.as_str() == slot)
+        {
             let checkpoint=consumed.len();
             let value=plan.motions.get_mut(&skill).and_then(|m|m.sample_direction_origin(r,&mut consumed).ok().flatten());
             if value.is_none(){consumed.truncate(checkpoint);}value

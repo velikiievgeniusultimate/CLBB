@@ -226,6 +226,10 @@ impl Controller {
         }
         actual.int()
     }
+    pub(super) fn aims_yve_crystal(&self) -> bool {
+        self.heroId_ == 101 && self.activeSlot_ == "skill:1" && self.skillCooldownVariant_ == 10125
+    }
+
     pub(crate) fn direction_point(&mut self, host: &mut impl Host) -> Option<Point> {
         // Pointer flush and frame tick can both send MOVE. Moving an unopened
         // W over Q can give Q the contact before the game processes W's DOWN.
@@ -274,13 +278,19 @@ impl Controller {
                 return Some(self.directionGoalPoint_);
             }
         }
+        let projection_skill = if self.aims_yve_crystal() { 10125 } else { self.coreSkill_ };
         let direction = if self.pendingRelease_ {
+            if !self.pendingDirectionValid_ && self.aims_yve_crystal() && self.directionGeometryFresh_ {
+                // A short press can finish before the crystal's arrow appears.
+                // Keep the release cursor and resolve it once the arrow exists.
+                self.resolve_frozen_direction(host, projection_skill);
+            }
             if !self.pendingDirectionValid_ {
                 return None;
             }
             self.pendingDirection_
         } else {
-            let world = host.skill_direction_world(self.pointer_,self.coreSkill_)?;
+            let world = host.skill_direction_world(self.pointer_, projection_skill)?;
             if !finite(world) {
                 return None;
             }
@@ -309,12 +319,22 @@ impl Controller {
             host.release_resolver(self.pendingWorldResolver_);
         }
         self.pendingWorldResolver_ = 0;
+        let projection_skill = if self.aims_yve_crystal() {
+            10125
+        } else if self.coreSkill_ > 0 {
+            self.coreSkill_
+        } else {
+            self.find_button(&self.activeSlot_).map_or(0, |b| self.measured_direction_skill_id(b))
+        };
+        self.resolve_frozen_direction(host, projection_skill);
+        self.directionGoalSequence_ = 0;
+        self.releaseRequested_.restart(self.now_);
+    }
+
+    fn resolve_frozen_direction(&mut self, host: &mut impl Host, projection_skill: i32) {
         self.pendingDirectionValid_ = false;
         self.pendingWorldValid_ = false;
-        let projection_skill=if self.coreSkill_>0 {self.coreSkill_} else {
-            self.find_button(&self.activeSlot_).map_or(0,|b|self.measured_direction_skill_id(b))
-        };
-        if let Some(world) = host.skill_direction_world(self.pointer_,projection_skill).filter(|p| finite(*p)) {
+        if let Some(world) = host.skill_direction_world(self.pendingPointer_, projection_skill).filter(|p| finite(*p)) {
             self.pendingWorld_ = world;
             self.pendingWorldValid_ = true;
         }
@@ -326,8 +346,6 @@ impl Controller {
                 self.pendingDirectionValid_ = true;
             }
         }
-        self.directionGoalSequence_ = 0;
-        self.releaseRequested_.restart(self.now_);
     }
     pub(crate) fn send_direction(&mut self, host: &mut impl Host, point: Point) -> bool {
         if !self.move_skill(host, self.skill_normalized(point), true) {
@@ -1219,6 +1237,7 @@ mod tests {
         world: Option<Point>,
         plane_world: Option<Point>,
         skill_world: Option<Point>,
+        direction_reads: Vec<(Point, i32)>,
         released: Vec<u64>,
         binding_aim_type: u8,
     }
@@ -1238,7 +1257,10 @@ mod tests {
         fn ground_world(&mut self, _: Point) -> Option<Point> {
             self.world
         }
-        fn skill_direction_world(&mut self,_:Point,_skill:i32)->Option<Point>{self.skill_world.or(self.world)}
+        fn skill_direction_world(&mut self, p: Point, skill: i32) -> Option<Point> {
+            self.direction_reads.push((p, skill));
+            self.skill_world.or(self.world)
+        }
         fn movement_direction(&mut self, _: Point) -> Option<Point> {
             None
         }
@@ -1370,6 +1392,32 @@ mod tests {
         assert!(c.pendingDirectionValid_);assert_eq!(c.pendingWorld_,Point::new(11.,22.));
         assert!((c.pendingDirection_.x-1./5f64.sqrt()).abs()<1e-10);
         assert!((c.pendingDirection_.y-2./5f64.sqrt()).abs()<1e-10);
+    }
+    #[test]
+    fn yve_quick_recast_waits_for_crystal_and_keeps_release_cursor() {
+        let (mut c, _, mut h) = setup();
+        c.heroId_ = 101;
+        c.activeSlot_ = "skill:1".into();
+        c.skillCooldownVariant_ = 10125;
+        c.coreSkill_ = 0;
+        c.skillBehavior_ = SkillBehavior::Direction;
+        c.frameCameraReady_ = true;
+        c.frameCamera_ = [1., 0., 0., 1.];
+        c.frameHero_ = Point::new(10., 20.);
+        let release_pointer = Point::new(0.6, 0.4);
+        c.pointer_ = release_pointer;
+        c.freeze_direction_intent(&mut h);
+        assert!(c.pendingRelease_ && !c.pendingDirectionValid_);
+        assert!(c.direction_point(&mut h).is_none());
+        c.pointer_ = Point::new(0.1, 0.2);
+        c.coreSkill_ = 10125;
+        c.directionGeometryFresh_ = true;
+        c.directionCenter_ = Point::new(0.8, 0.7);
+        c.directionRadius_ = Point::new(0.1, 0.1);
+        h.skill_world = Some(Point::new(10., 21.));
+        assert!(c.direction_point(&mut h).is_some());
+        assert_eq!(h.direction_reads, [(release_pointer, 10125); 2]);
+        assert_eq!(c.pendingDirection_, Point::new(0., 1.));
     }
     #[test]
     fn first_wall_w_arms_from_protected_input_without_acknowledging_stale_target() {

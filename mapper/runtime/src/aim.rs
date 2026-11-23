@@ -506,6 +506,29 @@ fn camera_lock_direction_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion
     }
     Ok(true)
 }
+// The recast arrow is rooted at Yve's placed crystal while its indicator is
+// active. The original positional cast keeps its own ground geometry.
+fn yve_crystal_origin_contract<M: Memory>(
+    r: &mut Reflection<M>, comp: u64, motion: u64, package: u64,
+    skill: i32, motion_name: &str, package_name: &str, checks: &mut Checks,
+) -> Result<bool> {
+    if (skill, motion_name, package_name) != (10125, "IndicatorMotionRot", "IndicatorPackageEasy_JianTou") {
+        return Ok(false);
+    }
+    let (rect, params) = native_rect_config(r, comp, skill, checks)?;
+    let config = owner(r, comp, "m_Config", checks)?;
+    let base = typed_field(r, config, "m_BaseType", 8)?;
+    if rect != 2 || params != [2., 5.8f32 as f64] || i32_at(&capture(r, checks, base, 4)?, 0) != 182 {
+        return Err("Unverified Yve crystal direction shape".into());
+    }
+    for object in [motion, package] {
+        let address = typed_field(r, object, "m_Config", 17)?;
+        if u64_at(&capture(r, checks, address, 8)?, 0) != config {
+            return Err("Yve crystal indicator config owner changed".into());
+        }
+    }
+    Ok(true)
+}
 // Hayabusa's shadow return selects native recipients from a direction. Its
 // HookLine motion has no m_OwnPackage; prove the shared config and both actual
 // comp owners instead. Other HookLine skills (e.g. Chou) remain unqualified.
@@ -1299,11 +1322,18 @@ impl MotionPlan {
         ] {
             fields.insert(n.into(), r.field(motion, n)?);
         }
+        let yve_crystal = yve_crystal_origin_contract(
+            r, comp, motion, package, skill, &name, &package_class.name, &mut checks,
+        )?;
         let (direction_visual,direction_arrow_field,direction_flags)=if name=="IndicatorMotionArcSurface" {
             (Some((typed_field(r,package,"fDefaultRayLength",12)?,typed_field(r,package,"m_vStartOffsete",17)?,typed_field(r,package,"m_vEndOffsete",17)?)),
              Some(typed_field(r,package,"_dragArrow",18)?),
              Some((typed_field(r,motion,"m_dragged",2)?,typed_field(r,motion,"m_bVaildDraged",2)?)))
-        }else if camera_direction{(None,Some(typed_field(r,package,"<m_gMain>k__BackingField",18)?),None)}else{(None,None,None)};
+        } else if camera_direction || yve_crystal {
+            (None, Some(typed_field(r, package, "<m_gMain>k__BackingField", 18)?), None)
+        } else {
+            (None, None, None)
+        };
         let circle_field = typed_field(r,package, "m_gYuan",18).ok().or_else(|| {
             (point_visual_fallback(&name,&package_class.name) ||
                  ((gord_bounce_range_family(skill,&name,&package_class.name)
@@ -1450,18 +1480,20 @@ impl MotionPlan {
         Ok(Some(spec))
     }
     pub fn sample_direction_origin<M:Memory>(&mut self,r:&mut Reflection<M>,consumed:&mut Checks)->Result<Option<crate::projection::DirectionOrigin>> {
-        if self.skill!=3190||self.name!="IndicatorMotionCameraLock"||!self.direction_geometry{return Ok(None);}
+        if crate::projection::remote_direction_owner(self.skill).is_none() || !self.direction_geometry {
+            return Ok(None);
+        }
         self.validate(r)?;
-        let at=self.direction_arrow_field.ok_or("Camera-lock arrow root absent")?;
+        let at=self.direction_arrow_field.ok_or("Remote arrow root absent")?;
         let object=u64_at(&capture(r,consumed,at,8)?,0);
         let class=capture(r,consumed,object,8)?;
-        if r.class(u64_at(&class,0))?.name!="GameObject"{return Err("Camera-lock root is not a GameObject".into());}
+        if r.class(u64_at(&class,0))?.name!="GameObject"{return Err("Remote arrow root is not a GameObject".into());}
         if self.direction_endpoint.as_ref().is_none_or(|(owner,path)|*owner!=object||path.validate(r).is_err()) {
             self.direction_endpoint=Some((object,Path::new(r,object,false)?));
         }
         let raw=capture_path(r,consumed,&self.direction_endpoint.as_ref().unwrap().1)?;
-        let point=crate::math::trs_chain(&raw,None).ok_or("Invalid camera-lock origin transform")?;
-        if point.iter().any(|v|!v.is_finite()||v.abs()>10000.)||point[1]< -1000. {return Err("Camera-lock origin is hidden".into());}
+        let point=crate::math::trs_chain(&raw,None).ok_or("Invalid remote arrow origin transform")?;
+        if point.iter().any(|v|!v.is_finite()||v.abs()>10000.)||point[1]< -1000. {return Err("Remote arrow origin is hidden".into());}
         Ok(Some(crate::projection::DirectionOrigin{skill:self.skill,point}))
     }
     pub fn validate<M: Memory>(&self, r: &Reflection<M>) -> Result<()> {
@@ -2575,6 +2607,24 @@ mod tests {
         r.memory.0.borrow_mut()[1568..1572].copy_from_slice(&6f32.to_le_bytes());
         assert!(check(&r,&checks).is_err());
         assert!(additional_direction_contract(&mut r,128,4210,"IndicatorMotionRot","IndicatorPackage_Multi_JianTou",&mut Vec::new()).is_err());
+    }
+    #[test]
+    fn yve_crystal_recast_origin_requires_its_own_arrow_config() {
+        let mut r = base_tap_fixture();
+        let m = "IndicatorMotionRot";
+        let p = "IndicatorPackageEasy_JianTou";
+        for (at, value) in [(1056, 10125i32), (1060, 2), (1072, 182)] {
+            r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        for (at, value) in [(1568, 2f32), (1572, 5.8)] {
+            r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        let mut proof = Vec::new();
+        assert!(yve_crystal_origin_contract(&mut r, 128, 256, 384, 10125, m, p, &mut proof).unwrap());
+        assert!(!yve_crystal_origin_contract(&mut r, 128, 256, 384, 10120, m, p, &mut Vec::new()).unwrap());
+        r.memory.0.borrow_mut()[416..424].copy_from_slice(&1280u64.to_le_bytes());
+        assert!(check(&r, &proof).is_err());
+        assert!(yve_crystal_origin_contract(&mut r, 128, 256, 384, 10125, m, p, &mut Vec::new()).is_err());
     }
     #[test]
     fn moskov_camera_lock_direction_requires_exact_owned_config() {

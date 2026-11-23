@@ -502,7 +502,7 @@ impl Controller {
         }
         self.pendingWorldResolver_ = intent.worldResolver;
         self.pendingDirection_ = intent.direction;
-        self.pendingDirectionValid_ = intent.directionValid;
+        self.pendingDirectionValid_ = intent.directionValid && !self.aims_yve_crystal();
         self.releaseRequested_.restart(self.now_);
     }
     pub(crate) fn clear_queued_skills(&mut self, host: &mut impl Host, reason: &str) {
