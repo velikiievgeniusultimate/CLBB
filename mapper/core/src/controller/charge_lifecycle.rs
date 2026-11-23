@@ -17,7 +17,7 @@ pub(crate) struct ChargeGesture {
     pub(crate) last_sample_ns: i64,
     cancel_after_end_candidate: bool,
 }
-fn game_clock(value: snapshot::Number) -> Option<u32> {
+pub(super) fn game_clock(value: snapshot::Number) -> Option<u32> {
     (value.is_number() && value.value.is_finite() && value.value.fract() == 0.
         && (0. ..=u32::MAX as f64).contains(&value.value)).then_some(value.value as u32)
 }

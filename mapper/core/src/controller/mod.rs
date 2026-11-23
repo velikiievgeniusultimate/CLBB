@@ -123,6 +123,13 @@ pub(crate) struct KaguraThrowTransition {
     released_ns: i64,
     observed_lock: bool,
 }
+#[derive(Clone, Copy)]
+pub(crate) struct AldousPhaseTransition {
+    released_ns: i64,
+    form: i32,
+    last_tick: Option<u32>,
+    unchanged_ticks: u8,
+}
 #[derive(Clone, Default, Debug)]
 pub struct DirectRange {
     pub hero: i32,
@@ -361,6 +368,7 @@ pub struct Controller {
     pub(crate) deferredItem_: Option<auxiliary::DeferredItem>,
     pub(crate) cooldownIgnoredKeys_: BTreeSet<i32>,
     pub(crate) cooldownCasts_: BTreeMap<String, i64>,
+    pub(crate) aldousTransitions_: [Option<AldousPhaseTransition>; 3],
     pub(crate) cooldownState_: snapshot::CooldownState,
     pub(crate) solver_: AimSolver,
     pub(crate) direct_: AngularRadialSolver,

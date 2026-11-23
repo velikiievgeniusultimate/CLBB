@@ -44,8 +44,8 @@ impl Host for TestHost {
     fn binding(&mut self, hero: i32, button: &Button, _: &str) -> Binding {
         let key = match (hero, button.kind.as_str(), button.slot.as_str()) {
             (_, "extra", _) => 70,
-            (17 | 22 | 27 | 33 | 46 | 59 | 63 | 108, "skill", "skill:1") => 87,
-            (22 | 33 | 50, "skill", "skill:2") => 69,
+            (17 | 22 | 27 | 33 | 46 | 59 | 63 | 64 | 108, "skill", "skill:1") => 87,
+            (22 | 33 | 50 | 64, "skill", "skill:2") => 69,
             (27 | 50, "skill", "skill:3") => 82,
             _ => 81,
         };
@@ -198,6 +198,9 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let jawhead_q = Skill { hero: 54, base: 5410, form: 5410, slot: "skill:0" };
     let uranus_w = Skill { hero: 59, base: 5920, form: 5920, slot: "skill:1" };
     let change_q = Skill { hero: 61, base: 6110, form: 6110, slot: "skill:0" };
+    let aldous_q = Skill { hero: 64, base: 6410, form: 6410, slot: "skill:0" };
+    let aldous_w = Skill { hero: 64, base: 6420, form: 6420, slot: "skill:1" };
+    let aldous_e = Skill { hero: 64, base: 6430, form: 6430, slot: "skill:2" };
     let aulus_w = Skill { hero: 108, base: 10820, form: 10820, slot: "skill:1" };
     let cici_q = Skill { hero: 123, base: 12310, form: 12310, slot: "skill:0" };
     for (skill, code, form) in [
@@ -212,6 +215,9 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         (jawhead_q, 81, 5417),
         (uranus_w, 87, 5921),
         (change_q, 81, 6110), (Skill { form: 6150, ..change_q }, 81, 6150),
+        (aldous_q, 81, 6417),
+        (aldous_w, 87, 6420), (Skill { form: 6421, ..aldous_w }, 87, 6421),
+        (aldous_e, 69, 6430), (aldous_e, 69, 6431),
         (aulus_w, 87, 10820), (Skill { form: 10824, ..aulus_w }, 87, 10824),
         (cici_q, 81, 12370),
     ] {
@@ -232,6 +238,51 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
         key(&mut c, &mut h, now + 2_000_000, code, true);
         assert!(h.active.len() > 1, "a fresh press works as soon as the enhancement expires");
+    }
+}
+
+#[test]
+fn aldous_repeat_waits_for_a_native_transition_and_needs_a_fresh_down() {
+    let stance = Skill { hero: 64, base: 6420, form: 6420, slot: "skill:1" };
+    let recast = Skill { form: 6421, ..stance };
+    for changed_form in [true, false] {
+        let (mut c, mut h) = setup(stance, Some(false), 1, 0);
+        let movement = c.movementTouch_;
+        let at = |ms: i64| START + ms * 1_000_000;
+        let observe = |c: &mut Controller, h: &mut TestHost, ms, tick, skill, locked| {
+            let mut f = resource_frame(at(ms), skill, false);
+            f.game_clock_ms = n(tick);
+            f.skill_state.buttons[0].cast_locked = flag(locked);
+            c.apply_snapshot(h, &f, at(ms));
+        };
+
+        observe(&mut c, &mut h, 60, 300., stance, false);
+        key(&mut c, &mut h, at(61), 87, true);
+        key(&mut c, &mut h, at(80), 87, false);
+        observe(&mut c, &mut h, 85, 300., stance, false);
+        key(&mut c, &mut h, at(86), 87, true);
+        assert!(h.traces.iter().any(|(event, reason)|
+            event == "cooldown_ignored" && reason == "await_native_phase_after_release"));
+        let button = c.find_button(stance.slot).unwrap().clone();
+        for ms in [90, 95, 98] {
+            observe(&mut c, &mut h, ms, 300., stance, false);
+            assert_eq!(c.cooldown_block(&button, 0), "await_native_phase_after_release");
+        }
+        if changed_form {
+            observe(&mut c, &mut h, 130, 366., recast, true);
+            assert_eq!(c.cooldown_block(&button, 0), "native_locked_enhancement");
+            observe(&mut c, &mut h, 145, 432., recast, false);
+        } else {
+            observe(&mut c, &mut h, 130, 366., stance, false);
+            assert_eq!(c.cooldown_block(&button, 0), "await_native_phase_after_release");
+            observe(&mut c, &mut h, 145, 432., stance, false);
+        }
+        assert!(c.queuedSkills_.is_empty());
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        key(&mut c, &mut h, at(146), 87, false);
+        assert_eq!(h.active.keys().copied().collect::<Vec<_>>(), [movement]);
+        key(&mut c, &mut h, at(147), 87, true);
+        assert!(h.active.len() > 1);
     }
 }
 

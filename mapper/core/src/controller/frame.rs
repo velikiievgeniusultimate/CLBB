@@ -46,6 +46,7 @@ impl Controller {
             self.cooldownSeen_ = false;
             self.cooldownState_ = snapshot::CooldownState::default();
             self.cooldownCasts_.clear();
+            self.aldousTransitions_.fill(None);
             self.responseModels_.clear();
             self.directStartups_.clear();
             self.directRanges_.clear();
@@ -77,6 +78,7 @@ impl Controller {
             self.cooldownSeen_ = false;
             self.cooldownState_ = snapshot::CooldownState::default();
             self.cooldownCasts_.clear();
+            self.aldousTransitions_.fill(None);
         }
         if ui.cooldown_state.present.get() {
             self.cooldownSeen_ = true
@@ -103,6 +105,7 @@ impl Controller {
             )
         }
         self.ingest_skill_variants(f);
+        self.observe_aldous_transitions(f);
         self.ingest_auxiliary_controls(host, f);
         self.cancelKey_ = host.cancel_key(hero);
         self.observe_kagura_throw(host);

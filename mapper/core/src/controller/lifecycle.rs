@@ -1,4 +1,7 @@
 use super::*;
+
+const ALDOUS_SKILLS: [(&str, i32); 3] = [("skill:0", 6410), ("skill:1", 6420), ("skill:2", 6430)];
+
 impl Controller {
     pub(crate) fn intrinsic_direction_attack(&self,b:&Button)->bool {
         self.heroId_==71 && b.kind=="attack" && b.slot=="attack"
@@ -251,7 +254,53 @@ impl Controller {
             .map(|r| r.active_skill_id.int())
             .unwrap_or(b.skillId)
     }
+    pub(crate) fn observe_aldous_transitions(&mut self, frame: &snapshot::Frame) {
+        if self.heroId_ != 64 { return; }
+        let Some(tick) = super::charge_lifecycle::game_clock(frame.game_clock_ms) else { return };
+        for ((slot, base), transition) in ALDOUS_SKILLS.into_iter().zip(&mut self.aldousTransitions_) {
+            let Some(pending) = transition else { continue };
+            if self.skillVariantSampleStartNs_ < pending.released_ns { continue; }
+            let mut rows = self.skillVariants_.iter().filter(|v| v.slot == slot && v.base == base);
+            let Some(row) = rows.next().filter(|_| rows.next().is_none()) else { continue };
+            // A changed form or a positive lock hands control to the native
+            // gate. If the cast never takes effect, allow retries after two
+            // advancing ticks following the first fresh observation.
+            if row.active <= 0 { continue; }
+            if row.active != pending.form || row.cast_locked == Some(true) {
+                *transition = None;
+            } else if row.cast_locked == Some(false) && pending.last_tick != Some(tick) {
+                pending.last_tick = Some(tick);
+                pending.unchanged_ticks += 1;
+                if pending.unchanged_ticks == 3 { *transition = None; }
+            }
+        }
+    }
+
+    fn remember_aldous_phase_release(&mut self, slot: &str, form: i32) {
+        if self.heroId_ != 64 { return; }
+        let expected = match form {
+            6410 => 0,
+            6420 | 6421 => 1,
+            6430 | 6431 | 6437 => 2,
+            _ => return,
+        };
+        if ALDOUS_SKILLS[expected].0 == slot {
+            self.aldousTransitions_[expected] = Some(AldousPhaseTransition {
+                released_ns: self.now_,
+                form,
+                last_tick: None,
+                unchanged_ticks: 0,
+            });
+        }
+    }
+
     pub(crate) fn cooldown_block(&self, b: &Button, minimum: i64) -> &'static str {
+        if self.heroId_ == 64 && b.kind == "skill"
+            && ALDOUS_SKILLS.into_iter().zip(self.aldousTransitions_).any(|((slot, base), pending)|
+                b.slot == slot && b.skillId == base && pending.is_some())
+        {
+            return "await_native_phase_after_release";
+        }
         // Only these verified forms treat the native cast lock as a hard
         // input gate. Other animation locks may allow buffered skills.
         let enhancement_forms: &[i32] = match (self.heroId_, b.slot.as_str(), b.skillId) {
@@ -274,6 +323,10 @@ impl Controller {
             (59, "skill:1", 5920) => &[5921], // Uranus's active shield.
             (61, "skill:0", 6110) => &[6110, 6150], // Chang'e's meteor channel.
             (64, "skill:0", 6410) => &[6417], // Aldous's enhanced attack.
+            // Aldous: W is locked in flight and briefly after entering its
+            // stance. E is locked while reveal hands over to target selection.
+            (64, "skill:1", 6420) => &[6420, 6421],
+            (64, "skill:2", 6430) => &[6430, 6431],
             (108, "skill:1", 10820) => &[10820, 10824], // Aulus's ultimate locks W.
             (123, "skill:0", 12310) => &[12370], // Cici's active yo-yo.
             _ => &[],
@@ -831,7 +884,8 @@ impl Controller {
             }
             if cast {
                 let slot = self.activeSlot_.clone();
-                self.mark_cooldown_cast(&slot, self.skillCooldownVariant_)
+                self.mark_cooldown_cast(&slot, self.skillCooldownVariant_);
+                self.remember_aldous_phase_release(&slot, self.skillCooldownVariant_)
             }
         }
         self.skillCooldownVariant_ = 0;
@@ -1096,6 +1150,7 @@ impl Controller {
         self.abort_owned_context(host);
         self.clear_queued_skills(host, "telemetry_invalidated");
         self.cooldownIgnoredKeys_.clear();
+        self.aldousTransitions_.fill(None);
         let was = self.ready_;
         self.finish_skill(host, true);
         self.kaguraThrow_ = None;
