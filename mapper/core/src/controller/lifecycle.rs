@@ -711,6 +711,8 @@ impl Controller {
         }
         self.sync_clock(host);
         self.qDragArming_ = false;
+        self.qDragArmRetries_ = 0;
+        self.qDragArmFirstSequence_ = 0;
         self.qDragRecompute_ = false;
         self.qDragRecomputeUsed_ = false;
         self.qDragMismatchSinceNs_ = 0;
@@ -897,6 +899,8 @@ impl Controller {
         self.skillCancelAcknowledged_ = false;
         self.skillCancelSentNs_ = 0;
         self.qDragArming_ = false;
+        self.qDragArmRetries_ = 0;
+        self.qDragArmFirstSequence_ = 0;
         self.qDragRecompute_ = false;
         self.qDragRecomputeUsed_ = false;
         self.qDragMismatchSinceNs_ = 0;

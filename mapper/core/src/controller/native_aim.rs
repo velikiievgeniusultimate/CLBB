@@ -824,37 +824,72 @@ impl Controller {
             return;
         }
         let protected_drag = !logical.valid_drag.get() || logical.first_drag.get();
-        if self.qDragArming_ {
-            if protected_drag
-                || !self.logicalSampleFresh_
-                || skill != self.qDragArmSkill_
-                || self.logicalSource_ != self.qDragArmSource_
-                || logical.sample_start_ns.get(0.) < self.qDragArmSentNs_ as f64
-                || logical.raw_touch_xyz.count != 3
-            {
+        let retrying = self.qDragArming_;
+        if retrying {
+            let sample_start = logical.sample_start_ns.get(0.) as i64;
+            if skill != self.qDragArmSkill_ || self.logicalSource_ != self.qDragArmSource_ {
                 return;
             }
-            let actual = raw_command(&logical.raw_touch_xyz, self.androidSize_);
-            let sent = cell(self.pixels(self.qDragArmPoint_));
-            if !finite(actual) || distance(actual, sent) > 1.5 {
-                return;
-            }
-            self.qDragArming_ = false;
-            self.qDragMismatchSinceNs_ = 0;
-            self.reset_accepted_input();
-            self.record_skill_touch(self.skillPoint_, false, false);
-            self.trace(
-                host,
-                "drag_bootstrap",
+            if protected_drag {
+                // Unity can open the indicator yet overlook the initial move
+                // and its stationary echo. Retry on later owned observations,
+                // using a different point on the same captured joystick.
                 if self.qDragRecompute_ {
-                    "native_geometry_recompute_receipt"
-                } else {
-                    "native_valid_drag_receipt"
-                },
-            );
-            self.qDragRecompute_ = false;
-            self.request_pointer_flush(host);
-            return;
+                    return;
+                }
+                // During a preceding cast the game can open the indicator
+                // while rejecting drag for several simulation ticks. Keep
+                // normal aim immediate and space retries through that window.
+                let elapsed = sample_start - self.qDragArmSentNs_;
+                if self.qDragArmRetries_ >= 4 {
+                    if self.pendingRelease_ && !self.skillKeyHeld_ && elapsed >= 96_000_000 {
+                        self.trace(host, "drag_bootstrap", "native_drag_still_protected");
+                        self.finish_skill(host, true);
+                    }
+                    return;
+                }
+                let interval = 24_000_000 << self.qDragArmRetries_.min(2);
+                if elapsed < interval {
+                    return;
+                }
+            } else {
+                if !self.logicalSampleFresh_ || !vector3(&logical.raw_touch_xyz) {
+                    return;
+                }
+                let actual = raw_command(&logical.raw_touch_xyz, self.androidSize_);
+                let sent = cell(self.pixels(self.qDragArmPoint_));
+                let latest_matches = sample_start >= self.qDragArmSentNs_ &&
+                    distance(actual, sent) <= 1.5;
+                // The first move can reach Unity just as a retry goes out.
+                // Match only this gesture's recorded probes. This receipt
+                // opens aiming; the final position still needs its own ACK.
+                let earlier_matches = self.qDragArmRetries_ > 0 && !self.qDragRecompute_ &&
+                    self.causal_.history().rev().any(|probe| {
+                        probe.sequence >= self.qDragArmFirstSequence_
+                            && probe.time_ns <= sample_start
+                            && distance(probe.pixels, actual) <= 1.5
+                    });
+                if !latest_matches && !earlier_matches {
+                    return;
+                }
+                self.qDragArming_ = false;
+                self.qDragArmRetries_ = 0;
+                self.qDragMismatchSinceNs_ = 0;
+                self.reset_accepted_input();
+                self.record_skill_touch(self.skillPoint_, false, false);
+                self.trace(
+                    host,
+                    "drag_bootstrap",
+                    if self.qDragRecompute_ {
+                        "native_geometry_recompute_receipt"
+                    } else {
+                        "native_valid_drag_receipt"
+                    },
+                );
+                self.qDragRecompute_ = false;
+                self.request_pointer_flush(host);
+                return;
+            }
         }
         if !protected_drag {
             if !self.pendingRelease_
@@ -938,6 +973,7 @@ impl Controller {
         if !finite(center) || !finite(initial) || !radius.is_finite() || radius < 4. {
             return;
         }
+        let previous = self.pixels(self.qDragArmPoint_);
         let mut chosen = Point::default();
         let mut best = -1.;
         for i in 0..32 {
@@ -955,7 +991,12 @@ impl Controller {
             {
                 continue;
             }
-            let d = distance(p, initial);
+            // The protector may have used the first MOVE as its anchor.
+            // Cross the joystick on a retry to leave that native dead zone.
+            let d = if retrying { distance(p, previous) } else { distance(p, initial) };
+            if retrying && (d < radius || distance(p, initial) < 4.) {
+                continue;
+            }
             if d > best {
                 best = d;
                 chosen = p;
@@ -986,7 +1027,13 @@ impl Controller {
         }
         self.qDragArmPoint_ = self.skillPoint_;
         self.qDragArmSentNs_ = self.now_;
-        self.trace(host, "drag_bootstrap", "await_native_valid_drag");
+        if retrying {
+            self.qDragArmRetries_ += 1;
+            self.trace(host, "drag_bootstrap", "retry_unacknowledged_drag");
+        } else {
+            self.qDragArmFirstSequence_ = self.touchSequence_;
+            self.trace(host, "drag_bootstrap", "await_native_valid_drag");
+        }
         self.request_pointer_flush(host);
     }
     pub(crate) fn predict_startup(
@@ -1470,6 +1517,67 @@ mod tests {
         f.logical.world_range = n(3.);
         (c, f, h)
     }
+    #[test]
+    fn protected_range_retries_dropped_moves_and_requires_a_real_probe_receipt() {
+        for (hero, skill) in [(66, 6630), (118, 11810)] {
+            let (mut c, mut f, mut h) = generic_point_range_fixture(hero, skill);
+            c.skillBehavior_ = SkillBehavior::Range;
+            c.select_logical_coordinates(&mut h, &f);
+            c.configure_direct(&mut h, &f);
+            c.update_range_drag_arming(&mut h, &f);
+            let first = c.causal_.latest().unwrap();
+            let raw = |p: Point| {
+                v3(p.x * 3999. / 4000., 3111. - p.y * 3110. / 3111., 0.)
+            };
+            assert!(c.qDragArming_);
+            assert_eq!(h.moves.len(), 1);
+            c.pendingRelease_ = true;
+            c.pendingWorldValid_ = true;
+
+            f.logical.sample_start_ns = n((first.time_ns + 15_000_000) as f64);
+            c.update_range_drag_arming(&mut h, &f);
+            assert_eq!(h.moves.len(), 1, "a recent probe is still in flight");
+
+            for (attempt, gap) in [24, 48, 96, 96].into_iter().enumerate() {
+                let before = c.causal_.latest().unwrap();
+                c.now_ = before.time_ns + (gap - 1) * 1_000_000;
+                f.logical.sample_start_ns = n(c.now_ as f64);
+                c.update_range_drag_arming(&mut h, &f);
+                assert_eq!(h.moves.len(), 1 + attempt, "backoff keeps probes spaced");
+                c.now_ += 1_000_000;
+                f.logical.sample_start_ns = n(c.now_ as f64);
+                c.skillCancelPending_ = true;
+                c.update_range_drag_arming(&mut h, &f);
+                assert_eq!(c.causal_.latest().unwrap().sequence, before.sequence);
+                c.skillCancelPending_ = false;
+                c.update_range_drag_arming(&mut h, &f);
+                assert_eq!(h.moves.len(), 2 + attempt);
+                assert!(distance(c.causal_.latest().unwrap().pixels, before.pixels) > 360.);
+                assert!(c.qDragArming_ && !c.pending_direct_acknowledged());
+            }
+
+            c.now_ += 60_000_000;
+            f.logical.sample_start_ns = n(c.now_ as f64);
+            c.update_range_drag_arming(&mut h, &f);
+            assert_eq!(h.moves.len(), 5, "the retries are bounded");
+            c.logicalSampleFresh_ = true;
+            f.logical.valid_drag = flag(true);
+            f.logical.first_drag = flag(false);
+            f.logical.raw_touch_xyz = raw(cell(c.pixels(c.skillDownPoint_)));
+            c.update_range_drag_arming(&mut h, &f);
+            assert!(c.qDragArming_, "a DOWN coordinate cannot acknowledge a MOVE probe");
+            let prior = c.causal_.history().rev().find(|p| p.sequence < c.touchSequence_).copied().unwrap();
+            f.logical.raw_touch_xyz = raw(prior.pixels);
+            f.logical.sample_start_ns = n((first.time_ns - 1) as f64);
+            c.update_range_drag_arming(&mut h, &f);
+            assert!(c.qDragArming_, "pre-command feedback is stale");
+            f.logical.sample_start_ns = n(c.now_ as f64);
+            c.update_range_drag_arming(&mut h, &f);
+            assert!(!c.qDragArming_, "a delayed owned first probe can open aiming");
+            assert!(!c.pending_direct_acknowledged(), "a probe cannot commit the release");
+        }
+    }
+
     #[test]
     fn lesley_ultimate_arms_the_native_drag_and_uses_its_current_range() {
         let (mut c, mut f, mut h) = generic_point_range_fixture(53, 5330);
