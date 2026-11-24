@@ -35,6 +35,7 @@ fn profile_setting(key: &str) -> Option<(i32, &str)> {
     ((1..=134).contains(&hero)
         && (setting.starts_with("hero.bindings.")
             || setting.starts_with("hero.movement.")
+            || setting.starts_with("points.") && !setting.ends_with(".add")
             || matches!(setting, "hero.cancel_key" | "hero.cancel_key.override")))
         .then_some((hero, setting))
 }
@@ -482,7 +483,7 @@ impl Adapter {
         if self.settings.integer("hero.movement.click_mode",hero)==2 {
             for direction in ["up","down","left","right"] {add(self.settings.integer(&format!("hero.movement.{direction}"),hero),format!("Движение · {direction}"));}
         } else {add(self.settings.integer("hero.movement.button",hero),"Движение".into());}
-        for (id, point) in &self.settings.points { add(point.key, format!("Точка {id}")); }
+        for (id, point) in self.settings.visible_points(hero) { add(point.key, format!("Точка {id}")); }
         owners.retain(|_, names| {
             names.len() > 1 && !(names.len() == 2
                 && names.iter().any(|name| name == "ally:mathilda")
@@ -1124,7 +1125,7 @@ impl Runtime {
             self.debug_route_reason="conflicting_binding_disabled";
             return true;
         }
-        if self.point_event(key, down, repeat, active_match) {
+        if self.point_event(key, down, repeat, active_match, hero) {
             self.debug_route_reason="custom_screen_point";
             return true;
         }
@@ -1318,6 +1319,7 @@ impl Runtime {
                     "capability_controls": sample.frame.ui.capability_controls.iter().take(sample.frame.ui.capability_count.min(32) as usize).map(native).collect::<Vec<_>>(),
                 }).to_string()
             }).unwrap_or_else(|| "{\"ready\":false}".into()),
+            "editor.hero" => self.editor_sample().map_or(0, |s| s.frame.hero_id.int()).to_string(),
             "editor.layout" => self.editor_layout(),
             "points.list" => self.host.settings.points.keys().map(|id| format!("{id}\n")).collect(),
             "hero.controls"=>self.hero_controls(),
@@ -1393,6 +1395,9 @@ impl Runtime {
         }
         let current_hero = self.core.inspect().heroId_;
         let (hero, key) = profile_setting(key).unwrap_or((current_hero, key));
+        let hero = if key.starts_with("points.") && key.ends_with(".add") {
+            self.editor_sample().map_or(0, |s| s.frame.hero_id.int())
+        } else { hero };
         match self.host.settings.set(key, value, hero) {
             Ok(()) => {
                 self.error.clear();
@@ -1754,6 +1759,48 @@ mod tests {
         assert!(!r.write("points.2.key",&crate::settings::F5.to_string()));
         assert!(r.write("points.2.remove","1"));
         assert!(!r.editor_layout().contains("points.2.key"));
+    }
+    #[test]
+    fn personal_points_follow_hero_changes_in_editor_conflicts_and_touch_routing() {
+        let mut events=Vec::new();
+        let mut r=fixture(&mut events);
+        let select=|r: &mut Runtime, hero| {
+            r.worker.shared.lock().unwrap().sample=Some(Arc::new(template_sample(hero,2,now_ns())));
+            r.poll(1280.,720.);
+        };
+        select(&mut r,25);
+        assert!(r.write("points.1.add","200000,300000,25"));
+        assert!(r.write("points.1.key","75"));
+        assert!(r.write("points.2.add","100000,100000,0"));
+        let p=Point::default();
+        assert!(r.event(1,75,true,false,p));
+        assert_eq!(r.point_contacts.len(),1);
+        select(&mut r,30);
+        assert!(r.point_contacts.is_empty());
+        assert!(!r.host.touches.contains(&true));
+        assert!(!r.editor_layout().contains("point:1"));
+        assert!(r.editor_layout().contains("point:2"));
+        assert!(!r.write("points.3.add","300000,300000,25"));
+        assert!(!r.write("points.1.remove","1"));
+        assert!(!r.event(1,75,true,false,p));
+        assert!(r.write("points.3.add","300000,300000,30"));
+        assert!(r.write("points.3.key","75"));
+        assert!(!r.host.conflict_blocks(75,30));
+        assert!(r.event(1,75,true,false,p));
+        assert!(r.event(1,75,false,false,p));
+        assert!((events.last().unwrap().2-0.3).abs()<1./1280.);
+        assert!(r.write("profile.25.points.1.cast_mode","1"));
+        assert!(!r.write("profile.30.points.1.cast_mode","0"));
+        assert_eq!(r.host.settings.get("points.visible",0),"2\t0\n");
+        assert_eq!(r.host.settings.get("points.visible",25),"1\t25\n2\t0\n");
+        select(&mut r,25);
+        assert!(r.editor_layout().contains("point:1"));
+        assert!(!r.editor_layout().contains("point:3"));
+        assert!(!r.host.conflict_blocks(75,25));
+        assert!(r.event(1,75,true,false,p));
+        assert!(r.event(1,75,false,false,p));
+        r.expire_points(now_ns()+50_000_000);
+        assert!((events.last().unwrap().2-0.2).abs()<1./1280.);
     }
     #[test]
     fn cached_match_conflicts_never_capture_menu_typing_after_source_is_lost() {

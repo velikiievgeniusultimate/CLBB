@@ -99,12 +99,19 @@ static const char css[] =
     "button.clbb-map-button:hover, button.clbb-map-done:hover { background: #66324a; }"
     "popover.clbb-map-menu > contents { background: #201921; color: #fff3f8; border: 1px solid #795064; border-radius: 14px; padding: 0; box-shadow: 0 6px 20px rgba(0,0,0,.4); }"
     "popover.clbb-map-menu > arrow { background: #201921; border-color: #795064; }"
-    ".clbb-settings.clbb-map-sheet { background: transparent; padding: 14px 16px; }"
-    ".clbb-map-title { color: #fff4f8; font-size: 19px; font-weight: 750; }"
-    ".clbb-map-sheet stackswitcher button { background: #2b222d; color: #cbb8c6; border: 1px solid #513c4c; padding: 4px 10px; min-height: 23px; box-shadow: none; }"
-    ".clbb-map-sheet stackswitcher button:checked { background: #54283e; border-color: #cc698b; color: #fff2f7; }"
-    ".clbb-map-sheet .clbb-row { padding: 5px 0; } .clbb-map-sheet .clbb-bind { min-width: 46px; }"
-    ".clbb-map-sheet .clbb-muted { color: #c2aebc; font-size: 12px; }"
+    ".clbb-settings.clbb-map-sheet { background: transparent; padding: 18px 22px; }"
+    ".clbb-map-title { color: #fff4f8; font-size: 21px; font-weight: 750; }"
+    ".clbb-map-scope { color: #e9adc3; font-size: 13px; font-weight: 600; }"
+    ".clbb-map-form { color: #f0bdd0; font-size: 14px; font-weight: 700; }"
+    ".clbb-map-sheet .clbb-row { min-height: 36px; padding: 6px 0; }"
+    ".clbb-map-sheet button.clbb-bind { min-width: 62px; }"
+    ".clbb-map-sheet button.clbb-reset { min-width: 24px; min-height: 24px; padding: 2px; border-radius: 6px; }"
+    ".clbb-map-form-group { background: #281f2a; border: 1px solid #483442; border-radius: 9px; margin-top: 6px; padding: 10px 12px 3px; }"
+    ".clbb-map-form-group .clbb-row:last-child { border-bottom-color: transparent; }"
+    ".clbb-map-choices { padding: 15px; }"
+    ".clbb-map-choices .clbb-map-button { padding: 7px 12px; }"
+    ".clbb-map-choices button:focus-visible { outline: 2px solid #e282a1; outline-offset: -2px; }"
+    ".clbb-settings.clbb-map-sheet .clbb-inherited label { color: #decfd9; }"
     ".clbb-settings { background: #141216; color: #f2edf0; font-family: "
     "Cantarell, sans-serif; font-size: 14px; }"
     ".clbb-shell { background: #141216; } .clbb-header { padding: 20px 26px; "
@@ -210,12 +217,15 @@ static const char css[] =
     ".clbb-accent { color: #ff6b91; } .clbb-info { color: #9dbad3; } "
     ".clbb-override { font-size: 11px; color: #c5b4c0; }";
 
+static char *profile_setting_key(ClbbSettings *s,const char *key) {
+  int profile=s->menu_hero>0?s->menu_hero:s->selected_profile;
+  if(profile>0 && (g_str_has_prefix(key,"hero.bindings.") || g_str_has_prefix(key,"hero.movement.")
+      || g_str_has_prefix(key,"hero.cancel_key") || g_str_has_prefix(key,"points.")))
+    return g_strdup_printf("profile.%d.%s",profile,key);
+  return NULL;
+}
 static char *read_text(ClbbSettings *s, const char *key, const char *fallback) {
-  int profile = s->menu_hero > 0 ? s->menu_hero : s->selected_profile;
-  g_autofree char *profile_key = profile > 0 && g_str_has_prefix(key,"hero.")
-      && (g_str_has_prefix(key,"hero.bindings.") || g_str_has_prefix(key,"hero.movement.")
-          || g_str_has_prefix(key,"hero.cancel_key"))
-      ? g_strdup_printf("profile.%d.%s",profile,key) : NULL;
+  g_autofree char *profile_key=profile_setting_key(s,key);
   const char *v =
       s->callbacks.read ? s->callbacks.read(s->callbacks.user, profile_key ? profile_key : key) : NULL;
   return g_strdup(v && *v ? v : fallback);
@@ -239,11 +249,7 @@ static gboolean write_value(ClbbSettings *s, const char *key,
                             const char *value) {
   if (s->refreshing)
     return TRUE;
-  int profile = s->menu_hero > 0 ? s->menu_hero : s->selected_profile;
-  g_autofree char *profile_key = profile > 0 && g_str_has_prefix(key,"hero.")
-      && (g_str_has_prefix(key,"hero.bindings.") || g_str_has_prefix(key,"hero.movement.")
-          || g_str_has_prefix(key,"hero.cancel_key"))
-      ? g_strdup_printf("profile.%d.%s",profile,key) : NULL;
+  g_autofree char *profile_key=profile_setting_key(s,key);
   gboolean ok =
       s->callbacks.write && s->callbacks.write(s->callbacks.user, profile_key ? profile_key : key, value);
   gtk_label_set_text(GTK_LABEL(s->message),
@@ -653,17 +659,20 @@ static void reset_inheritance(GtkButton *button, gpointer data) {
 }
 static void add_inheritance(Control *c) {
   c->inherit_key = g_strdup_printf("%s.override", c->key);
-  if (gtk_widget_get_ancestor(c->row,GTK_TYPE_FLOW_BOX) || c->owner->menu_content) {
+  if (gtk_widget_get_ancestor(c->row,GTK_TYPE_FLOW_BOX)) {
     c->inherit_status=label("Наследует общее","clbb-muted");
     gtk_box_append(GTK_BOX(gtk_widget_get_first_child(c->row)),c->inherit_status);
   }
   c->inherit_reset = gtk_button_new_from_icon_name("insert-link-symbolic");
   gtk_widget_add_css_class(c->inherit_reset, "clbb-secondary");
+  if(c->owner->menu_content && gtk_widget_is_ancestor(c->row,c->owner->menu_content))
+    gtk_widget_add_css_class(c->inherit_reset,"clbb-reset");
   g_signal_connect(c->inherit_reset, "clicked", G_CALLBACK(reset_inheritance), c);
   gtk_box_append(GTK_BOX(c->row), c->inherit_reset);
 }
 static int action_key(const char *slot) {
   if (!strcmp(slot,"ally:mathilda") || !strcmp(slot,"ally:johnson")) return 'V';
+  if (!strcmp(slot,"match:statistics")) return 0x01000001;
   if (!strcmp(slot,"item:active")) return 0x01000007;
   if (g_str_has_prefix(slot,"skill:")) { int n=slot[6]-'0'; return n>=0&&n<4 ? "QWER"[n] : 0; }
   if (!strcmp(slot,"combo:0")) return 'E';
@@ -733,17 +742,14 @@ char *clbb_editor_slot_title(const char *slot) {
   return g_strdup(action_title(slot,0,slot));
 }
 static GtkWidget *scope_box(ClbbSettings *s,GtkWidget *parent,gboolean personal) {
+  if(GTK_IS_BOX(parent))return parent;
   GtkWidget *box=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
   gtk_widget_set_hexpand(box,TRUE);
   const char *title=personal && s->palette_hero_name ? s->palette_hero_name :
                     personal ? "Для этого героя" : "Для всех героев";
-  if(GTK_IS_STACK(parent)) {
-    gtk_stack_add_titled(GTK_STACK(parent),box,personal?"hero":"common",title);
-  } else {
-    gtk_widget_add_css_class(box,"clbb-binding-scope");
-    gtk_flow_box_insert(GTK_FLOW_BOX(parent),box,-1);
-    gtk_box_append(GTK_BOX(box),label(title,"clbb-section-title"));
-  }
+  gtk_widget_add_css_class(box,"clbb-binding-scope");
+  gtk_flow_box_insert(GTK_FLOW_BOX(parent),box,-1);
+  gtk_box_append(GTK_BOX(box),label(title,"clbb-section-title"));
   return box;
 }
 static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,const char *config,const char *mode_config,const char *slot,int type,gboolean cancel) {
@@ -784,9 +790,19 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
           g_ptr_array_add(forms,g_steal_pointer(&form));
       }
     }
+    gboolean in_editor=GTK_IS_BOX(flow);
+    gboolean stop=g_str_has_prefix(slot,"skill:") || !strcmp(slot,"extra:2");
     for (guint n=0;n<forms->len;++n) {
       const char *form=g_ptr_array_index(forms,n);
-      char *title=forms->len>1?g_strdup_printf("Нажатие · версия %u",n+1):g_strdup("Нажатие");
+      GtkWidget *group=box;
+      if(in_editor && forms->len>1) {
+        g_autofree char *section=g_strdup_printf("Версия %u",n+1);
+        group=gtk_box_new(GTK_ORIENTATION_VERTICAL,1);
+        gtk_widget_add_css_class(group,"clbb-map-form-group");
+        gtk_box_append(GTK_BOX(box),group);
+        gtk_box_append(GTK_BOX(group),label(section,"clbb-map-form"));
+      }
+      char *title=forms->len>1&&!in_editor?g_strdup_printf("Нажатие · версия %u",n+1):g_strdup("Нажатие");
       if (held_only) {
         GtkWidget *row=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,16);
         gtk_widget_add_css_class(row,"clbb-row");
@@ -796,11 +812,15 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
         gtk_box_append(GTK_BOX(box),row);
       } else {
         key=g_strdup_printf("%s.bindings.%s.cast_mode",prefix,form);
-        mode_control(s,box,title,key,0,FALSE);g_free(key);
+        mode_control(s,group,title,key,0,FALSE);g_free(key);
       }
       g_free(title);
+      if(in_editor && stop) {
+        key=g_strdup_printf("%s.bindings.%s.stop_movement",prefix,form);
+        switch_control(s,group,"Останавливать движение",key,0);g_free(key);
+      }
     }
-    if (g_str_has_prefix(slot,"skill:")||!strcmp(slot,"extra:2")) for (guint n=0;n<forms->len;++n) {
+    if (!in_editor && stop) for (guint n=0;n<forms->len;++n) {
       const char *form=g_ptr_array_index(forms,n);
       char *title=forms->len>1?g_strdup_printf("Останавливать движение · версия %u",n+1):g_strdup("Останавливать движение");
       key=g_strdup_printf("%s.bindings.%s.stop_movement",prefix,form);
@@ -819,7 +839,7 @@ static void action_body(ClbbSettings *s,GtkWidget *content,const char *slot,cons
   gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow),12);
   gtk_box_append(GTK_BOX(content),flow);
   action_scope(s,flow,"common",config,mode_config,slot,type,cancel);
-  if (s->hero>0 && strcmp(slot,"match:statistics")) action_scope(s,flow,"hero",config,mode_config,slot,type,cancel);
+  if (s->hero>0) action_scope(s,flow,"hero",config,mode_config,slot,type,cancel);
   if(((s->hero==126 && (!strcmp(slot,"skill:0")||!strcmp(slot,"skill:1")||!strcmp(slot,"skill:2"))) || (s->hero==78 && !strcmp(slot,"skill:0"))))
     gtk_box_append(GTK_BOX(content),wrap_label("Результат навыка зависит от длительности удержания. Применение — только при отпускании.","clbb-muted"));
 }
@@ -955,7 +975,7 @@ static GtkWidget *palette_pane(ClbbSettings *s,const char *slot,const char *titl
 }
 static void palette_action(ClbbSettings *s,const char *slot,const char *config,const char *title,int group,int type) {
   gboolean cancel=!strcmp(slot,"cancel");
-  const char *scope=s->hero&&!g_str_equal(slot,"match:statistics")?"hero":"common";
+  const char *scope=s->hero?"hero":"common";
   g_autofree char *key=cancel?g_strdup_printf("%s.cancel_key",scope):g_strdup_printf("%s.bindings.%s.key",scope,config);
   GtkWidget *pane=palette_pane(s,config,title,group,key,cancel?'T':action_key(slot));
   action_body(s,pane,slot,config,config,type,cancel);
@@ -987,7 +1007,8 @@ static void point_panes(ClbbSettings *s) {
     GtkWidget *box=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
     gtk_widget_add_css_class(box,"clbb-binding-scope");
     gtk_box_append(GTK_BOX(pane),box);
-    gtk_box_append(GTK_BOX(box),label("Для всех героев","clbb-section-title"));
+    const char *owner=strchr(rows[i],'\t');
+    gtk_box_append(GTK_BOX(box),label(owner&&atoi(owner+1)>0?s->palette_hero_name:"Для всех героев","clbb-section-title"));
     point_controls(s,box,id);
     GtkWidget *remove=gtk_button_new_with_label("Удалить точку");
     gtk_widget_set_halign(remove,GTK_ALIGN_START);
@@ -1764,21 +1785,17 @@ static void display_refresh(ClbbSettings *s) {
 }
 
 gboolean clbb_settings_editor_menu_visible(const ClbbSettings *s) {
-  return s && s->menu && gtk_widget_get_visible(s->menu);
+  return s && ((s->menu && gtk_widget_get_visible(s->menu)) || clbb_editor_creation_visible(s->editor));
 }
 void clbb_settings_close_editor_menu(ClbbSettings *s) {
-  if(clbb_settings_editor_menu_visible(s))gtk_popover_popdown(GTK_POPOVER(s->menu));
+  if(s->menu && gtk_widget_get_visible(s->menu))gtk_popover_popdown(GTK_POPOVER(s->menu));
+  clbb_editor_close_creation(s->editor);
 }
 static void menu_closed(GtkPopover *popover,gpointer data) {
   (void)popover;
   ClbbSettings *s=data;
   if(s->menu_content)clear_dynamic(s,s->menu_content);
   s->menu_hero=0;s->menu_content=NULL;s->menu_message=NULL;
-}
-static void scope_changed(GObject *stack,GParamSpec *spec,gpointer data) {
-  (void)stack;(void)spec;
-  ClbbSettings *s=data;
-  if(s->capture) {stop_capture(s);clbb_settings_refresh(s);}
 }
 static gboolean menu_capture_key(GtkEventControllerKey *keys,guint keyval,guint keycode,
                                  GdkModifierType modifiers,gpointer data) {
@@ -1807,6 +1824,8 @@ static void editor_details(ClbbSettings *s,GtkWidget *canvas,const GdkRectangle 
   if(s->menu_content)menu_closed(GTK_POPOVER(s->menu),s);
   gtk_drop_down_set_selected(GTK_DROP_DOWN(s->profile_picker),0);
   clbb_settings_refresh(s);
+  gboolean point=g_str_has_prefix(slot,"point:");
+  if(!point && s->hero<=0)return;
   s->menu_hero=s->hero;
   GtkWidget *body=gtk_box_new(GTK_ORIENTATION_VERTICAL,9);
   gtk_widget_add_css_class(body,"clbb-settings");
@@ -1814,39 +1833,41 @@ static void editor_details(ClbbSettings *s,GtkWidget *canvas,const GdkRectangle 
   gtk_popover_set_child(GTK_POPOVER(s->menu),body);
   s->menu_content=body;
   gboolean movement=!strcmp(slot,"movement") || g_str_has_prefix(slot,"movement.");
-  gboolean point=g_str_has_prefix(slot,"point:");
-  gboolean personal=s->hero>0 && !point && strcmp(slot,"match:statistics");
   g_autofree char *title=clbb_editor_slot_title(movement?"movement":slot);
-  gtk_box_append(GTK_BOX(body),label(title,"clbb-map-title"));
-  GtkWidget *stack=gtk_stack_new();
-  gtk_stack_set_vhomogeneous(GTK_STACK(stack),FALSE);
-  if(personal) {
-    GtkWidget *switcher=gtk_stack_switcher_new();
-    gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(switcher),GTK_STACK(stack));
-    gtk_box_append(GTK_BOX(body),switcher);
-  } else gtk_box_append(GTK_BOX(body),label("Для всех героев","clbb-muted"));
-  GtkWidget *scroll=gtk_scrolled_window_new();
-  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),GTK_POLICY_NEVER,GTK_POLICY_AUTOMATIC);
-  gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll),MAX(96,MIN(320,gtk_widget_get_height(canvas)-110)));
-  gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll),TRUE);
-  gtk_widget_set_size_request(scroll,MIN(338,MAX(170,gtk_widget_get_width(canvas)-52)),-1);
-  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll),stack);
-  gtk_box_append(GTK_BOX(body),scroll);
-  for(int n=0;n<=(int)personal;n++) {
-    if(point)point_controls(s,scope_box(s,stack,FALSE),atoi(slot+6));
-    else if(movement)movement_scope(s,stack,n);
-    else if(g_str_has_prefix(slot,"upgrade:")) {
-      GtkWidget *box=scope_box(s,stack,n);
-      g_autofree char *key=g_strdup_printf("%s.bindings.%s.key",n?"hero":"common",slot);
-      Control *c=bind_control(s,box,"Клавиша",key,action_key(slot));
-      if(n)add_inheritance(c);
-    } else {
-      const char *role=g_str_has_prefix(slot,"spell:")?"extra:2":slot;
-      action_scope(s,stack,n?"hero":"common",slot,slot,role,0,!strcmp(slot,"cancel"));
-    }
+  GtkWidget *header=gtk_box_new(GTK_ORIENTATION_VERTICAL,3);
+  const char *scope=s->palette_hero_name;
+  if(point) {
+    g_autofree char *owner=g_strdup_printf("points.%d.owner",atoi(slot+6));
+    if(read_int(s,owner,0)==0)scope="Для всех героев";
   }
-  gtk_stack_set_visible_child_name(GTK_STACK(stack),personal?"hero":"common");
-  g_signal_connect(stack,"notify::visible-child",G_CALLBACK(scope_changed),s);
+  gtk_box_append(GTK_BOX(header),label(scope,"clbb-map-scope"));
+  gtk_box_append(GTK_BOX(header),label(title,"clbb-map-title"));
+  gtk_box_append(GTK_BOX(body),header);
+  GtkWidget *fields=gtk_box_new(GTK_ORIENTATION_VERTICAL,2);
+  GtkWidget *scroll=gtk_scrolled_window_new();
+  int width=gtk_widget_get_width(canvas),height=gtk_widget_get_height(canvas);
+  int sheet_width=CLAMP(width-80,180,452);
+  int left=anchor->x, right=width-anchor->x-anchor->width;
+  GtkPositionType side;
+  if(MAX(left,right)>=sheet_width+70)side=left>right?GTK_POS_LEFT:GTK_POS_RIGHT;
+  else side=anchor->y>height/2?GTK_POS_TOP:GTK_POS_BOTTOM;
+  int room=(side==GTK_POS_TOP)?anchor->y:(side==GTK_POS_BOTTOM)?height-anchor->y-anchor->height:height;
+  gtk_popover_set_position(GTK_POPOVER(s->menu),side);
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),GTK_POLICY_NEVER,GTK_POLICY_AUTOMATIC);
+  gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll),CLAMP(room-130,82,560));
+  gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll),TRUE);
+  gtk_widget_set_size_request(scroll,sheet_width,-1);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll),fields);
+  gtk_box_append(GTK_BOX(body),scroll);
+  if(point)point_controls(s,fields,atoi(slot+6));
+  else if(movement)movement_scope(s,fields,TRUE);
+  else if(g_str_has_prefix(slot,"upgrade:")) {
+    g_autofree char *key=g_strdup_printf("hero.bindings.%s.key",slot);
+    add_inheritance(bind_control(s,fields,"Клавиша",key,action_key(slot)));
+  } else {
+    const char *role=g_str_has_prefix(slot,"spell:")?"extra:2":slot;
+    action_scope(s,fields,"hero",slot,slot,role,0,!strcmp(slot,"cancel"));
+  }
   s->menu_message=label("","clbb-accent");
   gtk_widget_set_visible(s->menu_message,FALSE);
   gtk_box_append(GTK_BOX(body),s->menu_message);
@@ -2105,7 +2126,7 @@ void clbb_settings_refresh(ClbbSettings *s) {
   int hero=s->selected_profile?s->selected_profile:live;
   int spell=read_int(s,"common.battle_spell_id",0);
   g_autofree char *layout=live==hero?read_text(s,"hero.controls",""):g_strdup("");
-  g_autofree char *points=read_text(s,"points.list","");
+  g_autofree char *points=read_text(s,"points.visible","");
   g_autofree char *live_name=read_text(s,"hero.name","Герой");
   GtkStringObject *item=gtk_drop_down_get_selected_item(GTK_DROP_DOWN(s->profile_picker));
   const char *profile_name=s->selected_profile&&item?gtk_string_object_get_string(item):live_name;
@@ -2209,6 +2230,8 @@ void clbb_settings_refresh(ClbbSettings *s) {
     if (c->inherit_key) {
       gboolean own=read_bool(s,c->inherit_key,FALSE);
       gtk_widget_set_sensitive(c->inherit_reset,own);
+      if(gtk_widget_has_css_class(c->inherit_reset,"clbb-reset"))
+        gtk_widget_set_opacity(c->inherit_reset,own?1.:0.);
       if(c->inherit_status){
         gtk_label_set_text(GTK_LABEL(c->inherit_status),own?"Личное значение":"Наследует общее");
         gtk_widget_set_visible(c->inherit_reset,own);

@@ -13,6 +13,14 @@ pub struct ScreenPoint {
     pub y: u32,
     pub key: i32,
     pub instant: bool,
+    /// Zero keeps the point available to every hero, including points saved by older builds.
+    #[serde(default)]
+    pub owner: i32,
+}
+impl ScreenPoint {
+    pub fn visible_to(&self, hero: i32) -> bool {
+        self.owner == 0 || self.owner == hero
+    }
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Settings {
@@ -218,10 +226,18 @@ impl Settings {
             key.into()
         }
     }
+    pub fn visible_points(&self, hero: i32) -> impl Iterator<Item = (&u32, &ScreenPoint)> {
+        self.points.iter().filter(move |(_, p)| p.visible_to(hero))
+    }
+
     pub fn get(&self, key: &str, hero: i32) -> String {
+        if key == "points.visible" {
+            return self.visible_points(hero).map(|(id, p)| format!("{id}\t{}\n", p.owner)).collect();
+        }
         if key == "enabled" { return "true".into(); }
         if let Some((id, field)) = point_field(key) {
-            return self.points.get(&id).map(|p| match field {
+            return self.points.get(&id).filter(|p| p.visible_to(hero)).map(|p| match field {
+                "owner" => p.owner.to_string(),
                 "key" => p.key.to_string(),
                 "cast_mode" => i32::from(p.instant).to_string(),
                 _ => String::new(),
@@ -468,8 +484,7 @@ impl Settings {
         matches!(self.get(key, hero).as_str(), "true" | "1")
     }
     pub fn binding(&self, hero: i32, slot: &str) -> clbb_moba_core::controller::host::Binding {
-        let prefix = if slot == "match:statistics" { "common" } else { "hero" };
-        let key = |f| format!("{prefix}.bindings.{slot}.{f}");
+        let key = |f| format!("hero.bindings.{slot}.{f}");
         let code = self.integer(&key("key"), hero);
         let code = if valid_key(code) && !self.reserved(code, hero) {
             code
@@ -486,12 +501,16 @@ impl Settings {
     pub fn set(&mut self, key: &str, value: &str, hero: i32) -> Result<(), String> {
         if let Some((id, field)) = point_field(key) {
             let previous = self.points.get(&id).copied();
+            if previous.is_some_and(|p| !p.visible_to(hero)) { return Err("Точка другого героя".into()); }
             match (field, previous) {
                 ("add", None) => {
-                    let (x, y) = value.split_once(',').ok_or("Нужны координаты точки")?;
+                    let (x, rest) = value.split_once(',').ok_or("Нужны координаты точки")?;
+                    let (y, owner) = rest.split_once(',').unwrap_or((rest, "0"));
+                    let owner = owner.parse::<i32>().map_err(|_| "Неизвестный герой")?;
+                    if owner != 0 && (owner <= 0 || owner != hero) { return Err("Герой сменился".into()); }
                     let coord = |n: &str| n.parse::<u32>().ok().filter(|v| *v <= 1_000_000);
                     self.points.insert(id, ScreenPoint {
-                        x: coord(x).ok_or("Точка вне игры")?, y: coord(y).ok_or("Точка вне игры")?,
+                        x: coord(x).ok_or("Точка вне игры")?, y: coord(y).ok_or("Точка вне игры")?, owner,
                         ..Default::default()
                     });
                 }
@@ -777,17 +796,33 @@ mod tests {
         assert!(s.set("common.bindings.item:active.cast_mode", "2", 25).is_err());
     }
     #[test]
-    fn statistics_binding_is_global_rebindable_and_does_not_inherit_hero_overrides() {
+    fn old_points_remain_global_and_new_scopes_survive_serialization() {
+        let old=r#"{"points":{"1":{"x":2000,"y":4000,"key":75,"instant":true}}}"#;
+        let mut s:Settings=serde_json::from_str(old).unwrap();
+        s.set("points.2.add","3000,5000,25",25).unwrap();
+        s.set("points.2.key","76",25).unwrap();
+        let restored:Settings=serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).unwrap();
+        for hero in [0,25,30] {
+            assert_eq!(restored.get("points.1.key",hero),"75");
+            assert_eq!(restored.get("points.1.cast_mode",hero),"1");
+        }
+        assert_eq!(restored.get("points.2.key",25),"76");
+        assert_eq!(restored.get("points.2.cast_mode",25),"0");
+        assert_eq!(restored.get("points.2.key",30),"");
+    }
+    #[test]
+    fn statistics_shortcut_inherits_global_until_rebound_for_one_hero() {
         let mut s = Settings::default();
         for hero in 1..=133 { assert_eq!(s.binding(hero, "match:statistics").key, 0x01000001); }
         s.set("common.bindings.match:statistics.key", "88", 25).unwrap();
         s.set("hero.bindings.match:statistics.key", "90", 25).unwrap();
         for hero in 1..=133 {
-            assert_eq!(s.binding(hero, "match:statistics").key, 88);
+            assert_eq!(s.binding(hero, "match:statistics").key, if hero == 25 { 90 } else { 88 });
             assert_eq!(s.binding(hero, "match:statistics").cast_mode, 1);
         }
         s.set("common.bindings.match:statistics.key", "0", 25).unwrap();
-        assert_eq!(s.binding(25, "match:statistics").key, 0);
+        assert_eq!(s.binding(26, "match:statistics").key, 0);
+        assert_eq!(s.binding(25, "match:statistics").key, 90);
     }
     #[test]
     fn guinevere_ultimate_stop_is_personal_editable_and_seeded_once() {

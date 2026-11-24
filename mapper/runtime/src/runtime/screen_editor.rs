@@ -27,7 +27,7 @@ impl Runtime {
         });
     }
 
-    pub(super) fn point_event(&mut self, key: i32, down: bool, repeat: bool, active_match: bool) -> bool {
+    pub(super) fn point_event(&mut self, key: i32, down: bool, repeat: bool, active_match: bool, hero: i32) -> bool {
         if let Some(contact) = self.point_contacts.get_mut(&key) {
             if repeat || (down && !contact.released) { return true; }
             if !down && contact.deadline.is_some() {
@@ -39,7 +39,7 @@ impl Runtime {
             if !down { return true; }
         }
         if !active_match || key == 0 { return false; }
-        let Some(binding) = self.host.settings.points.values().find(|p| p.key == key) else { return false };
+        let Some((_, binding)) = self.host.settings.visible_points(hero).find(|(_, p)| p.key == key) else { return false };
         if !repeat && down {
             let point = Point::new(binding.x as f64 / 1e6, binding.y as f64 / 1e6);
             let instant = binding.instant;
@@ -53,13 +53,17 @@ impl Runtime {
         true
     }
 
+    pub(super) fn editor_sample(&self) -> Option<&super::Sample> {
+        self.host.fresh().filter(|s| s.frame.ready.get() && s.frame.ui.ready.get()
+            && s.frame.hero_id.int() > 0 && s.frame.hero_id.int() == s.frame.ui.hero_id.int())
+    }
+
     /// Rows carry the same setting identity used by the text palette. The
     /// panel may suspend input, but the observation worker continues sampling.
     pub(super) fn editor_layout(&self) -> String {
         let mut rows = String::new();
         let settings = &self.host.settings;
-        let sample = self.host.fresh().filter(|s| s.frame.ready.get() && s.frame.ui.ready.get()
-            && s.frame.hero_id.int() > 0 && s.frame.hero_id.int() == s.frame.ui.hero_id.int());
+        let sample = self.editor_sample();
         let hero = sample.map_or(0, |s| s.frame.hero_id.int());
         let mut row = |slot: &str, path: String, key: i32, x: f64, y: f64| {
             if (0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y) {
@@ -73,8 +77,7 @@ impl Runtime {
             let personal = |field: &str| format!("profile.{hero}.hero.{field}");
             let mut action = |slot: &str, xy: [f64; 2]| {
                 let field = format!("bindings.{slot}.key");
-                let path = if slot == "match:statistics" { format!("common.{field}") } else { personal(&field) };
-                row(slot, path, settings.binding(hero, slot).key, xy[0], xy[1]);
+                row(slot, personal(&field), settings.binding(hero, slot).key, xy[0], xy[1]);
             };
             for b in ui.buttons.iter().take(ui.button_count.min(32) as usize) {
                 if !b.active.get() { continue; }
@@ -108,7 +111,7 @@ impl Runtime {
                 }
             }
         }
-        for (&id, point) in &settings.points {
+        for (&id, point) in settings.visible_points(hero) {
             row(&format!("point:{id}"), format!("points.{id}.key"), point.key,
                 point.x as f64 / 1e6, point.y as f64 / 1e6);
         }

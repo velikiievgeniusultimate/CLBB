@@ -16,6 +16,8 @@ struct ClbbEditor {
     ClbbSettingsCallbacks cb;
     ClbbEditorDetails details;
     GtkWidget *layer, *canvas, *viewport, *heading, *hint, *popup;
+    GtkWidget *personal_choice;
+    int draft_hero;
     GPtrArray *markers;
     char *snapshot, *selected, *capture;
     guint timer;
@@ -221,17 +223,42 @@ static void capture(ClbbEditor *e, Marker *m) {
     update_selection(e);
 }
 
+static void choose_scope(ClbbEditor *e, GdkRectangle *anchor) {
+    const char *id=e->cb.read(e->cb.user,"editor.hero");
+    e->draft_hero=id?atoi(id):0;
+    const char *name=e->draft_hero?e->cb.read(e->cb.user,"hero.name"):NULL;
+    g_autofree char *personal=name&&*name?g_strdup_printf("Только для героя · %s",name):g_strdup("Только для этого героя");
+    gtk_button_set_label(GTK_BUTTON(e->personal_choice),personal);
+    gtk_widget_set_sensitive(e->personal_choice,e->draft_hero>0);
+    gtk_widget_set_tooltip_text(e->personal_choice,e->draft_hero?NULL:"Выберите героя в матче");
+    gtk_popover_set_pointing_to(GTK_POPOVER(e->popup),anchor);
+    gtk_popover_popup(GTK_POPOVER(e->popup));
+}
+
+static gboolean scope_key(GtkEventControllerKey *keys,guint keyval,guint keycode,
+                          GdkModifierType modifiers,gpointer data) {
+    (void)keys;(void)modifiers;
+    ClbbEditor *e=data;
+    int code=clbb_settings_event_keycode(gtk_widget_get_display(e->canvas),keyval,keycode);
+    const char *toggle=e->cb.read(e->cb.user,"hotkeys.editor");
+    if(code && toggle && code==atoi(toggle)) {
+        clbb_settings_hide(e->owner);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static void add_point(GtkButton *button, gpointer data) {
-    (void)button;
     ClbbEditor *e=data;
     gtk_popover_popdown(GTK_POPOVER(e->popup));
+    int owner=GTK_WIDGET(button)==e->personal_choice?e->draft_hero:0;
     g_autofree char *ids=g_strdup(e->cb.read(e->cb.user,"points.list"));
     g_auto(GStrv) rows=g_strsplit(ids?ids:"","\n",-1);
     gboolean used[257]={0};
     for (guint i=0; rows[i]; i++) { int id=atoi(rows[i]); if(id>0&&id<=256)used[id]=TRUE; }
     guint id=1; while(id<=256&&used[id]) id++;
     g_autofree char *command=g_strdup_printf("points.%u.add",id);
-    g_autofree char *coords=g_strdup_printf("%u,%u",(guint)(e->add_u*1e6+.5),(guint)(e->add_v*1e6+.5));
+    g_autofree char *coords=g_strdup_printf("%u,%u,%d",(guint)(e->add_u*1e6+.5),(guint)(e->add_v*1e6+.5),owner);
     if(id>256 || !e->cb.write(e->cb.user,command,coords)) { hint(e,"Не удалось добавить точку"); return; }
     g_free(e->selected); e->selected=g_strdup_printf("points.%u.key",id);
     refresh(e);
@@ -246,10 +273,10 @@ static void click(GtkGestureClick *gesture,int count,double x,double y,gpointer 
     if(button==3 && !m) {
         graphene_rect_t r;
         if(!bounds(e,&r)||!graphene_rect_contains_point(&r,&GRAPHENE_POINT_INIT(x,y)))return;
+        g_clear_pointer(&e->capture,g_free);
         e->add_u=(x-r.origin.x)/r.size.width; e->add_v=(y-r.origin.y)/r.size.height;
         GdkRectangle at={(int)x,(int)y,1,1};
-        gtk_popover_set_pointing_to(GTK_POPOVER(e->popup),&at);
-        gtk_popover_popup(GTK_POPOVER(e->popup));
+        choose_scope(e,&at);
         return;
     }
     if(button!=1)return;
@@ -328,10 +355,25 @@ ClbbEditor *clbb_editor_new(GtkOverlay *overlay,const ClbbSettingsCallbacks *cal
 
     e->popup=gtk_popover_new();
     gtk_widget_set_parent(e->popup,e->canvas);
-    GtkWidget *add=gtk_button_new_with_label("＋  Одиночное нажатие");
-    gtk_widget_add_css_class(add,"clbb-map-button");
-    gtk_popover_set_child(GTK_POPOVER(e->popup),add);
-    g_signal_connect(add,"clicked",G_CALLBACK(add_point),e);
+    gtk_widget_add_css_class(e->popup,"clbb-map-menu");
+    GtkEventController *keys=gtk_event_controller_key_new();
+    g_signal_connect(keys,"key-pressed",G_CALLBACK(scope_key),e);
+    gtk_widget_add_controller(e->popup,keys);
+    GtkWidget *choices=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
+    gtk_widget_add_css_class(choices,"clbb-map-choices");
+    gtk_popover_set_child(GTK_POPOVER(e->popup),choices);
+    GtkWidget *title=gtk_label_new("Для кого создать точку?");
+    gtk_label_set_xalign(GTK_LABEL(title),0);
+    gtk_widget_add_css_class(title,"clbb-map-title");
+    gtk_box_append(GTK_BOX(choices),title);
+    e->personal_choice=gtk_button_new_with_label("Только для этого героя");
+    GtkWidget *global=gtk_button_new_with_label("Для всех героев");
+    gtk_widget_add_css_class(e->personal_choice,"clbb-map-button");
+    gtk_widget_add_css_class(global,"clbb-map-button");
+    gtk_box_append(GTK_BOX(choices),e->personal_choice);
+    gtk_box_append(GTK_BOX(choices),global);
+    g_signal_connect(e->personal_choice,"clicked",G_CALLBACK(add_point),e);
+    g_signal_connect(global,"clicked",G_CALLBACK(add_point),e);
 
     GtkWidget *bar=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,8);
     gtk_widget_set_halign(bar,GTK_ALIGN_END);gtk_widget_set_valign(bar,GTK_ALIGN_START);
@@ -350,6 +392,12 @@ ClbbEditor *clbb_editor_new(GtkOverlay *overlay,const ClbbSettingsCallbacks *cal
     return e;
 }
 
+gboolean clbb_editor_creation_visible(ClbbEditor *e) {
+    return e && gtk_widget_get_visible(e->popup);
+}
+void clbb_editor_close_creation(ClbbEditor *e) {
+    if(clbb_editor_creation_visible(e))gtk_popover_popdown(GTK_POPOVER(e->popup));
+}
 void clbb_editor_show(ClbbEditor *e) {
     if(clbb_editor_visible(e))return;
     gtk_widget_set_visible(e->layer,TRUE);
