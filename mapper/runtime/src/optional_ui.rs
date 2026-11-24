@@ -464,7 +464,7 @@ impl OptionalUi {
                 let class = r.class_name(r.pointer(frame)?)?;
                 let target = match class {
                     "UIHeroRecord" => &mut record,
-                    "UIBattleInfo" => &mut hud,
+                    "UIBattleInfo" | "UIBattleInfo_EGC" => &mut hud,
                     _ => continue,
                 };
                 owner(r, &mut family.checks, frame)?;

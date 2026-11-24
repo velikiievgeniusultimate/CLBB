@@ -1847,6 +1847,48 @@ mod tests {
         assert!(!rows.contains("2531"));assert!(rows.contains("skill:2:1831"));
     }
     #[test]
+    fn mode_flicker_preserves_the_equipped_spell_and_uses_its_own_layout() {
+        use crate::source::{number, text, v2};
+        let mut events = Vec::new();
+        let mut r = fixture(&mut events);
+        for (hero, equipped) in [(7, 20190), (11, 20140)] {
+            let mut sample = template_sample(hero, 2, now_ns());
+            sample.frame.ui.button_count = 3;
+            sample.frame.token = text(&format!("alternate-mode-{hero}"));
+            for (row, slot, id, uv) in [
+                (1, "mode:flicker", 20102, [0.59, 0.92]),
+                (2, "extra:2", equipped, [0.67, 0.92]),
+            ] {
+                let mut b = sample.frame.ui.buttons[0];
+                b.slot = text(slot);
+                b.kind = text("extra");
+                b.index = number(row as f64);
+                b.skill_id = number(id as f64);
+                b.press_uv = v2(uv);
+                sample.frame.ui.buttons[row] = b;
+            }
+            sample.control_types.insert("mode:flicker".into(), 2);
+            r.worker.shared.lock().unwrap().sample = Some(Arc::new(sample));
+            r.poll(1280., 720.);
+            let layout = r.editor_layout();
+            assert!(layout.contains(&format!("mode:flicker\tprofile.{hero}.hero.bindings.mode:flicker.key\t71\t0.590000\t0.920000")));
+            assert!(layout.contains(&format!("spell:{equipped}\tprofile.{hero}.hero.bindings.spell:{equipped}.key\t70\t0.670000\t0.920000")));
+            assert!(!r.host.binding_conflicts(hero).contains_key(&71));
+            let diagnostics = r.read("diagnostics.controls");
+            let mapped: serde_json::Value = serde_json::from_str(unsafe { CStr::from_ptr(diagnostics) }.to_str().unwrap()).unwrap();
+            let flicker = mapped["buttons"].as_array().unwrap().iter().find(|b| b["slot"] == "mode:flicker").unwrap();
+            assert_eq!(flicker["key"], 71);
+            assert_eq!(flicker["cast_mode"], 0);
+            assert_eq!(mapped["types"]["mode:flicker"], 2);
+        }
+        let mut normal = template_sample(7, 2, now_ns());
+        normal.frame.token = text("normal-mode");
+        r.worker.shared.lock().unwrap().sample = Some(Arc::new(normal));
+        r.poll(1280., 720.);
+        assert!(!r.editor_layout().contains("mode:flicker"));
+        assert!(!r.event(1, 71, true, false, Point::default()));
+    }
+    #[test]
     fn hero_controls_exposes_only_fresh_present_buttons_and_current_forms() {
         let mut events=Vec::new();let mut r=fixture(&mut events);
         assert!(r.hero_controls().is_empty());

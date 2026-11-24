@@ -430,6 +430,7 @@ impl Settings {
             "extra:0" => 66,
             "extra:1" => 68,
             "extra:2" => 70,
+            "mode:flicker" => 71,
             "ally:mathilda" | "ally:johnson" => 86,
             "item:active" | "extra:3" => 0x01000007,
             "match:statistics" => 0x01000001,

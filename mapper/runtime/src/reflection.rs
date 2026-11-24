@@ -124,6 +124,14 @@ impl<M: Memory> Reflection<M> {
     pub fn class_name(&mut self, address: u64) -> Result<&str> {
         Ok(&self.cached_class(address)?.name)
     }
+    pub fn class_derives_from(&mut self, mut class: u64, base: u64) -> Result<bool> {
+        for _ in 0..24 {
+            if class == 0 { return Ok(false); }
+            if class == base { return Ok(true); }
+            class = self.cached_class(class)?.parent;
+        }
+        Ok(false)
+    }
     pub fn field(&mut self, object: u64, name: &str) -> Result<u64> {
         let mut address = self.pointer(object)?;
         for _ in 0..24 {
@@ -394,6 +402,21 @@ mod tests {
                 .unwrap_err()
                 .contains("identity mismatch")
         );
+    }
+    #[test]
+    fn ancestry_accepts_identity_and_validated_subclasses_only() {
+        let mut r = fixture();
+        r.validate_class(256).unwrap();
+        let base = Class { address: 512, name: "Base".into(), parent: 0,
+            statics: 0, fields: HashMap::new() };
+        r.classes.insert(512, base);
+        assert!(r.class_derives_from(256, 256).unwrap());
+        assert!(!r.class_derives_from(256, 512).unwrap());
+        r.classes.get_mut(&256).unwrap().parent = 512;
+        assert!(r.class_derives_from(256, 512).unwrap());
+        assert!(!r.class_derives_from(512, 256).unwrap());
+        r.classes.get_mut(&512).unwrap().parent = 256;
+        assert!(!r.class_derives_from(256, 768).unwrap());
     }
     #[test]
     fn cached_field_lookup_preserves_inheritance_static_and_offset_rules() {

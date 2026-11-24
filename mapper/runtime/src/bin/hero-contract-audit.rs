@@ -563,12 +563,14 @@ fn main() -> Result<()> {
     }, |value|value.match_owners==sample.match_owners&&value.indicator==sample.indicator&&value.frame.hero_id.int()==hero&&value.frame.token.as_str()==frame.token.as_str());
     let same_match=final_sample.is_ok();
     if process_identity(pid)?!=identity {return Err("Runtime identity changed during audit".into());}
+    let navigation = clbb_mapper::navigation::NavMesh::discover(&mut source.reflection)
+        .map(|mesh| json!({"triangles":mesh.triangle_count(),"vertices":mesh.vertex_count()}));
     let output=json!({
         "format":"clbb-hero-contract-audit","version":1,"pid":pid,"birth":identity.0,"executable":identity.1,
         "start_ns":start_ns,"end_ns":now_ns(),"hero":hero,"epoch":frame.token.as_str(),"resolution":size,
         "sample_ns":frame.time_ns.value,"active_skill":frame.skill_id.int(),"active_slot":frame.ui.active_slot.as_str(),
         "movement":{"ready":frame.ui.movement.ready.value,"press":frame.ui.movement.press_uv.values.map(|v|v.value),"center":frame.ui.movement.center_uv.values.map(|v|v.value),"radius":frame.ui.movement.radius_uv.values.map(|v|v.value)},"read_ms":frame.sample_duration_ms.value,"types":sample.control_types,"buttons":buttons,"variants":variants,
-        "linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"hero_level":hero_level,"skill_levels":skill_levels,"sample_rejections":errors,
+        "navigation":navigation,"linked":sample.linked,"contracts":contracts,"controls":controls,"ui":ui,"charge_lifecycle":charge_lifecycle,"hero_level":hero_level,"skill_levels":skill_levels,"sample_rejections":errors,
         "cached_integrity_before_final":cached_integrity_before_final,"same_match_at_end":same_match,"final_sample_error":final_sample.err(),"final_sample_attempts":final_sample_attempts,
         "scope":"read-only owned gameplay controls/configuration; no memory writes, input or production template authorization",
     });

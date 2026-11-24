@@ -678,6 +678,7 @@ static int action_key(const char *slot) {
   if (!strcmp(slot,"combo:0")) return 'E';
   if (!strcmp(slot,"combo:1")) return 'R';
   if (!strcmp(slot,"valentina:return")) return 'H';
+  if (!strcmp(slot,"mode:flicker")) return 'G';
   const char *slots[]={"extra:0","extra:1","extra:2","extra:3","attack","attack:minion","attack:tower","shop:quick","upgrade:0","upgrade:1","upgrade:2","upgrade:3"};
   int keys[]={'B','D','F',0x01000007,32,'A','S','Z','1','2','3','4'};
   for (guint n=0;n<G_N_ELEMENTS(slots);++n) if (!strcmp(slot,slots[n])) return keys[n];
@@ -720,6 +721,7 @@ static const char *action_title(const char *slot, int skill, const char *config)
   if (!strcmp(slot,"skill:2")) return "Навык 3";
   if (!strcmp(slot,"skill:3")) return "Навык 4";
   if (!strcmp(slot,"valentina:return")) return "Вернуть облик";
+  if (!strcmp(slot,"mode:flicker")) return "Дополнительная вспышка";
   if (!strcmp(slot,"combo:0")) return "Комбо · навык 1 → навык 2";
   if (!strcmp(slot,"combo:1")) return "Комбо · навык 2 → навык 1";
   const char *slots[]={"extra:0","extra:1","extra:2","extra:3","attack","attack:minion","attack:tower","shop:quick","upgrade:0","upgrade:1","upgrade:2","upgrade:3"};
@@ -1065,6 +1067,8 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
     }
   }
   g_hash_table_unref(seen);
+  if(strstr(layout,"\nmode:flicker\t"))
+    palette_action(s,"mode:flicker","mode:flicker","Дополнительная вспышка",PALETTE_SPELLS,2);
   const int spells[]={20020,20030,20040,20050,20060,20070,20080,20100,20140,20150,20160,20190};
   for(int pass=0;pass<2;pass++)for(guint i=0;i<G_N_ELEMENTS(spells);i++) {
     int id=spells[i];

@@ -269,6 +269,12 @@ pub struct UiPlan {
     portrait_retry: i64,
     last_choice_slot: String,
 }
+const MODE_FLICKER_SLOT: &str = "mode:flicker";
+
+fn mode_flicker_control(kind: &str, class: &str, base_skill: i32) -> bool {
+    kind == "extra" && class == "KeySkillExtra" && base_skill == 20102
+}
+
 pub(crate) fn skill_button_class<M: Memory>(r: &mut Reflection<M>, class: &crate::reflection::Class) -> Result<bool> {
     let mut ancestry = vec![class.name.clone()];
     let mut parent = class.parent;
@@ -683,6 +689,18 @@ mod control_kind_tests {
         assert_eq!(control_kind(true, &chain), "attack");
     }
     #[test]
+    fn mode_flicker_is_distinct_from_the_equipped_spell_and_hero_skills() {
+        use super::mode_flicker_control;
+        assert!(mode_flicker_control("extra", "KeySkillExtra", 20102));
+        for (kind, class, id) in [
+            ("extra", "KeySkillExtra", 20100), ("extra", "KeySkillExtra", 20140),
+            ("extra", "KeySkillExtra", 20001), ("skill", "SkillButton", 20102),
+            ("extra", "KeySkillEquip", 20102),
+        ] {
+            assert!(!mode_flicker_control(kind, class, id));
+        }
+    }
+    #[test]
     fn additional_controls_do_not_collide_with_hero_skills() {
         for chain in [vec!["SkillButtonAutoChargeEx", "SkillButton", "KeySkill"],
                       vec!["KeySkillExtra", "KeySkill"],
@@ -714,18 +732,15 @@ impl UiPlan {
         let frames_address = base.statics + offset;
         let frames = r.pointer(frames_address)?;
         let objects = r.list(frames)?;
-        let controls: Vec<_> = objects
-            .iter()
-            .copied()
-            .filter(|o| *o != 0 && r.pointer(*o).ok() == Some(target))
-            .collect();
-        if controls.len() != 1 {
-            return Err("Waiting for active match controls".into());
-        }
-        let object = controls[0];
+        let mut controls = objects.iter().copied().filter(|o| *o != 0).filter_map(|object| {
+            let class = r.pointer(object).ok()?;
+            r.class_derives_from(class, target).ok()?.then_some((object, class))
+        });
+        let (object, class) = controls.next().ok_or("Waiting for active match controls")?;
+        if controls.next().is_some() { return Err("Ambiguous active match controls".into()); }
         let mut checks = vec![
             (frames_address, frames.to_le_bytes().to_vec()),
-            (object, target.to_le_bytes().to_vec()),
+            (object, class.to_le_bytes().to_vec()),
         ];
         let button_list = link(r, object, "statusKeySkillList", &mut checks)?;
         let list_header = r.read(button_list + 16, 16)?;
@@ -778,8 +793,11 @@ impl UiPlan {
                 }
             }
             let mut johnson_interactive = None;
+            let mut mode_flicker = false;
             if kind == "extra" && skill != 0 {
                 let base = r.integer(skill)?;
+                mode_flicker = mode_flicker_control(kind, &class.name, base);
+                if mode_flicker { checks.push((skill, base.to_le_bytes().to_vec())); }
                 if class.name == "KeySkillProgressBar" && index == 4 && base == 303260 {
                     checks.push((skill, base.to_le_bytes().to_vec()));
                     johnson_interactive = Some(r.field(button, "interactive")?);
@@ -841,6 +859,8 @@ impl UiPlan {
                 "ally:mathilda".into()
             } else if kind == "item" {
                 "item:active".into()
+            } else if mode_flicker {
+                MODE_FLICKER_SLOT.into()
             } else if kind == "attack" {
                 "attack".into()
             } else {

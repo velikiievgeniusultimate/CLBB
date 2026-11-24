@@ -149,10 +149,12 @@ impl NavMesh {
         let game_slot = r.static_field("GamePathFinding", "Instance")?;
         let path = owner(r, &mut checks, path_slot)?;
         let game = owner(r, &mut checks, game_slot)?;
-        if owner(r, &mut checks, path)? != r.named["PathFindingCS"]
-            || owner(r, &mut checks, game)? != r.named["GamePathFinding"]
-        {
-            return Err("Navigation instance class changed".into());
+        for (object, base) in [(path,"PathFindingCS"), (game,"GamePathFinding")] {
+            if object == 0 { return Err(format!("Navigation instance {base} is absent")); }
+            let class = owner(r, &mut checks, object)?;
+            if !r.class_derives_from(class, r.named[base])? {
+                return Err(format!("Unexpected navigation type {} for {base}",r.class_name(class)?));
+            }
         }
         if link(r, &mut checks, game, "pathFinding")? != path {
             return Err("Navigation instance mismatch".into());
