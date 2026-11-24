@@ -338,6 +338,13 @@ fn gord_bounce_range_family(skill:i32,motion:&str,package:&str)->bool {
     skill==2310 && motion=="IndicatorMotionPos" && package=="IndicatorPackage_BulletDirctionBomb"
 }
 
+const XAVIER_WALL_SHAPE: f64 = 20.;
+fn xavier_wall_range_family(skill: i32, motion: &str, package: &str) -> bool {
+    matches!(skill, 11520..=11524)
+        && motion == "IndicatorMotionRotAndPosRot"
+        && package == "IndicatorPackage_JianTou_OtherPart_Special"
+}
+
 // Raw native short/long casts independently confirm relative position aiming.
 // Keep this measured family skill-specific; the class pair alone remains unknown.
 fn hanzo_ghost_range_family(skill:i32,motion:&str,package:&str)->bool {
@@ -385,6 +392,18 @@ fn valid_native_range(shape:f64,values:[f64;2])->bool {
 /// the distance while preserving the same typed configuration/array owner.
 fn native_range_contract<M:Memory>(r:&mut Reflection<M>,comp:u64,motion:u64,package:u64,skill:i32,
     motion_name:&str,package_name:&str,checks:&mut Checks)->Result<Option<(u64,f64)>> {
+    if xavier_wall_range_family(skill, motion_name, package_name) {
+        let config = owner(r, comp, "m_Config", checks)?;
+        let rect_at = typed_field(r, config, "m_RectType", 8)?;
+        let base_at = typed_field(r, config, "m_BaseType", 8)?;
+        let rect = i32_at(&capture(r, checks, rect_at, 4)?, 0);
+        let base = i32_at(&capture(r, checks, base_at, 4)?, 0);
+        let expected_base = if skill == 11520 { 370 } else { 1 };
+        if (rect, base) != (16, expected_base) {
+            return Err("Unverified Xavier wall configuration".into());
+        }
+        return native_range_contract_for_shape(r, comp, motion, package, skill, XAVIER_WALL_SHAPE, checks).map(Some);
+    }
     if barats_missile_range_family(skill, motion_name, package_name) {
         let range = native_range_contract_for_shape(r, comp, motion, package, skill, 3., checks)?;
         let config = owner(r, comp, "m_Config", checks)?;
@@ -1262,6 +1281,10 @@ impl MotionPlan {
         } else if gord_bounce_range_family(skill,&mc.name,&pc.name) {
             native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Gord range contract")?;
             3
+        } else if xavier_wall_range_family(skill, &mc.name, &pc.name) {
+            native_range_contract(r, comp, motion, package, skill, &mc.name, &pc.name, &mut checks)?
+                .ok_or("Missing Xavier wall range contract")?;
+            3
         } else if natan_direction_contract(r, comp, skill, &mc.name, &pc.name, &mut checks)? {
             2
         } else if let Some(kind)=native_template(&mc.name,&pc.name) {
@@ -1357,7 +1380,8 @@ impl MotionPlan {
             20150 => Some(("IndicatorMotionRot", "IndicatorPackageEasy_ShanXing_Normal")),
             20020 => Some(("IndicatorLieShaMotion", "IndicatorPackageEasy_ShanXing_Normal")),
             8430 => Some(("IndicatorMotionRot", "IndicatorPackageEasy")),
-            _ if attack_geometry || configured_direction || ((zhuxin_lantern_family(skill,&name,&package_class.name)||gord_bounce_range_family(skill,&name,&package_class.name)||barats_missile_range_family(skill,&name,&package_class.name)||lesley_selector_family(skill,&name,&package_class.name)||hanzo_ghost_range_family(skill,&name,&package_class.name))&&range_contract.is_some()) || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
+            _ if attack_geometry || configured_direction || range_contract.is_some()
+                || matches!(native_template(&name,&package_class.name),Some(2 | 3)) => Some((name.as_str(),package_class.name.as_str())),
             _ => None,
         };
         if expected.is_none_or(|(motion, package)| name != motion || package_class.name != package)
@@ -1789,9 +1813,9 @@ impl MotionPlan {
                     logical.world_range_source_present=flag(true);
                 }
             }
-            // The lantern package has separate rings for the caster and aim
-            // area. The valid native drag result is the unambiguous aim point.
-            if self.range_shape == Some(21.) && logical.ready.get() {
+            // The lantern and Xavier's wall have a visual centered on the
+            // caster. Their valid drag result supplies the actual placement.
+            if matches!(self.range_shape, Some(XAVIER_WALL_SHAPE | 21.)) && logical.ready.get() {
                 aim = Some([origin[0] + result[0], origin[1], origin[2] + result[2]]);
             }
             if let Some(p) = aim {
@@ -2174,6 +2198,18 @@ mod tests {
         assert!(!frame.logical.input_ready.get());
         assert!(!frame.motion.available.get());
     }
+    #[test]
+    fn xavier_wall_families_require_the_special_positional_package() {
+        let motion = "IndicatorMotionRotAndPosRot";
+        let package = "IndicatorPackage_JianTou_OtherPart_Special";
+        for skill in 11520..=11524 {
+            assert!(xavier_wall_range_family(skill, motion, package));
+        }
+        assert!(!xavier_wall_range_family(11525, motion, package));
+        assert!(!xavier_wall_range_family(11520, "IndicatorMotionRot", package));
+        assert!(!xavier_wall_range_family(11520, motion, "IndicatorPackage_JianTou_OtherPart"));
+    }
+
     #[test]
     fn native_templates_require_the_verified_motion_package_pair() {
         assert_eq!(native_template("IndicatorMotionRot","IndicatorPackageEasy"),Some(1));
