@@ -260,6 +260,41 @@ fn zhuxin_lantern_family(skill: i32, motion: &str, package: &str) -> bool {
         && package == "IndicatorPackage_MultiArrowsPoint2Circle"
 }
 
+fn natan_projectile_family(skill: i32, motion: &str, package: &str) -> bool {
+    matches!(skill, 10710 | 10720)
+        && motion == "IndicatorMotionRotSummonPart"
+        && package == "IndicatorPackage_Concat_JianTou"
+}
+
+fn natan_clone_placement(skill: i32, motion: &str, package: &str) -> bool {
+    skill == 10730 && motion == "IndicatorMotionRotAndPosRot" && package == "IndicatorPackage_JianTou_Yuan"
+}
+
+// Q and W return the player's unit direction. E places the clone six units
+// away even on short valid drags, so only the angle is under player control.
+fn natan_direction_contract<M: Memory>(
+    r: &mut Reflection<M>, comp: u64, skill: i32, motion: &str, package: &str,
+    checks: &mut Checks,
+) -> Result<bool> {
+    let projectile = natan_projectile_family(skill, motion, package);
+    if !projectile && !natan_clone_placement(skill, motion, package) {
+        return Ok(false);
+    }
+    let (rect, shape) = native_rect_config(r, comp, skill, checks)?;
+    let config = owner(r, comp, "m_Config", checks)?;
+    let at = typed_field(r, config, "m_BaseType", 8)?;
+    let base = i32_at(&capture(r, checks, at, 4)?, 0);
+    let expected = match skill {
+        10710 => (2, 659, [17., 7.8f32 as f64]),
+        10720 => (1, 1, [17., 6.]),
+        _ => (1, 50, [8., 6.]),
+    };
+    if (rect, base, shape) != expected {
+        return Err("Unverified Natan direction configuration".into());
+    }
+    Ok(true)
+}
+
 fn lesley_selector_family(skill:i32,motion:&str,package:&str)->bool {
     skill==5330 && motion=="IndicatorMotionPosSelectAndRot"
         && package=="IndicatorPackage_JianTou_Yuan_SameLengthWithRange"
@@ -1045,7 +1080,8 @@ impl MotionPlan {
         let lantern_audit = zhuxin_lantern_family(skill, &mc.name, &pc.name);
         let barats_audit = barats_missile_range_family(skill, &mc.name, &pc.name);
         let beatrix_audit = beatrix_sniper_ultimate_family(skill, &mc.name, &pc.name);
-        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!lantern_audit&&!barats_audit&&!beatrix_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        let natan_audit = natan_projectile_family(skill, &mc.name, &pc.name);
+        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!lantern_audit&&!barats_audit&&!beatrix_audit&&!natan_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
             if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
@@ -1058,7 +1094,7 @@ impl MotionPlan {
         }
         let mut values=serde_json::Map::new();
         for name in ["m_vDragResult","m_vDragTouchPos","m_vDragDir","m_vActiveDir"] {
-            let at=if base_tap||block_audit||lesley_audit||lantern_audit||barats_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
+            let at=if base_tap||block_audit||lesley_audit||lantern_audit||barats_audit||natan_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
             if at<motion || at+12>motion+4096 {return Err("Audit vector outside motion".into());}
             let raw=capture(r,&mut checks,at,12)?;
             values.insert(name.into(),serde_json::json!(source::vec3(&raw)?));
@@ -1226,6 +1262,8 @@ impl MotionPlan {
         } else if gord_bounce_range_family(skill,&mc.name,&pc.name) {
             native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Missing Gord range contract")?;
             3
+        } else if natan_direction_contract(r, comp, skill, &mc.name, &pc.name, &mut checks)? {
+            2
         } else if let Some(kind)=native_template(&mc.name,&pc.name) {
             if kind==3 {native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Unverified native range family")?;}
             kind
@@ -1305,6 +1343,7 @@ impl MotionPlan {
         let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let configured_direction=shadow_direction || camera_direction || melissa_dash_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
             || beatrix_sniper_ultimate_contract(r, comp, skill, &name, &package_class.name, &mut checks)?
+            || natan_direction_contract(r, comp, skill, &name, &package_class.name, &mut checks)?
             || grock_configuration_contract(r,comp,skill,&name,&package_class.name,&mut checks)?==Some(2) || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
         let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,configured_direction);
@@ -1650,8 +1689,9 @@ impl MotionPlan {
             None
         };
         if self.direction_geometry {
-            if (result[0].hypot(result[2]) - 1.).abs() > 0.01 {
-                return Err("Native direction is not a unit vector".into());
+            let extent = if self.skill == 10730 && self.name == "IndicatorMotionRotAndPosRot" { 6. } else { 1. };
+            if (result[0].hypot(result[2]) - extent).abs() > 0.01 {
+                return Err("Native direction has unexpected length".into());
             }
             frame.direction_input = s::Direction {
                 ready: flag(true),
@@ -1660,6 +1700,8 @@ impl MotionPlan {
                     "IndicatorMotionHookLine" => "IndicatorMotionHookLine.m_vDragResult",
                     "IndicatorMotionCameraLock" => "IndicatorMotionCameraLock.m_vDragResult",
                     "IndicatorMotionSwing" => "IndicatorMotionSwing.m_vDragResult",
+                    "IndicatorMotionRotSummonPart" => "IndicatorMotionRotSummonPart.m_vDragResult",
+                    "IndicatorMotionRotAndPosRot" if self.skill == 10730 => "IndicatorMotionRotAndPosRot.m_vDragResult",
                     _ => "IndicatorMotionRot.m_vDragResult",
                 }),
                 token: frame.token,
@@ -1669,7 +1711,7 @@ impl MotionPlan {
                 sample_start_ns: now,
                 sample_end_ns: now,
                 raw_touch_xyz: v3(touch),
-                direction_xz: v2([result[0], result[2]]),
+                direction_xz: v2([result[0] / extent, result[2] / extent]),
                 ..Default::default()
             };
         } else {
@@ -2645,6 +2687,51 @@ mod tests {
         assert!(check(&r,&checks).is_err());
         assert!(additional_direction_contract(&mut r,128,4210,"IndicatorMotionRot","IndicatorPackage_Multi_JianTou",&mut Vec::new()).is_err());
     }
+    #[test]
+    fn natan_direction_requires_its_owned_projectile_or_clone_config() {
+        let projectile = "IndicatorMotionRotSummonPart";
+        let arrow = "IndicatorPackage_Concat_JianTou";
+        let placement = "IndicatorMotionRotAndPosRot";
+        let circle = "IndicatorPackage_JianTou_Yuan";
+        for (skill, motion, package, rect, base, shape, extent) in [
+            (10710, projectile, arrow, 2i32, 659i32, 17f32, 7.8f32),
+            (10720, projectile, arrow, 1, 1, 17., 6.),
+            (10730, placement, circle, 1, 50, 8., 6.),
+        ] {
+            let mut r = base_tap_fixture();
+            for (at, value) in [(1056, skill), (1060, rect), (1072, base)] {
+                r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            for (at, value) in [(1568, shape), (1572, extent)] {
+                r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            let mut checks = Vec::new();
+            assert!(natan_direction_contract(&mut r, 128, skill, motion, package, &mut checks).unwrap());
+            assert!(!natan_direction_contract(&mut r, 128, 10735, motion, package, &mut Vec::new()).unwrap());
+            r.memory.0.borrow_mut()[1060..1064].copy_from_slice(&0i32.to_le_bytes());
+            assert!(check(&r, &checks).is_err());
+            assert!(natan_direction_contract(&mut r, 128, skill, motion, package, &mut Vec::new()).is_err());
+        }
+    }
+
+    #[test]
+    fn natan_clone_placement_normalizes_its_fixed_extent_only() {
+        let (r, mut plan) = q_fixture();
+        plan.skill = 10730;
+        plan.name = "IndicatorMotionRotAndPosRot".into();
+        plan.direction_geometry = true;
+        for (at, value) in [(528, 0f32), (536, 6.), (576, 0.3)] {
+            r.memory.0.borrow_mut()[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        let mut frame = s::Frame::default();
+        plan.sample(&r, &mut frame).unwrap();
+        assert!(frame.direction_input.ready.get());
+        assert_eq!(frame.direction_input.direction_xz.values.map(|v| v.value), [0., 1.]);
+        assert_eq!(frame.direction_input.source.as_str(), "IndicatorMotionRotAndPosRot.m_vDragResult");
+        plan.skill = 10731;
+        assert!(plan.sample(&r, &mut frame).is_err());
+    }
+
     #[test]
     fn beatrix_sniper_swing_requires_its_own_config() {
         let mut r = base_tap_fixture();

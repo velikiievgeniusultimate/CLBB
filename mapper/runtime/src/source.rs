@@ -388,6 +388,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         || (hero == 102 && slot == "skill:1" && base == 10220 && active == 10297)
         // A center tap opens Beatrix's native weapon menu.
         || (hero == 105 && slot == "skill:3" && base == 2010580 && active == 2010580)
+        // Natan swaps with the existing clone. Only placement needs aim.
+        || (hero == 107 && slot == "skill:2" && base == 10730 && active == 10735)
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
@@ -533,6 +535,14 @@ mod control_kind_tests {
         assert!(!verified_button_only_form(102, "skill:1", 10224, 10297));
         assert!(!verified_button_only_form(102, "skill:2", 10230, 10234));
         assert!(!verified_button_only_form(53, "skill:1", 10220, 10297));
+    }
+    #[test]
+    fn natan_clone_swap_taps_only_the_recast() {
+        use super::verified_button_only_form;
+        assert!(verified_button_only_form(107, "skill:2", 10730, 10735));
+        assert!(!verified_button_only_form(107, "skill:2", 10730, 10730));
+        assert!(!verified_button_only_form(107, "skill:1", 10730, 10735));
+        assert!(!verified_button_only_form(106, "skill:2", 10730, 10735));
     }
     #[test]
     fn granger_rhapsody_stop_is_only_its_current_native_recast() {
