@@ -2105,6 +2105,25 @@ index 1e0e0d5..7ac4b28 100644
  #ifdef __cplusplus
  }
  #endif
+diff --git a/src/api-impl-jni/generated_headers/android_view_View.h b/src/api-impl-jni/generated_headers/android_view_View.h
+index 37788fd..389d788 100644
+--- a/src/api-impl-jni/generated_headers/android_view_View.h
++++ b/src/api-impl-jni/generated_headers/android_view_View.h
+@@ -459,14 +459,6 @@ JNIEXPORT void JNICALL Java_android_view_View_native_1keep_1screen_1on
+ JNIEXPORT jboolean JNICALL Java_android_view_View_native_1getGlobalVisibleRect
+   (JNIEnv *, jobject, jlong, jobject);
+ 
+-/*
+- * Class:     android_view_View
+- * Method:    getWindowVisibleDisplayFrame
+- * Signature: (Landroid/graphics/Rect;)V
+- */
+-JNIEXPORT void JNICALL Java_android_view_View_getWindowVisibleDisplayFrame
+-  (JNIEnv *, jobject, jobject);
+-
+ #ifdef __cplusplus
+ }
+ #endif
 diff --git a/src/api-impl-jni/generated_headers/android_webkit_WebView.h b/src/api-impl-jni/generated_headers/android_webkit_WebView.h
 index e2aa204..2579961 100644
 --- a/src/api-impl-jni/generated_headers/android_webkit_WebView.h
@@ -2470,7 +2489,7 @@ index 7aa5fe4..50f09fd 100644
 +	atl_exec_restart();
 +}
 diff --git a/src/api-impl-jni/views/android_view_View.c b/src/api-impl-jni/views/android_view_View.c
-index 17c76b1..94eec95 100644
+index 17c76b1..688eb54 100644
 --- a/src/api-impl-jni/views/android_view_View.c
 +++ b/src/api-impl-jni/views/android_view_View.c
 @@ -1,10 +1,12 @@
@@ -2787,6 +2806,26 @@ index 17c76b1..94eec95 100644
  				GdkRectangle geometry;
  				gdk_monitor_get_geometry(monitor, &geometry);
  				// check if fullscreen is slightly larger than the window, if so, we can safely mock the new size
+@@ -1020,19 +1210,6 @@ JNIEXPORT jobject JNICALL Java_android_view_View_native_1get_1window(JNIEnv *env
+ 	return g_object_get_data(G_OBJECT(gtk_widget_get_root(widget)), "jobject");
+ }
+ 
+-extern GtkWindow *window;
+-
+-JNIEXPORT void JNICALL Java_android_view_View_getWindowVisibleDisplayFrame(JNIEnv *env, jobject this, jobject rect)
+-{
+-	int width;
+-	int height;
+-	gtk_window_get_default_size(window, &width, &height);
+-	_SET_INT_FIELD(rect, "left", 0);
+-	_SET_INT_FIELD(rect, "top", 0);
+-	_SET_INT_FIELD(rect, "right", width);
+-	_SET_INT_FIELD(rect, "bottom", height);
+-}
+-
+ JNIEXPORT jboolean JNICALL Java_android_view_View_native_1gtkEventPropagation(JNIEnv *env, jobject this)
+ {
+ 	synthetic_propagation_failed = GINT_TO_POINTER(1);
 diff --git a/src/api-impl-jni/views/android_view_ViewTreeObserver.c b/src/api-impl-jni/views/android_view_ViewTreeObserver.c
 index 199fbf4..2c05233 100644
 --- a/src/api-impl-jni/views/android_view_ViewTreeObserver.c
@@ -5871,6 +5910,23 @@ index 44ac5fb..94b7691 100644
  		}
  
  		@Override
+diff --git a/src/api-impl/android/view/View.java b/src/api-impl/android/view/View.java
+index c200fbd..4d0412b 100644
+--- a/src/api-impl/android/view/View.java
++++ b/src/api-impl/android/view/View.java
+@@ -2397,7 +2397,11 @@ public class View implements Drawable.Callback {
+ 
+ 	public boolean isPressed() { return false; }
+ 
+-	public native void getWindowVisibleDisplayFrame(Rect rect);
++	public void getWindowVisibleDisplayFrame(Rect rect) {
++		// The desktop editor is an overlay and does not reduce the Android
++		// viewport. The window manager and display metrics use virtual pixels.
++		rect.set(0, 0, Display.window_width, Display.window_height);
++	}
+ 
+ 	public void setRotation(float rotation) {}
+ 	public void setRotationX(float deg) {}
 diff --git a/src/api-impl/android/view/Window.java b/src/api-impl/android/view/Window.java
 index 7012eab..48fc7ff 100644
 --- a/src/api-impl/android/view/Window.java
