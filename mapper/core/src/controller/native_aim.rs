@@ -26,8 +26,8 @@ const RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]";
 const HANZO_GHOST_RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]*[20]";
 fn known_direction_source(hero:i32,skill:i32,source:&str)->bool {
     (hero == 105 && skill == 2010530 && source == "IndicatorMotionSwing.m_vDragResult")
-        || (hero == 107 && matches!(skill, 10710 | 10720) && source == "IndicatorMotionRotSummonPart.m_vDragResult")
-        || (hero == 107 && skill == 10730 && source == "IndicatorMotionRotAndPosRot.m_vDragResult")
+        || (matches!(hero, 107 | 110) && matches!(skill, 10710 | 10720) && source == "IndicatorMotionRotSummonPart.m_vDragResult")
+        || (matches!(hero, 107 | 110) && skill == 10730 && source == "IndicatorMotionRotAndPosRot.m_vDragResult")
         || source=="IndicatorMotionRot.m_vDragResult" || (hero==31&&skill==3190&&source=="IndicatorMotionCameraLock.m_vDragResult") || (hero==21&&skill==2126&&source=="IndicatorMotionHookLine.m_vDragResult") || (hero==84&&skill==8410&&source=="KeySkilleCheckMesh.currentDirect")
 }
 const ANGLE_COS: f64 = 0.9999904807207345; // cos(0.25 degrees)
@@ -1380,6 +1380,15 @@ mod tests {
         f.logical.first_drag = flag(false);
         (c, f, TestHost::default())
     }
+    #[test]
+    fn valentina_accepts_natan_clone_feedback_only_for_the_exact_skill() {
+        let source = "IndicatorMotionRotAndPosRot.m_vDragResult";
+        assert!(known_direction_source(110, 10730, source));
+        assert!(!known_direction_source(110, 11030, source));
+        assert!(!known_direction_source(110, 10735, source));
+        assert!(!known_direction_source(106, 10730, source));
+    }
+
     #[test]
     fn physical_wall_query_receipt_cannot_be_used_by_another_hero_or_skill() {
         assert!(known_direction_source(84,8410,"KeySkilleCheckMesh.currentDirect"));
