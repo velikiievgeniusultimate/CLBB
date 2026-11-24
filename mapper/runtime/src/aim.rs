@@ -181,11 +181,13 @@ fn layla_ultimate_direction_template(skill:i32,motion:&str,package:&str,rect:i32
         && rect==2 && params==[6.,16.]
 }
 
-// Measured RectType0 layouts for Terizla's final swing and Cecilion's claws.
+// Measured RectType0 layouts for Terizla's final swing, Cecilion's claws
+// and both stages of Phoveus's first skill.
 fn two_part_position_direction_rect_zero(skill: i32, motion: &str, package: &str, rect: i32, params: &[f64]) -> bool {
     let extent = match skill {
         8222 => 4.25,
         9120 => 6.,
+        10610 | 2010610 => 4.,
         _ => return false,
     };
     motion == "IndicatorMotionRot" && package == "IndicatorPackage_TwoPartAndPos_Direction"
@@ -2351,6 +2353,11 @@ mod tests {
         assert!(!two_part_position_direction_rect_zero(8222, motion, package, 0, &[11., 4.]));
         assert!(!two_part_position_direction_rect_zero(8222, "IndicatorMotionPos", package, 0, &shape));
         assert!(!two_part_position_direction_rect_zero(8222, motion, "IndicatorPackage_TwoPart_Direction", 0, &shape));
+        for skill in [10610, 2010610] {
+            assert!(two_part_position_direction_rect_zero(skill, motion, package, 0, &[11., 4.]));
+            assert!(!two_part_position_direction_rect_zero(skill, motion, package, 0, &shape));
+        }
+        assert!(!two_part_position_direction_rect_zero(2010611, motion, package, 0, &[11., 4.]));
     }
     #[test]
     fn kadita_waves_require_exact_owned_configuration() {
