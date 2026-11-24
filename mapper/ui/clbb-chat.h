@@ -23,3 +23,4 @@ gboolean atl_chat_batch_pending(GtkWindow *window);
 void atl_chat_cancel_batch(GtkWindow *window);
 gboolean atl_chat_begin_followup(GtkWindow *window, const ClbbChatTarget *target, gint64 now);
 gboolean clbb_chat_site(GtkWindow *window, ClbbChatTarget *target, gboolean live);
+gboolean clbb_lobby_chat_field(GtkWindow *window, guint field[3]);

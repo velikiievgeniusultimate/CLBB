@@ -83,6 +83,7 @@ struct Shared {
     chooser: Option<(crate::account_chooser::Chooser, Instant)>,
     chooser_generation: u64,
     chat: Option<(crate::chat_ui::Target, Instant)>,
+    lobby_chat_field: Option<([f64; 3], Instant)>,
 }
 impl Shared {
     fn update_chooser(&mut self, next: Option<crate::account_chooser::Chooser>) {
@@ -258,7 +259,9 @@ impl Worker {
                             chat_at = now + Duration::from_millis(55);
                             let target = frames.active_frames(&mut source.reflection)
                                 .and_then(|visible| crate::chat_ui::locate(&mut source.reflection, &visible));
-                            out.lock().unwrap().chat = target.map(|v| (v, Instant::now()));
+                            let mut out = out.lock().unwrap();
+                            out.chat = target.map(|v| (v, Instant::now()));
+                            out.lobby_chat_field = None;
                         }
                         if !wait.is_zero() { std::thread::sleep(wait); }
                     } else {
@@ -267,7 +270,12 @@ impl Worker {
                         while Instant::now() < deadline && !quit.load(Ordering::Relaxed) {
                             let visible = frames.active_frames(&mut source.reflection).unwrap_or_default();
                             let state = crate::account_chooser::Reader::locate(&mut source.reflection, &visible);
-                            out.lock().unwrap().update_chooser(state);
+                            let field = crate::chat_ui::lobby_field(&mut source.reflection, &visible);
+                            {
+                                let mut out = out.lock().unwrap();
+                                out.update_chooser(state);
+                                out.lobby_chat_field = field.map(|rect| (rect, Instant::now()));
+                            }
                             std::thread::sleep(Duration::from_millis(70).min(deadline.saturating_duration_since(Instant::now())));
                         }
                     }
@@ -1247,6 +1255,12 @@ impl Runtime {
             "chat.target" => self.worker.shared.lock().unwrap().chat
                 .filter(|(_,at)| at.elapsed() <= Duration::from_millis(280))
                 .map(|(v,_)| v.encode()).unwrap_or_default(),
+            "chat.lobby_field" => self.worker.shared.lock().unwrap().lobby_chat_field
+                .filter(|(_, at)| at.elapsed() <= Duration::from_millis(280))
+                .map(|(field, _)| {
+                    let [left, center_y, right] = field.map(|v| (v * 1e6).round() as u32);
+                    format!("{left} {center_y} {right}")
+                }).unwrap_or_default(),
             "account.chooser" => self.worker.shared.lock().unwrap().chooser_layout(),
             "profiles.catalog" => (1..=134).map(|id| format!("{id}\t{}\n", hero_display_name(id))).collect(),
             _ if profile_setting(key).is_some() => {

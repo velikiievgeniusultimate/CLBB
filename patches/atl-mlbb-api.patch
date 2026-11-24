@@ -568,7 +568,7 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..f968d06 100644
+index 3eb505c..565cccc 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
 @@ -1,5 +1,8 @@
@@ -580,7 +580,7 @@ index 3eb505c..f968d06 100644
  
  #include "../defines.h"
  #include "../util.h"
-@@ -8,9 +11,680 @@
+@@ -8,9 +11,699 @@
  /* main app window */
  extern GtkWindow *window;
  
@@ -720,6 +720,7 @@ index 3eb505c..f968d06 100644
 +	GtkOverlay *overlay;
 +	GtkWidget *card, *entry, *count, *hint, *send, *source_entry;
 +	GWeakRef previous_focus;
++	guint lobby_field[3];
 +	gulong position_handler;
 +	ClbbChatTarget target;
 +	int followup_channel;
@@ -826,10 +827,18 @@ index 3eb505c..f968d06 100644
 +	out->height = natural_height;
 +	gboolean battle = chat->target.site == CLBB_CHAT_BATTLE_SITE;
 +	out->x = area.origin.x + horizontal_margin;
-+	if (battle)
++	out->y = area.origin.y + (int)area.size.height - out->height - 12;
++	if (battle) {
 +		out->x = area.origin.x + (int)area.size.width - out->width - horizontal_margin;
-+	out->y = area.origin.y + (int)(area.size.height * (battle ? .69 : 1.))
-+	         - out->height - 12;
++		out->y = area.origin.y + (int)(area.size.height * .69) - out->height - 12;
++	} else if (chat->lobby_field[2]) {
++		double scale = area.size.width / 1000000.;
++		out->x = area.origin.x + (int)(chat->lobby_field[0] * scale);
++		out->width = (int)((chat->lobby_field[2] - chat->lobby_field[0]) * scale);
++		int center = (int)(chat->lobby_field[1] * (area.size.height / 1000000.));
++		out->y = area.origin.y + CLAMP(center - out->height / 2, 0,
++		                             MAX(0, (int)area.size.height - out->height));
++	}
 +	return out->width > 0 && out->height > 0;
 +}
 +
@@ -1054,43 +1063,53 @@ index 3eb505c..f968d06 100644
 +	chat->overlay = g_object_ref(GTK_OVERLAY(overlay));
 +	g_weak_ref_init(&chat->previous_focus, gtk_window_get_focus(owner));
 +	chat->card = g_object_ref_sink(gtk_box_new(GTK_ORIENTATION_VERTICAL, 5));
-+	GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-+	gtk_widget_add_css_class(chat->card, "clbb-chat-entry");
 +	gboolean battle = target->site == CLBB_CHAT_BATTLE_SITE;
 +	chat->entry = gtk_entry_new();
-+	gtk_entry_set_placeholder_text(GTK_ENTRY(chat->entry), battle ? "Сообщение" : "Введите текст");
 +	gtk_widget_set_hexpand(chat->entry, TRUE);
-+	gtk_editable_set_width_chars(GTK_EDITABLE(chat->entry), 18);
-+	gtk_editable_set_max_width_chars(GTK_EDITABLE(chat->entry), 36);
 +	gtk_accessible_update_property(GTK_ACCESSIBLE(chat->entry),
-+	                               GTK_ACCESSIBLE_PROPERTY_LABEL, "Сообщение в игровой чат", -1);
-+	chat->send = gtk_button_new_with_label("Отправить");
-+	gtk_widget_add_css_class(chat->send, "chat-send");
-+	GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
-+	const char *close_title = battle ? "Закрыть и сохранить черновик" : "Отменить ввод";
-+	gtk_widget_set_tooltip_text(close, close_title);
-+	gtk_accessible_update_property(GTK_ACCESSIBLE(close),
-+	                               GTK_ACCESSIBLE_PROPERTY_LABEL, close_title, -1);
-+	chat->count = gtk_label_new(NULL);
-+	chat->hint = gtk_label_new(NULL);
-+	gtk_label_set_xalign(GTK_LABEL(chat->hint), 0);
-+	gtk_label_set_wrap(GTK_LABEL(chat->hint), TRUE);
-+	gtk_widget_add_css_class(chat->hint, "chat-count");
-+	gtk_widget_add_css_class(chat->count, "chat-count");
-+	gtk_widget_set_tooltip_text(chat->count, "Длина сообщения в байтах UTF-8");
-+	gtk_box_append(GTK_BOX(row), chat->entry);
-+	gtk_box_append(GTK_BOX(row), chat->count);
-+	gtk_box_append(GTK_BOX(row), chat->send);
-+	gtk_box_append(GTK_BOX(row), close);
-+	gtk_box_append(GTK_BOX(chat->card), row);
-+	gtk_box_append(GTK_BOX(chat->card), chat->hint);
-+	gtk_widget_set_visible(chat->count, battle);
-+	gtk_widget_set_visible(chat->hint, FALSE);
-+	g_signal_connect(chat->entry, "changed", G_CALLBACK(chat_entry_changed), chat);
-+	update_chat_limit(chat);
++	                               GTK_ACCESSIBLE_PROPERTY_LABEL, "Ввод текста", -1);
++	if (battle) {
++		gtk_widget_add_css_class(chat->card, "clbb-chat-entry");
++		gtk_entry_set_placeholder_text(GTK_ENTRY(chat->entry), "Сообщение");
++		gtk_editable_set_width_chars(GTK_EDITABLE(chat->entry), 18);
++		gtk_editable_set_max_width_chars(GTK_EDITABLE(chat->entry), 36);
++		chat->send = gtk_button_new_with_label("Отправить");
++		gtk_widget_add_css_class(chat->send, "chat-send");
++		GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
++		const char *close_title = "Закрыть и сохранить черновик";
++		gtk_widget_set_tooltip_text(close, close_title);
++		gtk_accessible_update_property(GTK_ACCESSIBLE(close),
++		                               GTK_ACCESSIBLE_PROPERTY_LABEL, close_title, -1);
++		chat->count = gtk_label_new(NULL);
++		chat->hint = gtk_label_new(NULL);
++		gtk_label_set_xalign(GTK_LABEL(chat->hint), 0);
++		gtk_label_set_wrap(GTK_LABEL(chat->hint), TRUE);
++		gtk_widget_add_css_class(chat->hint, "chat-count");
++		gtk_widget_add_css_class(chat->count, "chat-count");
++		gtk_widget_set_tooltip_text(chat->count, "Длина сообщения в байтах UTF-8");
++		GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
++		gtk_box_append(GTK_BOX(row), chat->entry);
++		gtk_box_append(GTK_BOX(row), chat->count);
++		gtk_box_append(GTK_BOX(row), chat->send);
++		gtk_box_append(GTK_BOX(row), close);
++		gtk_box_append(GTK_BOX(chat->card), row);
++		gtk_box_append(GTK_BOX(chat->card), chat->hint);
++		g_signal_connect(chat->entry, "changed", G_CALLBACK(chat_entry_changed), chat);
++		g_signal_connect(chat->send, "clicked", G_CALLBACK(submit_inline), chat);
++		g_signal_connect(close, "clicked", G_CALLBACK(cancel_inline), chat);
++		update_chat_limit(chat);
++	} else {
++		/* The game already draws its input panel and actions. Render only
++		 * the editable text and caret over its own field. */
++		gboolean (*field)(GtkWindow *, guint *) = dlsym(RTLD_DEFAULT, "clbb_lobby_chat_field");
++		if (field && !field(owner, chat->lobby_field))
++			chat->lobby_field[2] = 0;
++		gtk_widget_add_css_class(chat->entry, "clbb-plain-input");
++		gtk_entry_set_has_frame(GTK_ENTRY(chat->entry), FALSE);
++		gtk_editable_set_width_chars(GTK_EDITABLE(chat->entry), 0);
++		gtk_box_append(GTK_BOX(chat->card), chat->entry);
++	}
 +	g_signal_connect(chat->entry, "activate", G_CALLBACK(submit_inline), chat);
-+	g_signal_connect(chat->send, "clicked", G_CALLBACK(submit_inline), chat);
-+	g_signal_connect(close, "clicked", G_CALLBACK(cancel_inline), chat);
 +	GtkEventController *keys = gtk_event_controller_key_new();
 +	g_signal_connect(keys, "key-pressed", G_CALLBACK(inline_escape), chat);
 +	gtk_widget_add_controller(chat->card, keys);
@@ -1103,7 +1122,10 @@ index 3eb505c..f968d06 100644
 +			".clbb-chat-entry .chat-count {color:#e0c9d7; font-size:.88em; min-width:2.8em;}"
 +			".clbb-chat-entry button {background:#322631; color:#f9eff5;}"
 +			".clbb-chat-entry button.chat-send {background:#77364e;}"
-+			".clbb-chat-entry button:hover {background:#98556f;}");
++			".clbb-chat-entry button:hover {background:#98556f;}"
++			".clbb-plain-input, .clbb-plain-input:focus-within {"
++			"background:transparent; color:#eef4ff; caret-color:#eef4ff; border:0;"
++			"outline:none; box-shadow:none; padding:0; min-height:0;}");
 +		gtk_style_context_add_provider_for_display(gtk_widget_get_display(overlay), GTK_STYLE_PROVIDER(style),
 +		                                           GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 +		g_object_unref(style);
@@ -1201,9 +1223,6 @@ index 3eb505c..f968d06 100644
 +		gtk_entry_set_buffer(entry, gtk_text_get_buffer(source));
 +		gtk_entry_set_visibility(entry, gtk_text_get_visibility(source));
 +		gtk_entry_set_input_purpose(entry, gtk_text_get_input_purpose(source));
-+		const char *placeholder = gtk_text_get_placeholder_text(source);
-+		if (placeholder && *placeholder)
-+			gtk_entry_set_placeholder_text(entry, placeholder);
 +		clbb_text_set_limits(GTK_EDITABLE(entry), clbb_text_limits(GTK_EDITABLE(source)));
 +		gtk_editable_set_position(GTK_EDITABLE(entry), -1);
 +		return TRUE;
@@ -1262,7 +1281,7 @@ index 3eb505c..f968d06 100644
  	JNIEnv *env = get_jni_env();
  	J__DialogInterface__dismiss(env, jobj);
  	return FALSE;
-@@ -27,6 +701,8 @@ static gboolean on_touch_outside(GtkEventControllerLegacy *controller, GdkEvent
+@@ -27,6 +720,8 @@ static gboolean on_touch_outside(GtkEventControllerLegacy *controller, GdkEvent
  {
  	GdkEventType event_type = gdk_event_get_event_type(event);
  	if ((event_type == GDK_BUTTON_PRESS || event_type == GDK_TOUCH_BEGIN) && gtk_widget_get_visible(GTK_WIDGET(outside->dialog))) {
@@ -1271,7 +1290,7 @@ index 3eb505c..f968d06 100644
  		JNIEnv *env = get_jni_env();
  		jmethodID dismiss = _METHOD(_CLASS(outside->jobj), "dismiss", "()V");
  		(*env)->CallVoidMethod(env, outside->jobj, dismiss);
-@@ -56,8 +732,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
+@@ -56,8 +751,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
  	GtkWidget *decor_view = GTK_WIDGET(_PTR(decor_view_ptr));
  	GtkWidget *dialog = gtk_window_new();
  	gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
@@ -1289,7 +1308,7 @@ index 3eb505c..f968d06 100644
  	return _INTPTR(g_object_ref(dialog));
  }
  
-@@ -74,26 +757,43 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,26 +776,43 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
@@ -8801,10 +8820,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..079e1bc
+index 0000000..6e5c513
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1671 @@
+@@ -0,0 +1,1680 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -9269,6 +9288,15 @@ index 0000000..079e1bc
 +        return TRUE;
 +    }
 +    return read_chat_target(h, target) && target->editing;
++}
++
++gboolean clbb_lobby_chat_field(GtkWindow *window, guint field[3]) {
++    ClbbHost *h = g_object_get_data(G_OBJECT(window), "clbb-mapper-attached");
++    if (!h || h->closing || h->dispatching || clbb_settings_is_visible(h->settings))
++        return FALSE;
++    const char *layout = h->read(h->runtime, "chat.lobby_field");
++    return layout && sscanf(layout, "%u %u %u", &field[0], &field[1], &field[2]) == 3 &&
++        field[0] < field[2] && field[2] <= 1000000 && field[1] > 0 && field[1] < 1000000;
 +}
 +
 +static gboolean click_chat_target(ClbbHost *h, const ClbbChatTarget *target) {

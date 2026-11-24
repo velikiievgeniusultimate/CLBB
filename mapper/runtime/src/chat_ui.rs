@@ -1,4 +1,4 @@
-//! Locations of the battle chat buttons and input field.
+//! Locations of the battle chat controls and the lobby text field.
 use crate::{
     optional_ui::button_widget,
     platform::Memory,
@@ -49,20 +49,28 @@ fn point<M: Memory>(r: &mut Reflection<M>, obj: u64) -> Result<[f64; 2]> {
 }
 
 fn project<M: Memory>(r: &mut Reflection<M>, widget: &Widget) -> Result<[f64; 2]> {
+    geometry(r, widget).map(|(center, _)| center)
+}
+
+fn geometry<M: Memory>(r: &mut Reflection<M>, widget: &Widget) -> Result<([f64; 2], [f64; 2])> {
     let obj = widget.object;
     let camera = r.link(obj, "mCam")?;
     let native = r.link(camera, "m_CachedPtr")?;
     let bytes = r.read(native, 4096)?;
     let offset = ui_matrix_offset(&bytes)?;
     let (view, projection) = matrices(&bytes[offset..offset + 128])?;
-    let (p, _) = widget.geometry(r, &view, &projection, true)?;
+    let (p, radius) = widget.geometry(r, &view, &projection, true)?;
     if !onscreen(p) {
         return Err("Chat control outside the game surface".into());
     }
-    Ok(p)
+    Ok((p, radius))
 }
 
-fn input_point<M: Memory>(r: &mut Reflection<M>, label: u64, send_button: u64) -> Option<[f64; 2]> {
+fn input_geometry<M: Memory>(
+    r: &mut Reflection<M>,
+    label: u64,
+    send_button: u64,
+) -> Option<([f64; 2], [f64; 2])> {
     let mut checks = Vec::new();
     let sprite = button_widget(r, &mut checks, send_button).ok()?;
     let widget = Widget::new(r, sprite).ok()?;
@@ -71,10 +79,25 @@ fn input_point<M: Memory>(r: &mut Reflection<M>, label: u64, send_button: u64) -
     }
     // Textless labels have no draw call even while the input is clickable.
     let label = Widget::new(r, label).ok()?;
-    let picked = project(r, &label).ok()?;
+    let picked = geometry(r, &label).ok()?;
     crate::platform::matches_reads(&r.memory, &checks)
         .ok()?
         .then_some(picked)
+}
+
+/// The menu editor uses this rectangle only to render the desktop caret and text.
+pub fn lobby_field<M: Memory>(r: &mut Reflection<M>, frames: &[u64]) -> Option<[f64; 3]> {
+    let top = frames.iter().rev().copied().find(|&frame| frame != 0)?;
+    if r.class_name(r.pointer(top).ok()?).ok()? != "UIChat" {
+        return None;
+    }
+    let input = r.link(top, "localInput").ok()?;
+    let label = r.link(input, "label").ok()?;
+    let ui = r.link(top, "m_FrameUI").ok()?;
+    let send = r.link(ui, "m_Button_Send").ok()?;
+    let ([x, y], [radius_x, _]) = input_geometry(r, label, send)?;
+    (radius_x.is_finite() && radius_x > 0.)
+        .then(|| [(x - radius_x).max(0.), y, (x + radius_x).min(1.)])
 }
 
 fn integer<M: Memory>(r: &mut Reflection<M>, obj: u64, field: &str) -> Option<i32> {
@@ -142,7 +165,7 @@ pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64]) -> Option<Target
     let ui = r.link(chat, "m_UIFrameInfo").ok()?;
     let field = r.link(ui, "m_zLabel_InputChat").ok()?;
     let send = r.link(ui, "m_button_Send").ok()?;
-    let (editing, point) = if let Some(p) = input_point(r, field, send) {
+    let (editing, point) = if let Some((p, _)) = input_geometry(r, field, send) {
         (true, p)
     } else {
         let icon = r.link(ui, "m_sprite_SendMessage1").ok()?;
