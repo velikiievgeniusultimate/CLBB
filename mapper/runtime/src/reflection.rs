@@ -1,6 +1,6 @@
 //! Read-only IL2CPP metadata discovery. Refuse unknown layouts and ambiguous classes.
 use crate::platform::{Memory, Region};
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, time::{Duration, Instant}};
 pub type Result<T> = std::result::Result<T, String>;
 pub fn u64_at(b: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(b[at..at + 8].try_into().unwrap())
@@ -30,6 +30,7 @@ pub struct Reflection<M: Memory> {
     pub maps: Vec<Region>,
     pub named: HashMap<String, u64>,
     classes: HashMap<u64, Class>,
+    last_string_map_refresh: Option<Instant>,
 }
 impl<M: Memory> Reflection<M> {
     pub fn new(memory: M) -> Result<Self> {
@@ -39,6 +40,7 @@ impl<M: Memory> Reflection<M> {
             maps,
             named: HashMap::new(),
             classes: HashMap::new(),
+            last_string_map_refresh: None,
         })
     }
     pub fn read(&self, address: u64, length: usize) -> Result<Vec<u8>> {
@@ -56,13 +58,23 @@ impl<M: Memory> Reflection<M> {
     pub fn boolean(&self, address: u64) -> Result<bool> {
         Ok(self.read(address, 1)?[0] != 0)
     }
-    pub fn cstring(&self, address: u64) -> Result<String> {
-        let region = self
-            .maps
-            .iter()
-            .find(|m| m.readable && m.start <= address && address < m.end)
-            .ok_or("String outside metadata mappings")?;
-        let raw = self.read(address, 192.min((region.end - address) as usize))?;
+    pub fn cstring(&mut self, address: u64) -> Result<String> {
+        fn readable_span(maps: &[Region], address: u64) -> Option<usize> {
+            maps.iter().find(|m| m.readable && m.start <= address && address < m.end)
+                .map(|m| (m.end - address).min(192) as usize)
+        }
+
+        let mut span = readable_span(&self.maps, address);
+        // IL2CPP can allocate names for later-instantiated UI classes after
+        // discovery has cached the required runtime classes and region list.
+        if address != 0 && span.is_none() && self.last_string_map_refresh
+            .is_none_or(|last| last.elapsed() >= Duration::from_millis(100))
+        {
+            self.last_string_map_refresh = Some(Instant::now());
+            self.maps = self.memory.regions()?;
+            span = readable_span(&self.maps, address);
+        }
+        let raw = self.read(address, span.ok_or("String outside metadata mappings")?)?;
         let end = raw
             .iter()
             .position(|b| *b == 0)
@@ -366,6 +378,18 @@ mod tests {
             reads: RefCell::new(Vec::new()),
         })
         .unwrap()
+    }
+    #[test]
+    fn class_lookup_refreshes_late_string_mappings_after_cold_discovery() {
+        let mut r = fixture();
+        // Header and statics were discoverable before the strings were mapped.
+        r.maps[0].end = 512;
+        assert_eq!(r.class(256).unwrap().name, "Hero");
+        assert!(r.class(256).unwrap().fields.contains_key("life"));
+        assert_eq!(r.maps[0].end, 1024);
+        r.memory.reads.borrow_mut().clear();
+        assert_eq!(r.cstring(1024).unwrap_err(), "String outside metadata mappings");
+        assert!(r.memory.reads.borrow().is_empty(), "never read outside a readable span");
     }
     #[test]
     fn cached_field_lookup_keeps_live_class_identity_and_validates_cache_misses() {

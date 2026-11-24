@@ -1018,6 +1018,7 @@ impl Runtime {
                     "source_age_ms":sample.map(|s|(now as f64-s.frame.time_ns.value)/1e6),
                     "clock_ms":sample.map(|s|s.game_clock_ms),
                     "read_ms":worker.source_ms,"published":worker.published_samples,"rejected":worker.rejected_samples,
+                    "source_error":worker.error,
                     "max_publish_gap_ms":worker.max_publish_gap_ms,"max_navigation_ms":worker.max_navigation_ms,
                     "logical_start_ns":view.traceSampleStart_,"logical_end_ns":view.traceSampleEnd_,
                     "logical_fresh":view.logicalSampleFresh_,"accepted_ns":view.acceptedSampleNs_,
