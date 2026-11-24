@@ -274,6 +274,8 @@ pub struct Direction {
     pub sample_end_ns: Number,
     pub raw_touch_xyz: Vector3,
     pub direction_xz: Vector2,
+    pub cone_left_xz: Vector2,
+    pub cone_right_xz: Vector2,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]

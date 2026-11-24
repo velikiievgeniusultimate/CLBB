@@ -319,6 +319,7 @@ pub struct Controller {
     pub(crate) pendingDirection_: Point,
     pub(crate) directionAcceptedPoint_: Point,
     pub(crate) directionObserved_: Point,
+    pub(crate) directionCone_: Option<[Point; 2]>,
     pub(crate) directionGoalPoint_: Point,
     pub(crate) directionGoalCenter_: Point,
     pub(crate) pendingGoalCenter_: Point,

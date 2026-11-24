@@ -760,6 +760,7 @@ impl Controller {
         };
         self.skillBehavior_ = if arrow_follow { SkillBehavior::Tap } else { self.classify_skill(b) };
         self.directionGeometryFresh_ = false;
+        self.directionCone_ = None;
         self.pendingDirectionValid_ = false;
         self.skillStarted_.restart(self.now_);
         self.skillMoved_.invalidate();
@@ -981,6 +982,7 @@ impl Controller {
         self.provisionalStartup_ = false;
         self.startupArmed_ = false;
         self.directionGeometryFresh_ = false;
+        self.directionCone_ = None;
         self.pendingDirectionValid_ = false;
         self.skillBehavior_ = SkillBehavior::Range;
         self.reset_accepted_input();

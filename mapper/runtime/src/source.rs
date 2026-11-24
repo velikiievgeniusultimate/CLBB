@@ -399,6 +399,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         // Fredrinn's uncharged ultimate accepts a press that the game ignores.
         // The charged native variant still supplies its own aiming contract.
         || (hero == 117 && slot == "skill:3" && base == 11750 && active == 11750)
+        // Ixia ends the barrage with a tap on the original ultimate button.
+        || (hero == 121 && slot == "skill:2" && base == 12130 && active == 2012150)
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
@@ -502,6 +504,7 @@ mod control_kind_tests {
             (61, 6130, "skill:2", 6130, 6146),
             (107, 10730, "skill:2", 10730, 10735),
             (111, 11130, "skill:2", 11130, 11133),
+            (121, 12130, "skill:2", 12130, 2012150),
         ] {
             let copy = BorrowedSkill { hero, ultimate, attack: 0 };
             assert!(borrowed_button_only_form(copy, slot, base, recast));

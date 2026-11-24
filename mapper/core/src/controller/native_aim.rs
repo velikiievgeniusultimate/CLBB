@@ -24,8 +24,10 @@ const LESLEY_RANGE_SOURCE: &str = "IndicatorMotionPosSelectAndRot.m_vDragResult/
 const ZHUXIN_LANTERN_SOURCE: &str = "IndicatorMotion_MultiArrowsPoint2Circle.m_vDragResult";
 const RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]";
 const HANZO_GHOST_RANGE_SOURCE: &str = "CData_Skill_Element.m_ShowRectPara[1]*[20]";
+const IXIA_BARRAGE_SOURCE: &str = "IndicatorMotionRotFaceDirction.m_vDragResult";
 fn known_direction_source(hero:i32,skill:i32,source:&str)->bool {
     (hero == 105 && skill == 2010530 && source == "IndicatorMotionSwing.m_vDragResult")
+        || (matches!(hero, 121 | 110) && matches!(skill, 2012110 | 2012120) && source == IXIA_BARRAGE_SOURCE)
         || (matches!(hero, 107 | 110) && matches!(skill, 10710 | 10720) && source == "IndicatorMotionRotSummonPart.m_vDragResult")
         || (matches!(hero, 107 | 110) && skill == 10730 && source == "IndicatorMotionRotAndPosRot.m_vDragResult")
         || source=="IndicatorMotionRot.m_vDragResult" || (hero==31&&skill==3190&&source=="IndicatorMotionCameraLock.m_vDragResult") || (hero==21&&skill==2126&&source=="IndicatorMotionHookLine.m_vDragResult") || (hero==84&&skill==8410&&source=="KeySkilleCheckMesh.currentDirect")
@@ -55,6 +57,17 @@ fn same_number(a: Number, b: Number) -> bool {
 }
 fn xy(value: &Vector2) -> Point {
     Point::new(value.values[0].value, value.values[1].value)
+}
+fn constrain_direction(direction: Point, cone: Option<[Point; 2]>) -> Point {
+    let Some([left, right]) = cone else { return direction; };
+    let center = left + right;
+    if direction.dot(center) >= left.dot(center) {
+        direction
+    } else if direction.dot(left) >= direction.dot(right) {
+        left
+    } else {
+        right
+    }
 }
 fn xz(value: &Vector3) -> Point {
     Point::new(value.values[0].value, value.values[2].value)
@@ -367,7 +380,7 @@ impl Controller {
                     || self.directionMatchedSequence_ != latest.sequence
                     || distance(latest.pixels, point) >= 0.02
                     || distance(self.directionAcceptedPoint_, point) >= 0.02
-                    || self.directionObserved_.dot(self.pendingDirection_) < ANGLE_COS
+                    || self.directionObserved_.dot(constrain_direction(self.pendingDirection_, self.directionCone_)) < ANGLE_COS
                 {
                     return None;
                 }
@@ -413,12 +426,13 @@ impl Controller {
         {
             return false;
         }
-        self.directionObserved_.dot(self.pendingDirection_) >= ANGLE_COS
+        self.directionObserved_.dot(constrain_direction(self.pendingDirection_, self.directionCone_)) >= ANGLE_COS
     }
     pub(crate) fn sample_direction_input(&mut self, host: &mut impl Host, frame: &Frame) {
         macro_rules! reject {($reason:expr)=>{{self.trace(host,"direction_feedback_rejected",$reason);return;}}}
         self.directionAccepted_ = false;
         self.directionMatchedSequence_ = 0;
+        self.directionCone_ = None;
         let expected = self
             .find_button(&self.activeSlot_)
             .map_or(0, |button| self.direction_geometry_skill_id(button, frame));
@@ -451,6 +465,18 @@ impl Controller {
             || !same_number(input.sample_end_ns, geometry.sample_end_ns)
         {
             reject!("geometry_clock_mismatch");
+        }
+        if input.source.as_str() == IXIA_BARRAGE_SOURCE {
+            let (left, right) = (&input.cone_left_xz, &input.cone_right_xz);
+            if !vector2(left) || !vector2(right) { reject!("native_direction_cone_missing"); }
+            let (left, right) = (xy(left), xy(right));
+            let (ln, rn) = (left.length(), right.length());
+            if (ln - 1.).abs() > 0.01 || (rn - 1.).abs() > 0.01 {
+                reject!("native_direction_cone_invalid");
+            }
+            let (left, right) = (left / ln, right / rn);
+            if !(0. ..0.999).contains(&left.dot(right)) { reject!("native_direction_cone_invalid"); }
+            self.directionCone_ = Some([left, right]);
         }
         if raw.values[2].value.abs() > 1.
             || (raw.values[0].value == 0. && raw.values[1].value == 0.)
@@ -487,7 +513,9 @@ impl Controller {
             reject!("angular_prediction_unavailable");
         };
         let predicted_norm = predicted.length();
-        if predicted_norm < 1e-4 || (predicted / predicted_norm).dot(observed) < ANGLE_COS {
+        if predicted_norm < 1e-4
+            || constrain_direction(predicted / predicted_norm, self.directionCone_).dot(observed) < ANGLE_COS
+        {
             reject!("native_direction_model_mismatch");
         }
         self.directionAccepted_ = true;
@@ -2462,6 +2490,75 @@ mod tests {
         let (mut c,mut h)=buffered_direction_fixture();c.skillCastMode_=1;
         c.tick(&mut h);assert!(h.edges.iter().all(|e|e.0!="up"));
     }
+    #[test]
+    fn barrage_acknowledges_the_native_edge_for_a_cursor_outside_the_cone() {
+        let (mut c, mut f, mut h) = setup();
+        c.heroId_ = 121;
+        c.activeSlot_ = "skill:0".into();
+        c.coreSkill_ = 2012110;
+        c.skillBehavior_ = SkillBehavior::Direction;
+        c.frameCoreSampleStartNs_ = c.castStartedNs_;
+        c.skillVariantSampleNs_ = c.now_;
+        c.skillVariants_.push(SkillVariant {
+            slot: c.activeSlot_.clone(),
+            base: 12110,
+            active: c.coreSkill_,
+            ..Default::default()
+        });
+        f.hero_id = n(121.);
+        f.ui.hero_id = f.hero_id;
+        f.skill_id = n(c.coreSkill_ as f64);
+        f.ui.active_slot = text("skill:0");
+        c.traceEnabled_ = true;
+        c.buttons_.clear();
+        c.buttons_.push(Button {
+            slot: c.activeSlot_.clone(),
+            kind: "skill".into(),
+            skillId: 12110,
+            aimType: 2,
+            ..Button::default()
+        });
+        c.androidSize_ = Point::new(1000., 1000.);
+        c.directionCenter_ = Point::new(0.5, 0.5);
+        c.directionRadius_ = Point::new(0.1, 0.1);
+        c.directionGeometryFresh_ = true;
+        c.frameCamera_ = [1., 0., 0., 1.];
+        c.now_ = 1_980_000_000;
+        c.record_skill_touch(Point::new(0.6005, 0.5005), false, true);
+        c.directionGoalSequence_ = c.touchSequence_;
+        c.directionGoalTime_ = c.now_;
+        c.now_ = 2_000_000_000;
+        c.pendingRelease_ = true;
+        c.pendingDirectionValid_ = true;
+        c.pendingDirection_ = Point::new(1., 0.);
+        let edge_y = 0.75f64.sqrt();
+        let input = &mut f.direction_input;
+        input.ready = flag(true);
+        input.coherent = flag(true);
+        input.source = text(IXIA_BARRAGE_SOURCE);
+        input.token = text("token");
+        input.hero_id = n(121.);
+        input.slot = text("skill:0");
+        input.skill_id = n(2012110.);
+        input.sample_start_ns = n(1_990_000_000.);
+        input.sample_end_ns = n(1_995_000_000.);
+        input.raw_touch_xyz = v3(599.4, 500.5, 0.);
+        input.cone_left_xz = v2(0.5, edge_y);
+        input.cone_right_xz = v2(-0.5, edge_y);
+        input.direction_xz = v2(0.5, edge_y);
+        f.active_joystick.sample_start_ns = input.sample_start_ns;
+        f.active_joystick.sample_end_ns = input.sample_end_ns;
+        c.sample_direction_input(&mut h, &f);
+        assert!(c.direction_acknowledged(), "{:?}", h.traces);
+
+        f.direction_input.direction_xz = v2(-0.5, edge_y);
+        c.sample_direction_input(&mut h, &f);
+        assert!(!c.direction_acknowledged());
+        f.direction_input.cone_right_xz = Vector2::default();
+        c.sample_direction_input(&mut h, &f);
+        assert!(c.directionCone_.is_none());
+    }
+
     #[test]
     fn direction_ack_requires_current_raw_provenance_and_post_goal_snapshot() {
         let (mut c, mut f, mut h) = setup();

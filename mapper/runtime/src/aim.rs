@@ -266,6 +266,28 @@ fn natan_projectile_family(skill: i32, motion: &str, package: &str) -> bool {
         && package == "IndicatorPackage_Concat_JianTou"
 }
 
+fn ixia_barrage_direction_family(skill: i32, motion: &str, package: &str) -> bool {
+    matches!(skill, 2012110 | 2012120)
+        && motion == "IndicatorMotionRotFaceDirction"
+        && package == "IndicatorPackageEasy_JianTou"
+}
+
+fn ixia_barrage_direction_contract<M: Memory>(
+    r: &mut Reflection<M>, comp: u64, skill: i32, motion: &str, package: &str, checks: &mut Checks,
+) -> Result<bool> {
+    if !ixia_barrage_direction_family(skill, motion, package) {
+        return Ok(false);
+    }
+    let (rect, shape) = native_rect_config(r, comp, skill, checks)?;
+    let config = owner(r, comp, "m_Config", checks)?;
+    let at = typed_field(r, config, "m_BaseType", 8)?;
+    let base = i32_at(&capture(r, checks, at, 4)?, 0);
+    if rect != 2 || !valid_native_range(2., shape) || base != if skill == 2012110 { 50 } else { 712 } {
+        return Err("Unverified Ixia barrage configuration".into());
+    }
+    Ok(true)
+}
+
 fn natan_clone_placement(skill: i32, motion: &str, package: &str) -> bool {
     skill == 10730 && motion == "IndicatorMotionRotAndPosRot" && package == "IndicatorPackage_JianTou_Yuan"
 }
@@ -1100,7 +1122,8 @@ impl MotionPlan {
         let barats_audit = barats_missile_range_family(skill, &mc.name, &pc.name);
         let beatrix_audit = beatrix_sniper_ultimate_family(skill, &mc.name, &pc.name);
         let natan_audit = natan_projectile_family(skill, &mc.name, &pc.name);
-        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!lantern_audit&&!barats_audit&&!beatrix_audit&&!natan_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
+        let ixia_audit = ixia_barrage_direction_family(skill, &mc.name, &pc.name);
+        if !base_tap&&!shadow_direction&&!melissa_dash&&!block_audit&&!lesley_audit&&!lantern_audit&&!barats_audit&&!beatrix_audit&&!natan_audit&&!ixia_audit&&!["IndicatorMotionRot","IndicatorMotionPos","IndicatorMotionRotAndPosRot","IndicatorMotionFaTiaoQiu2","IndicatorMotionArcSurface","IndicatorMotionCameraLock"].contains(&mc.name.as_str()) {return Err("Unverified diagnostic motion layout".into());}
         for (object,field,expected) in [(motion,"m_OwnComp",comp),(motion,"m_OwnPackage",package),(package,"m_OwnComp",comp)] {
             if (base_tap||shadow_direction)&&object==motion&&field=="m_OwnPackage" {
                 match r.field(object,field) {
@@ -1113,7 +1136,7 @@ impl MotionPlan {
         }
         let mut values=serde_json::Map::new();
         for name in ["m_vDragResult","m_vDragTouchPos","m_vDragDir","m_vActiveDir"] {
-            let at=if base_tap||block_audit||lesley_audit||lantern_audit||barats_audit||natan_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
+            let at=if base_tap||block_audit||lesley_audit||lantern_audit||barats_audit||natan_audit||ixia_audit{typed_field(r,motion,name,17)?}else{r.field(motion,name)?};
             if at<motion || at+12>motion+4096 {return Err("Audit vector outside motion".into());}
             let raw=capture(r,&mut checks,at,12)?;
             values.insert(name.into(),serde_json::json!(source::vec3(&raw)?));
@@ -1122,6 +1145,13 @@ impl MotionPlan {
             if let Ok(at)=r.field(motion,name) {
                 let raw=capture(r,&mut checks,at,12)?;
                 values.insert(name.into(),serde_json::json!(source::vec3(&raw)?));
+            }
+        }
+        if ixia_audit {
+            for name in ["_leftDir", "_oriDir", "_rightDir"] {
+                let at = typed_field(r, motion, name, 17)?;
+                let raw = capture(r, &mut checks, at, 12)?;
+                values.insert(name.into(), serde_json::json!(source::vec3(&raw)?));
             }
         }
         if lesley_audit {
@@ -1285,7 +1315,8 @@ impl MotionPlan {
             native_range_contract(r, comp, motion, package, skill, &mc.name, &pc.name, &mut checks)?
                 .ok_or("Missing Xavier wall range contract")?;
             3
-        } else if natan_direction_contract(r, comp, skill, &mc.name, &pc.name, &mut checks)? {
+        } else if natan_direction_contract(r, comp, skill, &mc.name, &pc.name, &mut checks)?
+            || ixia_barrage_direction_contract(r, comp, skill, &mc.name, &pc.name, &mut checks)? {
             2
         } else if let Some(kind)=native_template(&mc.name,&pc.name) {
             if kind==3 {native_range_contract(r,comp,motion,package,skill,&mc.name,&pc.name,&mut checks)?.ok_or("Unverified native range family")?;}
@@ -1364,9 +1395,11 @@ impl MotionPlan {
         let range_contract=native_range_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let shadow_direction=shadow_return_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
         let camera_direction=camera_lock_direction_contract(r,comp,motion,package,skill,&name,&package_class.name,&mut checks)?;
+        let ixia_barrage = ixia_barrage_direction_contract(r, comp, skill, &name, &package_class.name, &mut checks)?;
         let configured_direction=shadow_direction || camera_direction || melissa_dash_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
             || beatrix_sniper_ultimate_contract(r, comp, skill, &name, &package_class.name, &mut checks)?
             || natan_direction_contract(r, comp, skill, &name, &package_class.name, &mut checks)?
+            || ixia_barrage
             || grock_configuration_contract(r,comp,skill,&name,&package_class.name,&mut checks)?==Some(2) || fixed_part_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?
             || additional_direction_contract(r,comp,skill,&name,&package_class.name,&mut checks)?;
         let direction_geometry=verified_direction_geometry(skill,&name,&package_class.name,configured_direction);
@@ -1411,6 +1444,11 @@ impl MotionPlan {
             "m_fDragRatio",
         ] {
             fields.insert(n.into(), r.field(motion, n)?);
+        }
+        if ixia_barrage {
+            for name in ["_leftDir", "_rightDir"] {
+                fields.insert(name.into(), typed_field(r, motion, name, 17)?);
+            }
         }
         let yve_crystal = yve_crystal_origin_contract(
             r, comp, motion, package, skill, &name, &package_class.name, &mut checks,
@@ -1725,6 +1763,7 @@ impl MotionPlan {
                     "IndicatorMotionCameraLock" => "IndicatorMotionCameraLock.m_vDragResult",
                     "IndicatorMotionSwing" => "IndicatorMotionSwing.m_vDragResult",
                     "IndicatorMotionRotSummonPart" => "IndicatorMotionRotSummonPart.m_vDragResult",
+                    "IndicatorMotionRotFaceDirction" => "IndicatorMotionRotFaceDirction.m_vDragResult",
                     "IndicatorMotionRotAndPosRot" if self.skill == 10730 => "IndicatorMotionRotAndPosRot.m_vDragResult",
                     _ => "IndicatorMotionRot.m_vDragResult",
                 }),
@@ -1738,6 +1777,12 @@ impl MotionPlan {
                 direction_xz: v2([result[0] / extent, result[2] / extent]),
                 ..Default::default()
             };
+            if self.name == "IndicatorMotionRotFaceDirction" {
+                let left = vector("_leftDir")?;
+                let right = vector("_rightDir")?;
+                frame.direction_input.cone_left_xz = v2([left[0], left[2]]);
+                frame.direction_input.cone_right_xz = v2([right[0], right[2]]);
+            }
         } else {
             let mut logical = s::Logical {
                 ready: flag(true),

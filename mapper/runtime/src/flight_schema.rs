@@ -281,6 +281,8 @@ impl Encode for s::Direction {
         out.insert("sample_end_ns".into(), self.sample_end_ns.encode());
         out.insert("raw_touch_xyz".into(), self.raw_touch_xyz.encode());
         out.insert("direction_xz".into(), self.direction_xz.encode());
+        out.insert("cone_left_xz".into(), self.cone_left_xz.encode());
+        out.insert("cone_right_xz".into(), self.cone_right_xz.encode());
         Value::Object(out)
     }
 }
