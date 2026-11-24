@@ -76,6 +76,9 @@ impl Text {
     pub fn owned(&self) -> String {
         self.as_str().to_owned()
     }
+    pub fn explicitly_empty(self) -> bool {
+        self.present == 1 && self.size == 0
+    }
     pub fn missing(self) -> bool {
         self.present == 0
     }

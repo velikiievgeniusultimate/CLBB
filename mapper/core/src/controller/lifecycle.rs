@@ -1046,7 +1046,15 @@ impl Controller {
     }
     pub(crate) fn sample_skill_cancel(&mut self, host: &mut impl Host, f: &snapshot::Frame) {
         self.skillCancelAcknowledged_ = false;
-        if !self.skillCancelPending_ || self.skillCancelSentNs_ == 0 || self.skillTouch_ < 0 {
+        let cancel_pending = self.skillCancelPending_;
+        let since = if cancel_pending {
+            self.skillCancelSentNs_
+        } else if self.awaiting_cable_direction() {
+            self.releaseRequested_.0.unwrap_or(0)
+        } else {
+            return;
+        };
+        if since <= 0 || self.skillTouch_ < 0 {
             return;
         }
         if self.skillBehavior_ == SkillBehavior::Selection && self.selection_.kind == 2 {
@@ -1065,7 +1073,7 @@ impl Controller {
         // stop contract is revoked: even a direct cross gesture produces no
         // cancel flag. Its UP at the cross leaves the channel intact. Do not
         // hold the rest of the mapper hostage waiting for an impossible ACK.
-        if self.revoked_chang_e_stop(s) {
+        if cancel_pending && self.revoked_chang_e_stop(s) {
             self.trace(host, "cancel_contact_revoked", "chang_e_midchannel_shield_replaced_stop");
             self.finish_skill(host, true);
             return;
@@ -1086,7 +1094,7 @@ impl Controller {
             || !s.sample_end_ns.is_number()
             || !start.is_finite()
             || !end.is_finite()
-            || start < self.skillCancelSentNs_ as f64
+            || start < since as f64
             || end < start
             || end - start > 100e6
             || now - end > 100e6
@@ -1095,6 +1103,13 @@ impl Controller {
             return;
         }
         let same_skill = s.base_skill_id.int() == b.skillId;
+        if same_skill && self.cable_form_expired(b, f, since) {
+            // The owned recast disappeared. Lift only its finger at the
+            // cancel position, keeping movement and the queued inputs alive.
+            self.end_revoked_skill(host, "cancelled_cable_form_expired");
+            return;
+        }
+        if !cancel_pending { return; }
         if same_skill && s.slot.as_str() == self.activeSlot_ && s.cancelled.get() {
             self.skillCancelAcknowledged_ = true;
             self.trace(host, "cancel_acknowledged", "native_cancel_flag_after_move");
@@ -1111,10 +1126,6 @@ impl Controller {
             // DOWN and cancel MOVE reached the game without opening a skill
             // preview. Release just that touch and let the queued skill run.
             self.finish_skill_inner(host, false, Some("cancelled_unclaimed_cyclops_skill"));
-        } else if same_skill && self.cancelled_cable_form_expired(b, f) {
-            // The cancel MOVE was delivered. Lift only that finger at its
-            // last point, without booking a cast or discarding newer input.
-            self.finish_skill_inner(host, false, Some("cancelled_cable_form_expired"));
         }
     }
     fn revoked_chang_e_stop(&self, s: &snapshot::CancelState) -> bool {

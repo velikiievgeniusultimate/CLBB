@@ -91,20 +91,20 @@ impl Controller {
     }
 
     // The game closes the chained cable's reticle when its recast window
-    // expires. Its cancel flag can no longer acknowledge a subsequent T.
-    // Require positive evidence of the base form in the same post-MOVE frame.
-    pub(super) fn cancelled_cable_form_expired(&self, b: &Button, f: &snapshot::Frame) -> bool {
+    // expires. Its cancel flag can no longer acknowledge that contact.
+    // Require the base form and explicitly idle HUD in the same fresh frame.
+    pub(super) fn cable_form_expired(&self, b: &Button, f: &snapshot::Frame, since: i64) -> bool {
         self.holding_cable_contact()
             && self.skillCooldownVariant_ == 1723
             && self.skillBehavior_ == SkillBehavior::Direction
             && self.skillActivationObserved_
             && b.skillId == 1720
-            && self.frameCoreSampleStartNs_ >= self.skillCancelSentNs_
-            && self.skillVariantSampleStartNs_ >= self.skillCancelSentNs_
+            && self.frameCoreSampleStartNs_ >= since
+            && self.skillVariantSampleStartNs_ >= since
             && self.active_variant(b) == 1720
             && f.skill_id.get(-1.) == 0.
-            && f.ui.active_slot.missing()
-            && f.cancel_state.slot.missing()
+            && f.ui.active_slot.explicitly_empty()
+            && f.cancel_state.slot.explicitly_empty()
             && !f.cancel_state.cancelled.get()
             && !f.active_joystick.ready.get()
             && !f.direction_input.ready.get()

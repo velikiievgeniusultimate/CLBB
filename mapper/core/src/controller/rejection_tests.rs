@@ -578,46 +578,82 @@ fn fanny_cable_commits_only_the_angle_chosen_at_physical_release() {
     }
 }
 
+const FANNY_CHAIN: Skill = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
+const FANNY_BASE: Skill = Skill { form: 1720, ..FANNY_CHAIN };
+const FANNY_CANCEL_POINT: Point = Point { x: 0.83, y: 0.42 };
+
+fn fanny_idle(at: i64, form: Skill) -> snapshot::Frame {
+    let mut f = frame(at, form, Some(false));
+    f.skill_id = n(0.);
+    f.ui.active_slot = text("");
+    f.ui.cancel_uv = v2(FANNY_CANCEL_POINT.x, FANNY_CANCEL_POINT.y);
+    f.cancel_state = snapshot::CancelState {
+        ready: flag(true), coherent: flag(true), token: f.token, hero_id: f.hero_id,
+        source: text("UIKeySkill.bCancelSkill"), slot: text(""), base_skill_id: n(1720.), cancelled: flag(false),
+        sample_start_ns: f.skill_state.sample_start_ns, sample_end_ns: f.time_ns,
+        ..Default::default()
+    };
+    f
+}
+
+#[test]
+fn recorded_fanny_expiry_releases_on_first_fresh_frame_after_w_up() {
+    // Relative timings from the reported clip. It opened the chained preview
+    // at 7 ms, closed it at 262 ms and restored base W before physical UP.
+    let (mut c, mut h) = setup(FANNY_CHAIN, Some(false), 2, 0);
+    let at = |ms: i64| START + (60 + ms) * 1_000_000;
+    let movement = c.movementTouch_;
+    key(&mut c, &mut h, at(0), 87, true);
+    let expired = c.skillTouch_;
+    let mut owned = fanny_idle(at(7), FANNY_CHAIN);
+    owned.ui.active_slot = text("skill:1");
+    owned.skill_id = n(1723.);
+    c.apply_snapshot(&mut h, &owned, at(7));
+    assert!(c.skillActivationObserved_);
+    c.apply_snapshot(&mut h, &fanny_idle(at(262), FANNY_CHAIN), at(262));
+    for ms in [334, 600, 636] {
+        c.apply_snapshot(&mut h, &fanny_idle(at(ms), FANNY_BASE), at(ms));
+    }
+    assert!(h.active.contains_key(&expired));
+    key(&mut c, &mut h, at(637), 87, false);
+    c.apply_snapshot(&mut h, &fanny_idle(at(639), FANNY_BASE), at(639));
+    assert_eq!(h.ended, [expired], "W releases on the first coherent idle frame after UP");
+    assert!(!c.pendingRelease_ && !c.skillCancelPending_);
+    assert!(c.cooldownCasts_.is_empty());
+    assert!(h.traces.iter().any(|(event, reason)| event == "release" && reason == "cancelled_cable_form_expired"));
+    assert!(!h.traces.iter().any(|(event, _)| event == "cancel_requested"));
+    assert!(c.movementHeld_ && h.active.contains_key(&movement));
+    c.apply_snapshot(&mut h, &fanny_idle(at(642), FANNY_BASE), at(642));
+    key(&mut c, &mut h, at(742), 87, true);
+    assert_eq!(c.activeSlot_, "skill:1");
+    assert!(c.skillTouch_ >= 0 && c.skillTouch_ != expired && c.skillKeyHeld_);
+}
+
 #[test]
 fn expiring_fanny_cable_cancel_releases_only_w_and_accepts_the_next_physical_press() {
-    const CHAIN: Skill = Skill { hero: 17, base: 1720, form: 1723, slot: "skill:1" };
-    const NORMAL: Skill = Skill { form: 1720, ..CHAIN };
-    let cancel_point = Point::new(0.83, 0.42);
-    let idle = |at, form| {
-        let mut f = frame(at, form, Some(false));
-        f.skill_id = n(0.);
-        f.ui.cancel_uv = v2(cancel_point.x, cancel_point.y);
-        f.cancel_state = snapshot::CancelState {
-            ready: flag(true), coherent: flag(true), token: f.token, hero_id: f.hero_id,
-            source: text("UIKeySkill.bCancelSkill"), base_skill_id: n(1720.), cancelled: flag(false),
-            sample_start_ns: f.skill_state.sample_start_ns, sample_end_ns: f.time_ns,
-            ..Default::default()
-        };
-        f
-    };
     for early_press in [false, true] {
-        let (mut c, mut h) = setup(CHAIN, Some(false), 2, 0);
+        let (mut c, mut h) = setup(FANNY_CHAIN, Some(false), 2, 0);
         let movement = c.movementTouch_;
         let start = START + 60_000_000;
         key(&mut c, &mut h, start, 87, true);
         let finger = c.skillTouch_;
-        let mut owned = idle(start + 8_000_000, CHAIN);
+        let mut owned = fanny_idle(start + 8_000_000, FANNY_CHAIN);
         owned.skill_id = n(1723.);
-        owned.ui.active_slot = text(CHAIN.slot);
+        owned.ui.active_slot = text(FANNY_CHAIN.slot);
         c.apply_snapshot(&mut h, &owned, start + 8_000_000);
         assert!(c.skillActivationObserved_);
-        c.apply_snapshot(&mut h, &idle(start + 90_000_000, CHAIN), start + 90_000_000);
+        c.apply_snapshot(&mut h, &fanny_idle(start + 90_000_000, FANNY_CHAIN), start + 90_000_000);
         let cancel = start + 137_000_000;
         key(&mut c, &mut h, cancel, 84, true);
         key(&mut c, &mut h, cancel + 1_000_000, 84, false);
-        assert_eq!(h.active[&finger], cancel_point);
+        assert_eq!(h.active[&finger], FANNY_CANCEL_POINT);
         key(&mut c, &mut h, cancel + 2_000_000, 87, false);
         if early_press {
             key(&mut c, &mut h, cancel + 3_000_000, 87, true);
         }
-        for (i, case) in ["chain", "old_cancel", "old_variant", "wrong_epoch", "other_slot", "missing_skill", "other_aim"].iter().enumerate() {
+        for (i, case) in ["chain", "old_cancel", "old_variant", "wrong_epoch", "other_slot", "missing_skill", "other_aim", "missing_slot", "malformed_slot"].iter().enumerate() {
             let at = cancel + (5 + i as i64) * 1_000_000;
-            let mut f = idle(at, NORMAL);
+            let mut f = fanny_idle(at, FANNY_BASE);
             match *case {
                 "chain" => f.skill_state.buttons[0].active_skill_id = n(1723.),
                 "old_cancel" => f.cancel_state.sample_start_ns = n((cancel - 1) as f64),
@@ -626,17 +662,19 @@ fn expiring_fanny_cable_cancel_releases_only_w_and_accepts_the_next_physical_pre
                 "other_slot" => f.cancel_state.slot = text("skill:0"),
                 "missing_skill" => f.skill_id = Default::default(),
                 "other_aim" => f.ui.active_slot = text("skill:0"),
+                "missing_slot" => f.ui.active_slot = Default::default(),
+                "malformed_slot" => f.cancel_state.slot.size = 999,
                 _ => unreachable!(),
             }
             c.apply_snapshot(&mut h, &f, at);
             assert!(c.skillCancelPending_ && h.active.contains_key(&finger), "{case}");
         }
         let at = cancel + 22_000_000;
-        c.apply_snapshot(&mut h, &idle(at, NORMAL), at);
+        c.apply_snapshot(&mut h, &fanny_idle(at, FANNY_BASE), at);
         assert_eq!(h.ended, [finger]);
         assert!(!c.skillCancelPending_ && c.cooldownCasts_.is_empty());
         assert!(h.active.contains_key(&movement) && c.movementHeld_);
-        c.apply_snapshot(&mut h, &idle(at + 5_000_000, NORMAL), at + 5_000_000);
+        c.apply_snapshot(&mut h, &fanny_idle(at + 5_000_000, FANNY_BASE), at + 5_000_000);
         if !early_press {
             assert_eq!(h.active.len(), 1);
             key(&mut c, &mut h, at + 6_000_000, 87, true);
