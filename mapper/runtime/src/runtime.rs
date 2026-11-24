@@ -482,6 +482,7 @@ impl Adapter {
         if self.settings.integer("hero.movement.click_mode",hero)==2 {
             for direction in ["up","down","left","right"] {add(self.settings.integer(&format!("hero.movement.{direction}"),hero),format!("Движение · {direction}"));}
         } else {add(self.settings.integer("hero.movement.button",hero),"Движение".into());}
+        for (id, point) in &self.settings.points { add(point.key, format!("Точка {id}")); }
         owners.retain(|_, names| {
             names.len() > 1 && !(names.len() == 2
                 && names.iter().any(|name| name == "ally:mathilda")
@@ -712,7 +713,10 @@ fn linked_geometry(frame: &clbb_moba_core::controller::snapshot::Frame, endpoint
         cancel:controls.cancel_uv.valid().then(||Point::new(controls.cancel_uv.values[0].value,controls.cancel_uv.values[1].value)),
     })
 }
+mod screen_editor;
+
 pub struct Runtime {
+    point_contacts: BTreeMap<i32, screen_editor::Contact>,
     updates: crate::updater::Updates,
     gestures: crate::linked_gesture::Gestures,
     portrait: crate::portrait_gesture::Picker,
@@ -741,6 +745,7 @@ impl Runtime {
         let mut v = Self {
             updates:crate::updater::Updates::new(),
             recorder: recorder.clone(), debug_at:0, debug_pointer_at:0, debug_pending_since:0, debug_mismatch_since:0, debug_route_reason:"initial", debug_full_state_at:0, debug_state_key:(0,-1,0,0),
+            point_contacts: BTreeMap::new(),
             gestures: Default::default(), portrait:Default::default(),
             core: Controller::new(),
             host: Adapter {
@@ -783,6 +788,7 @@ impl Runtime {
                 self.gestures.forget_after_native_reset();self.portrait.reset();
             } else {
                 self.gestures.reset_after_failed_native_abort(&mut self.host);
+                self.release_points();
             }
         }
         let result=self.core.apply_input(&mut self.host,event,now_ns());
@@ -792,6 +798,7 @@ impl Runtime {
     fn reconcile_native_reset(&mut self) {
         if self.last_reset_generation!=self.host.reset_generation {
             self.gestures.forget_after_native_reset();self.portrait.reset();
+            self.point_contacts.clear();
             self.last_reset_generation=self.host.reset_generation;
         }
     }
@@ -889,6 +896,7 @@ impl Runtime {
             self.input(Input::Invalid("F7: данные игры устарели — касания отменены"));
         }
         let now = now_ns();
+        self.expire_points(now);
         for i in 0..5 {
             if self.host.timers[i].is_some_and(|at| now >= at) {
                 self.host.timers[i] = if i == 0 || i == 3 {
@@ -1116,6 +1124,10 @@ impl Runtime {
             self.debug_route_reason="conflicting_binding_disabled";
             return true;
         }
+        if self.point_event(key, down, repeat, active_match) {
+            self.debug_route_reason="custom_screen_point";
+            return true;
+        }
         if self.portrait.contains(key){
             self.debug_route_reason="portrait_held_key";
             if !down&&!repeat{self.portrait.pointer=p;self.portrait.release(key,now_ns());}return true;
@@ -1306,6 +1318,8 @@ impl Runtime {
                     "capability_controls": sample.frame.ui.capability_controls.iter().take(sample.frame.ui.capability_count.min(32) as usize).map(native).collect::<Vec<_>>(),
                 }).to_string()
             }).unwrap_or_else(|| "{\"ready\":false}".into()),
+            "editor.layout" => self.editor_layout(),
+            "points.list" => self.host.settings.points.keys().map(|id| format!("{id}\n")).collect(),
             "hero.controls"=>self.hero_controls(),
             "profiles.forms" => {
                 let mut rows = String::new();
@@ -1535,6 +1549,7 @@ mod tests {
         let recorder=Recorder::new();
         Runtime {
             updates:crate::updater::Updates::new(),
+            point_contacts: BTreeMap::new(),
             gestures: Default::default(), portrait:Default::default(),
             core: Controller::new(),
             host: Adapter {
@@ -1696,6 +1711,49 @@ mod tests {
         assert_eq!(r.host.binding(25,&b,"skill:1").key,87);
         r.host.settings.set("hero.movement.down","65",25).unwrap();
         assert_eq!(r.host.binding_conflicts(25).get(&65).unwrap().len(),2);
+    }
+    #[test]
+    fn screen_points_hold_distinct_fingers_and_instant_tap_retires_only_its_own() {
+        let mut events=Vec::new();
+        let mut r=fixture(&mut events);
+        r.worker.shared.lock().unwrap().sample=Some(Arc::new(template_sample(25,2,now_ns())));
+        r.poll(1280.,720.);
+        for (id,coords,key) in [(1,"100000,100000","74"),(2,"100000,220000","75")] {
+            assert!(r.write(&format!("points.{id}.add"),coords));
+            assert!(r.write(&format!("points.{id}.key"),key));
+        }
+        let other=r.host.begin(Point::new(0.7,0.8));
+        let p=Point::default();
+        for code in [74,75] { assert!(r.event(1,code,true,false,p)); }
+        assert_eq!(r.host.touches.iter().filter(|v|**v).count(),3);
+        assert!(r.event(1,74,true,true,p));
+        assert!(r.event(1,74,false,false,p));
+        assert_eq!(r.host.touches.iter().filter(|v|**v).count(),2);
+        assert!(r.host.touches[other as usize]);
+        assert!(r.event(1,75,false,false,p));
+        assert_eq!(events.iter().map(|e|(e.0,e.1)).collect::<Vec<_>>(),[(0,other),(0,1),(0,2),(2,1),(2,2)]);
+        assert_eq!(events[2].2,events[4].2);
+        assert_eq!(events[2].3,events[4].3);
+        r.host.end(other,p);
+        assert!(r.write("points.2.cast_mode","1"));
+        assert!(r.event(1,74,true,false,p));
+        assert!(r.event(1,75,true,false,p));
+        r.expire_points(now_ns()+50_000_000);
+        assert_eq!(r.host.touches.iter().filter(|v|**v).count(),1);
+        assert!(r.event(1,75,true,true,p));
+        assert_eq!(r.host.touches.iter().filter(|v|**v).count(),1);
+        r.suspend(true);
+        assert!(r.point_contacts.is_empty());
+        assert!(!r.host.touches.contains(&true));
+        let layout=r.editor_layout();
+        assert!(layout.contains("skill:2\tprofile.25.hero.bindings.skill:2.key"));
+        assert!(layout.contains("point:2\tpoints.2.key\t75\t0.100000\t0.220000"));
+        assert!(r.write("points.1.key","69"));
+        assert!(r.host.conflict_blocks(69,25));
+        assert!(!r.write("points.2.key","33554433"));
+        assert!(!r.write("points.2.key",&crate::settings::F5.to_string()));
+        assert!(r.write("points.2.remove","1"));
+        assert!(!r.editor_layout().contains("points.2.key"));
     }
     #[test]
     fn cached_match_conflicts_never_capture_menu_typing_after_source_is_lost() {

@@ -1,5 +1,5 @@
 diff --git a/meson.build b/meson.build
-index 2c31844..a9bc128 100644
+index 2c31844..e8bb8ff 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -61,7 +61,7 @@ subdir('src/api-impl')
@@ -55,19 +55,20 @@ index 2c31844..a9bc128 100644
                                                                          libart_dep, wayland_protos_dep, upcalls_header
                                                                    ],
                                                                    link_with: [ libandroid_so ],
-@@ -258,6 +269,11 @@ resources = gnome.compile_resources('com.gitlab.android_translation_layer.androi
+@@ -258,6 +269,12 @@ resources = gnome.compile_resources('com.gitlab.android_translation_layer.androi
  
  executable('android-translation-layer', [
                                          	'src/main-executable/main.c',
 +                                            'src/main-executable/restart.c',
 +                                            'src/main-executable/clbb_mapper.c',
 +                                            '../../mapper/ui/clbb-settings.c',
++                                            '../../mapper/ui/clbb-editor.c',
 +                                            '../../mapper/ui/clbb-account-gate.c',
 +                                            '../../mapper/ui/clbb-viewport.c',
                                          	'src/main-executable/actions.c',
                                          	'src/main-executable/back_button.c',
                                          	'src/main-executable/bionic_compat.c',
-@@ -267,7 +283,7 @@ executable('android-translation-layer', [
+@@ -267,7 +284,7 @@ executable('android-translation-layer', [
                                          include_directories: shared_includes_dir,
                                          install: true,
                                          dependencies: [
@@ -8652,10 +8653,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..29965c0
+index 0000000..86c1e98
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1656 @@
+@@ -0,0 +1,1670 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -9035,6 +9036,7 @@ index 0000000..29965c0
 +    if (!h->dispatching) {
 +        h->dispatching = TRUE;
 +        h->suspend(h->runtime, visible || !gtk_window_is_active(h->window));
++        if (visible && !h->raw_tap) clbb_view_cancel_mouse(game_surface(GTK_WIDGET(h->window)),0);
 +        h->dispatching = FALSE;
 +    }
 +}
@@ -9042,10 +9044,13 @@ index 0000000..29965c0
 +    int settings = setting_int(h, "hotkeys.settings"),
 +        lock = setting_int(h, "hotkeys.confine"),
 +        full = setting_int(h, "hotkeys.fullscreen");
-+    if (key != settings && key != lock && key != full)
++    int editor = setting_int(h,"hotkeys.editor");
++    if (!key || (key != settings && key != lock && key != full && key != editor))
 +        return FALSE;
 +    if (down && !repeat) {
-+        if (key == settings)
++        if (key == editor)
++            clbb_settings_show_editor(h->settings);
++        else if (key == settings)
 +            clbb_settings_show(h->settings);
 +        else if (key == lock)
 +            confine(h);
@@ -9264,7 +9269,7 @@ index 0000000..29965c0
 +    if (h->dispatching || h->closing)
 +        return FALSE;
 +    gboolean editing = refresh_text_input(h);
-+    if (quick_chat_key(h, event, editing)) return TRUE;
++    if (!clbb_settings_is_visible(h->settings) && quick_chat_key(h, event, editing)) return TRUE;
 +    if (editing) return FALSE;
 +    GdkEventType type = gdk_event_get_event_type(event);
 +    if(type==GDK_FOCUS_CHANGE && !gdk_focus_event_get_in(event)) unlock(h);
@@ -9277,7 +9282,8 @@ index 0000000..29965c0
 +            unlock(h);
 +    }
 +    gboolean panel_visible = clbb_settings_is_visible(h->settings);
-+    if (panel_visible && (clbb_settings_is_capturing(h->settings) ||
++    gboolean editor_visible = clbb_settings_editor_visible(h->settings);
++    if (panel_visible && !editor_visible && (clbb_settings_is_capturing(h->settings) ||
 +        (type != GDK_KEY_PRESS && type != GDK_KEY_RELEASE)))
 +        return FALSE;
 +    if (type == GDK_MOTION_NOTIFY && h->agent_until > g_get_monotonic_time())
@@ -9311,7 +9317,7 @@ index 0000000..29965c0
 +                gdk_key_event_get_keyval(event),hardware);
 +            GdkModifierType mods = gdk_event_get_modifier_state(event);
 +            int chord = clbb_settings_chord(code,mods);
-+            if (code && debug_recording(h) &&
++            if (!editor_visible && code && debug_recording(h) &&
 +                chord == setting_int(h, "debug.mark_shortcut")) code = chord;
 +        }
 +        claimed = g_hash_table_contains(h->claimed, GUINT_TO_POINTER(hardware));
@@ -9333,6 +9339,7 @@ index 0000000..29965c0
 +            code = clbb_settings_mousecode(b);
 +            if (code) code &= ~0x02000000;
 +        }
++        if (editor_visible && kind == 0) return FALSE;
 +        GtkWidget *game = game_surface(GTK_WIDGET(h->window));
 +        if (!game)
 +            return FALSE;
@@ -9352,6 +9359,14 @@ index 0000000..29965c0
 +    if (!code && kind != 0)
 +        return FALSE;
 +    gboolean handled = FALSE;
++    if (editor_visible) {
++        int shortcut_code=kind==2?(0x02000000|code):code;
++        gboolean capture=clbb_settings_editor_input(h->settings,shortcut_code,down,repeat);
++        gboolean close=shortcut_code==setting_int(h,"hotkeys.editor") || (kind==1 && code==0x01000000);
++        if (!capture && close && down && !repeat) clbb_settings_hide(h->settings);
++        if (kind==1 && down) g_hash_table_add(h->claimed,GUINT_TO_POINTER(hardware));
++        return capture || close || kind==1;
++    }
 +    if (kind == 1 && debug_recording(h) && code == setting_int(h, "debug.mark_shortcut")) {
 +        handled = TRUE;
 +        if (down && !repeat) h->write(h->runtime, "debug.mark", "manual");
@@ -9791,7 +9806,7 @@ index 0000000..29965c0
 +    gboolean portrait_visible=!strcmp(h->read(h->runtime,"portrait.visible"),"true");
 +    if(surface && (portrait_visible || h->portrait_visible))gtk_widget_queue_draw(surface);
 +    h->portrait_visible=portrait_visible;
-+    if (++h->ticks % 500 == 0 && clbb_settings_is_visible(h->settings))
++    if (++h->ticks % 500 == 0 && gtk_widget_get_visible(clbb_settings_panel(h->settings)))
 +        clbb_settings_refresh(h->settings);
 +    return G_SOURCE_CONTINUE;
 +}

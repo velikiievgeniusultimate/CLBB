@@ -2,13 +2,24 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf};
 pub const MOUSE: i32 = 0x02000000;
+pub const F5: i32 = 0x01000034;
 pub const F7: i32 = 0x01000036;
 pub const F11: i32 = 0x0100003a;
 pub const F12: i32 = 0x0100003b;
+/// Coordinates in millionths of the logical game surface.
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+pub struct ScreenPoint {
+    pub x: u32,
+    pub y: u32,
+    pub key: i32,
+    pub instant: bool,
+}
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
     pub values: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub points: BTreeMap<u32, ScreenPoint>,
     #[serde(skip)]
     pub path: PathBuf,
     /// Verified current native templates are runtime defaults, not user choices.
@@ -209,6 +220,13 @@ impl Settings {
     }
     pub fn get(&self, key: &str, hero: i32) -> String {
         if key == "enabled" { return "true".into(); }
+        if let Some((id, field)) = point_field(key) {
+            return self.points.get(&id).map(|p| match field {
+                "key" => p.key.to_string(),
+                "cast_mode" => i32::from(p.instant).to_string(),
+                _ => String::new(),
+            }).unwrap_or_default();
+        }
         if let Some((scope, tail)) = key.split_once(".bindings.spell:") {
             if let Some((id, field)) = tail.split_once('.') {
                 let canonical = Self::canonical(key, hero);
@@ -350,6 +368,7 @@ impl Settings {
             "audio.volume" | "audio.game_volume" | "audio.voice_volume" => "100".into(),
             "audio.muted" | "display.show_fps" => "false".into(),
             "hotkeys.chat" => 0x01000004.to_string(),
+            "hotkeys.editor" => F5.to_string(),
             "hotkeys.settings" => F7.to_string(),
             "hotkeys.confine" => F12.to_string(),
             "hotkeys.fullscreen" => F11.to_string(),
@@ -465,6 +484,35 @@ impl Settings {
         }
     }
     pub fn set(&mut self, key: &str, value: &str, hero: i32) -> Result<(), String> {
+        if let Some((id, field)) = point_field(key) {
+            let previous = self.points.get(&id).copied();
+            match (field, previous) {
+                ("add", None) => {
+                    let (x, y) = value.split_once(',').ok_or("Нужны координаты точки")?;
+                    let coord = |n: &str| n.parse::<u32>().ok().filter(|v| *v <= 1_000_000);
+                    self.points.insert(id, ScreenPoint {
+                        x: coord(x).ok_or("Точка вне игры")?, y: coord(y).ok_or("Точка вне игры")?,
+                        ..Default::default()
+                    });
+                }
+                ("remove", Some(_)) if value == "1" => { self.points.remove(&id); }
+                ("key", Some(mut point)) => {
+                    point.key = value.parse().ok().filter(|v| valid_key(*v) && !self.reserved(*v, hero))
+                        .ok_or("Недопустимая клавиша")?;
+                    self.points.insert(id, point);
+                }
+                ("cast_mode", Some(mut point)) if matches!(value, "0" | "1") => {
+                    point.instant = value == "1";
+                    self.points.insert(id, point);
+                }
+                _ => return Err("Не удалось изменить точку".into()),
+            }
+            if let Err(e) = self.save() {
+                if let Some(old) = previous { self.points.insert(id, old); } else { self.points.remove(&id); }
+                return Err(e);
+            }
+            return Ok(());
+        }
         if let Some((scope,tail))=key.split_once(".bindings.") {
             if let Some((slot,field))=tail.rsplit_once('.') {
                 if hold_duration_skill(hero,slot) {
@@ -521,10 +569,10 @@ impl Settings {
             "movement.click_mode" | "hero.movement.click_mode" => matches!(value, "0" | "1" | "2"),
             "movement.click_distance_percent" | "hero.movement.click_distance_percent" => integer.is_some_and(|v| (0..=500).contains(&v)),
             "movement.hold_ms" | "hero.movement.hold_ms" => integer.is_some_and(|v| (40..=600).contains(&v)),
-            "hotkeys.settings" | "hotkeys.confine" | "hotkeys.fullscreen" | "hotkeys.chat" => {
+            "hotkeys.editor" | "hotkeys.settings" | "hotkeys.confine" | "hotkeys.fullscreen" | "hotkeys.chat" => {
                 integer.is_some_and(|v| {
                     if v == 0 { return key == "hotkeys.chat"; }
-                    valid_key(v) && !["hotkeys.settings", "hotkeys.confine", "hotkeys.fullscreen", "hotkeys.chat", "debug.mark_shortcut"]
+                    valid_key(v) && !["hotkeys.editor","hotkeys.settings", "hotkeys.confine", "hotkeys.fullscreen", "hotkeys.chat", "debug.mark_shortcut"]
                         .into_iter()
                         .any(|k| k != key && (self.integer(k, hero) == v
                             || ((k == "hotkeys.chat" || key == "hotkeys.chat") &&
@@ -534,7 +582,7 @@ impl Settings {
             "debug.mark_shortcut" => integer.is_some_and(|v| {
                 let base=v & !0x0e000000;
                 v==0 || (v>0 && v & !0x3fffffff==0 && valid_key(base) && base!=0
-                    && (v & 0x0e000000!=0 || !["hotkeys.settings","hotkeys.confine","hotkeys.fullscreen","hotkeys.chat"].iter().any(|key|self.integer(key,hero)==v || (*key=="hotkeys.chat" && enter_key(v) && enter_key(self.integer(key,hero))))))
+                    && (v & 0x0e000000!=0 || !["hotkeys.editor","hotkeys.settings","hotkeys.confine","hotkeys.fullscreen","hotkeys.chat"].iter().any(|key|self.integer(key,hero)==v || (*key=="hotkeys.chat" && enter_key(v) && enter_key(self.integer(key,hero))))))
             }),
             "hero.cancel_key" | "common.cancel_key" | "movement.button" | "hero.movement.button" => {
                 integer.is_some_and(|v| valid_key(v) && !self.reserved(v, hero))
@@ -583,7 +631,7 @@ impl Settings {
     }
     fn reserved(&self, key: i32, hero: i32) -> bool {
         key != 0
-            && ["hotkeys.settings", "hotkeys.confine", "hotkeys.fullscreen", "hotkeys.chat", "debug.mark_shortcut"]
+            && ["hotkeys.editor","hotkeys.settings", "hotkeys.confine", "hotkeys.fullscreen", "hotkeys.chat", "debug.mark_shortcut"]
                 .into_iter()
                 .any(|k| self.integer(k, hero) == key ||
                     (k == "hotkeys.chat" && enter_key(key) && enter_key(self.integer(k, hero))))
@@ -651,6 +699,10 @@ fn enter_key(key: i32) -> bool {
     matches!(key, 0x01000004 | 0x01000005)
 }
 
+fn point_field(key: &str) -> Option<(u32, &str)> {
+    let (id, field) = key.strip_prefix("points.")?.split_once('.')?;
+    Some((id.parse::<u32>().ok().filter(|n| (1..=256).contains(n))?, field))
+}
 pub fn valid_key(key: i32) -> bool {
     key == 0
         || ((32..=0x10ffff).contains(&key) && !(0xd800..=0xdfff).contains(&key))

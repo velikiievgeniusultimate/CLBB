@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-cc -std=c11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation clbb-settings.c preview.c -o /tmp/clbb-settings-preview $(pkg-config --cflags --libs gtk4)
+cc -std=c11 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation clbb-settings.c clbb-editor.c clbb-viewport.c preview.c -o /tmp/clbb-settings-preview $(pkg-config --cflags --libs gtk4) -lm
 if [[ ${1:-} == --run ]]; then
   shift
   exec /tmp/clbb-settings-preview "$@"

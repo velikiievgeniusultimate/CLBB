@@ -1,4 +1,5 @@
 #include "clbb-settings.h"
+#include "clbb-editor.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,7 +42,10 @@ struct ClbbSettings {
   GtkWidget *audio_input, *audio_output, *audio_status;
   GPtrArray *audio_input_ids, *audio_output_ids;
   char *audio_inventory[2];
-  GtkWidget *panel;
+  GtkWidget *panel, *sidebar, *close;
+  ClbbEditor *editor;
+  gboolean return_to_editor;
+  char *point_list;
   GWeakRef previous_focus;
   ClbbSettingsCallbacks callbacks;
   GPtrArray *controls;
@@ -87,6 +91,11 @@ struct ClbbSettings {
 };
 
 static const char css[] =
+    ".clbb-map-bar, .clbb-map-hint { background: rgba(25,18,28,0.96); color: #fff3f8; border: 1px solid #845669; border-radius: 12px; padding: 6px 12px; }"
+    ".clbb-map-bar label { font-weight: bold; } .clbb-map-hint { padding: 7px 14px; }"
+    "button.clbb-map-button, button.clbb-map-done { min-height: 28px; padding: 2px 10px; border-radius: 8px; background: #34212d; color: #fff1f7; border: 1px solid #764958; }"
+    "button.clbb-map-done { background: #a02c54; border-color: #db5b82; font-weight: bold; }"
+    "button.clbb-map-button:hover, button.clbb-map-done:hover { background: #66324a; }"
     ".clbb-settings { background: #141216; color: #f2edf0; font-family: "
     "Cantarell, sans-serif; font-size: 14px; }"
     ".clbb-shell { background: #141216; } .clbb-header { padding: 20px 26px; "
@@ -279,7 +288,7 @@ gint clbb_settings_chord(gint code, GdkModifierType state) {
       (state & GDK_SHIFT_MASK ? 0x02000000 : 0) |
       (state & GDK_ALT_MASK ? 0x08000000 : 0) : 0;
 }
-static char *key_name(int code) {
+char *clbb_binding_label(int code) {
   if ((code & 0xffff0000) == 0x20000000) return g_strdup_printf("Клавиша · код %u",code & 0xffff);
   if ((code & 0xff000000) == 0x10000000) {
     guint symbol=code & 0xffffff;
@@ -607,6 +616,7 @@ static void mode_control(ClbbSettings *s, GtkWidget *box, const char *title,
                          const char *key, int fallback, gboolean movement) {
   Control *c = new_control(s, box, title, key, CONTROL_MODE, fallback);
   const char *const casts[] = {"При отпускании", "Сразу при нажатии", NULL};
+  const char *const point_modes[] = {"С удержанием", "Моментальное нажатие", NULL};
   const char *const moves[] = {"По прямой", "С обходом препятствий", "Клавиатура", NULL};
   const char *const spells[] = {"Моментальное прожатие", "Обычный навык",
                                 "Моментальный с наведением",
@@ -616,7 +626,7 @@ static void mode_control(ClbbSettings *s, GtkWidget *box, const char *title,
   c->battle_spell_mode=g_str_has_suffix(key,".bindings.extra:2.cast_mode")
       || (spell&&spell!=20030&&spell!=20040&&spell!=20080&&spell!=20190);
   c->widget = gtk_drop_down_new_from_strings(
-      c->battle_spell_mode ? spells : movement ? moves : casts);
+      c->battle_spell_mode ? spells : movement ? moves : g_str_has_prefix(key,"points.") ? point_modes : casts);
   g_signal_connect(c->widget, "notify::selected", G_CALLBACK(changed_mode), c);
   gtk_box_append(GTK_BOX(c->row), c->widget);
 }
@@ -694,6 +704,19 @@ static const char *action_title(const char *slot, int skill, const char *config)
   for (guint n=0;n<G_N_ELEMENTS(slots);++n) if (!strcmp(slot,slots[n])) return titles[n];
   return "Кнопка";
 }
+char *clbb_editor_slot_title(const char *slot) {
+  if(g_str_has_prefix(slot,"point:"))return g_strdup_printf("Точка %s",slot+6);
+  if(g_str_has_prefix(slot,"spell:"))return g_strdup(battle_spell_name(atoi(slot+6)));
+  if(!strcmp(slot,"movement"))return g_strdup("Передвижение");
+  const char *directions[]={"movement.up","movement.down","movement.left","movement.right"};
+  const char *names[]={"Вперёд","Назад","Влево","Вправо"};
+  for(guint i=0;i<G_N_ELEMENTS(names);i++)if(!strcmp(slot,directions[i]))return g_strdup(names[i]);
+  if(!strcmp(slot,"cancel"))return g_strdup("Отмена навыка");
+  if(!strcmp(slot,"ally:johnson"))return g_strdup("Посадка к Джонсону");
+  if(!strcmp(slot,"match:statistics"))return g_strdup("Статистика");
+  if(!strcmp(slot,"attack:quick"))return g_strdup("Быстрая атака");
+  return g_strdup(action_title(slot,0,slot));
+}
 static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,const char *config,const char *mode_config,const char *slot,int type,gboolean cancel) {
   (void)type;
   gboolean personal=!strcmp(prefix,"hero");
@@ -713,7 +736,7 @@ static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,cons
   }
   gboolean fixed=g_str_has_prefix(slot,"combo:");
   gboolean held_only=((s->hero==126 && (!strcmp(slot,"skill:0")||!strcmp(slot,"skill:1")||!strcmp(slot,"skill:2"))) || (s->hero==78 && !strcmp(slot,"skill:0")));
-  if (!cancel&&!fixed&&strcmp(slot,"match:statistics")) {
+  if (!cancel&&!fixed&&strcmp(slot,"match:statistics")&&strcmp(slot,"attack:quick")) {
     GPtrArray *forms=g_ptr_array_new_with_free_func(g_free);
     g_ptr_array_add(forms,g_strdup(!strcmp(slot,"extra:2")?mode_config:slot));
     char **lines=g_strsplit(s->hero_layout,"\n",258);
@@ -852,7 +875,7 @@ static void palette_update(ClbbSettings *s) {
     const char *bind=g_object_get_data(G_OBJECT(pane),"clbb-key");
     int fallback=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pane),"clbb-fallback"));
     int group=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pane),"clbb-group"));
-    g_autofree char *key=key_name(read_int(s,bind,fallback));
+    g_autofree char *key=clbb_binding_label(read_int(s,bind,fallback));
     g_autofree char *description=g_strdup_printf("%s · %s",title,key);
     const char *groups[]={"Базовые","Навыки героя","Боевые навыки","Временные"};
     const char *upgrade=g_str_has_prefix(slot,"skill:")?" Прокачка навыка":"";
@@ -920,6 +943,34 @@ static void palette_action(ClbbSettings *s,const char *slot,const char *config,c
     gtk_box_append(GTK_BOX(pane),wrap_label(note,"clbb-muted"));
   }
 }
+static void remove_point(GtkButton *button,gpointer data) {
+  ClbbSettings *s=data;
+  const char *key=g_object_get_data(G_OBJECT(button),"clbb-remove");
+  if(write_value(s,key,"1")) clbb_settings_refresh(s);
+}
+static void point_panes(ClbbSettings *s) {
+  g_auto(GStrv) rows=g_strsplit(s->point_list?s->point_list:"","\n",-1);
+  for(guint i=0;rows[i];i++) {
+    int id=atoi(rows[i]);if(id<=0||id>256)continue;
+    g_autofree char *slot=g_strdup_printf("point:%d",id);
+    g_autofree char *title=clbb_editor_slot_title(slot);
+    g_autofree char *key=g_strdup_printf("points.%d.key",id);
+    g_autofree char *mode=g_strdup_printf("points.%d.cast_mode",id);
+    GtkWidget *pane=palette_pane(s,slot,title,PALETTE_BASIC,key,0);
+    GtkWidget *box=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
+    gtk_widget_add_css_class(box,"clbb-binding-scope");
+    gtk_box_append(GTK_BOX(pane),box);
+    gtk_box_append(GTK_BOX(box),label("Для всех героев","clbb-section-title"));
+    bind_control(s,box,"Клавиша",key,0);
+    mode_control(s,box,"Нажатие",mode,0,FALSE);
+    GtkWidget *remove=gtk_button_new_with_label("Удалить точку");
+    gtk_widget_set_halign(remove,GTK_ALIGN_START);
+    gtk_widget_add_css_class(remove,"clbb-secondary");
+    g_object_set_data_full(G_OBJECT(remove),"clbb-remove",g_strdup_printf("points.%d.remove",id),g_free);
+    g_signal_connect(remove,"clicked",G_CALLBACK(remove_point),s);
+    gtk_box_append(GTK_BOX(box),remove);
+  }
+}
 static void build_hero(ClbbSettings *s,int hero,const char *layout) {
   clear_dynamic(s,s->hero_box);
   s->hero=hero;g_free(s->hero_layout);s->hero_layout=g_strdup(layout);
@@ -978,6 +1029,11 @@ static void build_hero(ClbbSettings *s,int hero,const char *layout) {
   palette_action(s,"ally:johnson","ally:johnson","Посадка к Джонсону",PALETTE_TEMP,1);
   palette_action(s,"ally:mathilda","ally:mathilda","Помощь Матильды",PALETTE_TEMP,1);
   palette_action(s,"item:active","item:active","Активный предмет",PALETTE_TEMP,1);
+  if(strstr(layout,"\nextra:3\textra:3\t"))palette_action(s,"extra:3","extra:3","Дополнительная кнопка",PALETTE_TEMP,0);
+  if(strstr(layout,"\nextra:2\textra:2\t") && !battle_spell_name(s->active_spell))
+    palette_action(s,"extra:2","extra:2","Боевой навык",PALETTE_SPELLS,0);
+  if(hero==105)palette_action(s,"attack:quick","attack:quick","Быстрая атака",PALETTE_BASIC,0);
+  point_panes(s);
   palette_update(s);
 }
 static void palette_pick_profile(GObject *picker,GParamSpec *spec,gpointer user) {
@@ -1670,6 +1726,31 @@ static void display_refresh(ClbbSettings *s) {
     display_update_draft(s);
 }
 
+static void editor_details(ClbbSettings *s,const char *slot) {
+  g_autofree char *destination=g_strdup(slot);
+  if(g_str_has_prefix(slot,"upgrade:")) {
+    g_free(destination);destination=g_strdup_printf("skill:%s",slot+8);
+  } else if(g_str_has_prefix(slot,"movement.")) {
+    g_free(destination);destination=g_strdup("movement");
+  }
+  clbb_editor_hide(s->editor);
+  s->return_to_editor=TRUE;
+  gtk_button_set_label(GTK_BUTTON(s->close),"К карте кнопок");
+  gtk_drop_down_set_selected(GTK_DROP_DOWN(s->profile_picker),0);
+  gtk_list_box_select_row(GTK_LIST_BOX(s->sidebar),gtk_list_box_get_row_at_index(GTK_LIST_BOX(s->sidebar),1));
+  clbb_settings_refresh(s);
+  for(GtkWidget *pane=gtk_widget_get_first_child(s->hero_box);pane;pane=gtk_widget_get_next_sibling(pane)) {
+    if(g_strcmp0(destination,g_object_get_data(G_OBJECT(pane),"clbb-slot")))continue;
+    int group=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pane),"clbb-group"));
+    palette_tab_clicked(GTK_BUTTON(s->palette_tabs[group]),s);
+    g_free(s->palette_selected);s->palette_selected=g_strdup(destination);palette_update(s);
+    break;
+  }
+  gtk_widget_set_visible(s->panel,TRUE);gtk_widget_grab_focus(s->panel);
+}
+static void open_editor_clicked(GtkButton *button,gpointer data) {
+  (void)button;clbb_settings_show_editor(data);
+}
 ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
                                    const ClbbSettingsCallbacks *callbacks) {
   ClbbSettings *s = g_new0(ClbbSettings, 1);
@@ -1702,7 +1783,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
                  label("COMPUTER LEGENDS BANG BANG", "clbb-caption"));
   gtk_widget_set_hexpand(branding, TRUE);
   gtk_box_append(GTK_BOX(header), branding);
-  GtkWidget *close = gtk_button_new_with_label("Вернуться в игру");
+  GtkWidget *close = s->close = gtk_button_new_with_label("Вернуться в игру");
   gtk_widget_add_css_class(close, "clbb-close");
   g_signal_connect(close, "clicked", G_CALLBACK(close_clicked), s);
   gtk_box_append(GTK_BOX(header), close);
@@ -1710,7 +1791,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   GtkWidget *body = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
   gtk_widget_set_vexpand(body, TRUE);
   gtk_box_append(GTK_BOX(root), body);
-  GtkWidget *sidebar = gtk_list_box_new();
+  GtkWidget *sidebar = s->sidebar = gtk_list_box_new();
   gtk_widget_add_css_class(sidebar, "clbb-sidebar");
   gtk_widget_set_size_request(sidebar, 185, -1);
   gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar), GTK_SELECTION_SINGLE);
@@ -1748,6 +1829,11 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   b = page(s, "controls", "Настройки управления",
            "Выберите действие, чтобы изменить общий бинд или задать исключение для героя.");
   gtk_widget_add_css_class(b,"clbb-palette-page");
+  GtkWidget *open_editor=gtk_button_new_with_label("Открыть интерактивный маппер");
+  gtk_widget_set_halign(open_editor,GTK_ALIGN_START);
+  gtk_widget_add_css_class(open_editor,"clbb-secondary");
+  g_signal_connect(open_editor,"clicked",G_CALLBACK(open_editor_clicked),s);
+  gtk_box_append(GTK_BOX(b),open_editor);
   GtkWidget *toolbar=gtk_box_new(GTK_ORIENTATION_HORIZONTAL,10);
   gtk_widget_add_css_class(toolbar,"clbb-palette-toolbar");
   s->palette_search=gtk_search_entry_new();
@@ -1842,6 +1928,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   bind_control(s, card, "Быстрый ввод в чат", "hotkeys.chat", 0x01000004);
 
   card = section(b, "Окно и курсор");
+  bind_control(s, card, "Интерактивный маппер", "hotkeys.editor", KEY_F1 + 4);
   bind_control(s, card, "Открыть настройки", "hotkeys.settings", KEY_F1 + 6);
   bind_control(s, card, "Ограничить курсор игровой областью", "hotkeys.confine",
                KEY_F1 + 11);
@@ -1883,6 +1970,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   g_signal_connect(sidebar, "row-selected", G_CALLBACK(nav_selected), s);
   gtk_list_box_select_row(GTK_LIST_BOX(sidebar), gtk_list_box_get_row_at_index(
                                                      GTK_LIST_BOX(sidebar), 0));
+  s->editor=clbb_editor_new(overlay,&s->callbacks,s,editor_details);
   clbb_settings_refresh(s);
   return s;
 }
@@ -1911,12 +1999,14 @@ void clbb_settings_refresh(ClbbSettings *s) {
   int hero=s->selected_profile?s->selected_profile:live;
   int spell=read_int(s,"common.battle_spell_id",0);
   g_autofree char *layout=live==hero?read_text(s,"hero.controls",""):g_strdup("");
+  g_autofree char *points=read_text(s,"points.list","");
   g_autofree char *live_name=read_text(s,"hero.name","Герой");
   GtkStringObject *item=gtk_drop_down_get_selected_item(GTK_DROP_DOWN(s->profile_picker));
   const char *profile_name=s->selected_profile&&item?gtk_string_object_get_string(item):live_name;
   if(hero!=s->hero)stop_capture(s);
   if(hero!=s->hero||live!=s->live_profile||spell!=s->active_spell||g_strcmp0(layout,s->hero_layout)
-      ||g_strcmp0(profile_name,s->palette_hero_name)){
+      ||g_strcmp0(profile_name,s->palette_hero_name)||g_strcmp0(points,s->point_list)){
+    g_free(s->point_list);s->point_list=g_steal_pointer(&points);
     s->live_profile=live;
     s->active_spell=spell;
     g_free(s->palette_hero_name);
@@ -1941,10 +2031,10 @@ void clbb_settings_refresh(ClbbSettings *s) {
     switch (c->kind) {
     case CONTROL_BIND:
       if (!strcmp(c->key, "debug.mark_shortcut")) {
-        char *base = key_name(n & ~0x0e000000);
+        char *base = clbb_binding_label(n & ~0x0e000000);
         t = g_strdup_printf("%s%s%s%s", n & 0x04000000 ? "Ctrl+" : "", n & 0x02000000 ? "Shift+" : "", n & 0x08000000 ? "Alt+" : "", base);
         g_free(base);
-      } else t = key_name(n);
+      } else t = clbb_binding_label(n);
       gtk_button_set_label(GTK_BUTTON(c->widget), t);
       g_free(t);
       gboolean conflict=FALSE,allowed=FALSE;
@@ -2033,7 +2123,7 @@ void clbb_settings_refresh(ClbbSettings *s) {
       const char *title=g_object_get_data(G_OBJECT(pane),"clbb-title");
       const char *bind=g_object_get_data(G_OBJECT(pane),"clbb-key");
       int fallback=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pane),"clbb-fallback"));
-      g_autofree char *key=key_name(read_int(s,bind,fallback));
+      g_autofree char *key=clbb_binding_label(read_int(s,bind,fallback));
       g_autofree char *caption=g_strdup_printf("%s · %s",title,key);
       if(g_strcmp0(caption,gtk_button_get_label(GTK_BUTTON(tile))))
         gtk_button_set_label(GTK_BUTTON(tile),caption);
@@ -2043,6 +2133,23 @@ void clbb_settings_refresh(ClbbSettings *s) {
   gtk_widget_set_visible(s->movement_distance_row,
                          read_int(s, "movement.click_mode", 0) == 0);
   s->refreshing = FALSE;
+}
+void clbb_settings_show_editor(ClbbSettings *s) {
+  if(!s || clbb_editor_visible(s->editor))return;
+  if(gtk_widget_get_visible(s->panel)) {
+    stop_capture(s);gtk_widget_set_visible(s->panel,FALSE);
+  } else {
+    GtkRoot *root=gtk_widget_get_root(s->panel);
+    if(root)g_weak_ref_set(&s->previous_focus,gtk_root_get_focus(root));
+    if(s->callbacks.visibility)s->callbacks.visibility(s->callbacks.user,TRUE);
+  }
+  s->return_to_editor=FALSE;
+  gtk_button_set_label(GTK_BUTTON(s->close),"Вернуться в игру");
+  clbb_editor_show(s->editor);
+}
+gboolean clbb_settings_editor_visible(ClbbSettings *s) { return s && clbb_editor_visible(s->editor); }
+gboolean clbb_settings_editor_input(ClbbSettings *s,int code,gboolean down,gboolean repeat) {
+  return clbb_settings_editor_visible(s) && clbb_editor_input(s->editor,code,down,repeat);
 }
 void clbb_settings_show(ClbbSettings *s) {
   if (!s || clbb_settings_is_visible(s))
@@ -2059,6 +2166,8 @@ void clbb_settings_show(ClbbSettings *s) {
 void clbb_settings_hide(ClbbSettings *s) {
   if (!clbb_settings_is_visible(s))
     return;
+  if(s->return_to_editor) { clbb_settings_show_editor(s); return; }
+  clbb_editor_hide(s->editor);
   stop_capture(s);
   gtk_widget_set_visible(s->panel, FALSE);
   GtkWidget *previous = g_weak_ref_get(&s->previous_focus);
@@ -2072,7 +2181,7 @@ void clbb_settings_hide(ClbbSettings *s) {
     s->callbacks.visibility(s->callbacks.user, FALSE);
 }
 gboolean clbb_settings_is_visible(const ClbbSettings *s) {
-  return s && gtk_widget_get_visible(s->panel);
+  return s && (gtk_widget_get_visible(s->panel) || clbb_editor_visible(s->editor));
 }
 GtkWidget *clbb_settings_panel(ClbbSettings *s) {
   return s ? s->panel : NULL;
@@ -2080,7 +2189,9 @@ GtkWidget *clbb_settings_panel(ClbbSettings *s) {
 void clbb_settings_destroy(ClbbSettings *s) {
   if (!s)
     return;
-  clbb_settings_hide(s);
+  s->return_to_editor=FALSE;clbb_settings_hide(s);
+  clbb_editor_free(s->editor);
+  g_free(s->point_list);
   g_object_set_data(G_OBJECT(s->panel),"clbb-accounts-owner",NULL);
   g_clear_pointer(&s->account_ids, g_ptr_array_unref);
   g_clear_pointer(&s->account_labels, g_ptr_array_unref);
