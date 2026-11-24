@@ -396,6 +396,9 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         || (hero == 111 && slot == "skill:2" && base == 11130 && active == 11133)
         // Floryn's global heal is a tap and has no targeting indicator.
         || (hero == 112 && slot == "skill:2" && base == 11235 && active == 11235)
+        // Fredrinn's uncharged ultimate accepts a press that the game ignores.
+        // The charged native variant still supplies its own aiming contract.
+        || (hero == 117 && slot == "skill:3" && base == 11750 && active == 11750)
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
@@ -583,6 +586,13 @@ mod control_kind_tests {
         assert!(!verified_button_only_form(112, "skill:0", 11225, 11225));
         assert!(!verified_button_only_form(112, "skill:1", 11215, 11215));
         assert!(!verified_button_only_form(111, "skill:2", 11235, 11235));
+    }
+    #[test]
+    fn fredrinn_only_taps_the_uncharged_ultimate() {
+        use super::verified_button_only_form;
+        assert!(verified_button_only_form(117, "skill:3", 11750, 11750));
+        assert!(!verified_button_only_form(117, "skill:3", 11750, 11760));
+        assert!(!verified_button_only_form(117, "skill:2", 11750, 11750));
     }
     #[test]
     fn granger_rhapsody_stop_is_only_its_current_native_recast() {
