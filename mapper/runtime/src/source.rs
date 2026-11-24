@@ -394,6 +394,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         || (hero == 110 && slot == "valentina:return" && base == 11070 && matches!(active, 11071 | 11076))
         // Edith ends her transformed form with a tap on the same ultimate slot.
         || (hero == 111 && slot == "skill:2" && base == 11130 && active == 11133)
+        // Floryn's global heal is a tap and has no targeting indicator.
+        || (hero == 112 && slot == "skill:2" && base == 11235 && active == 11235)
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
@@ -573,6 +575,14 @@ mod control_kind_tests {
         assert!(!verified_button_only_form(107, "skill:2", 10730, 10730));
         assert!(!verified_button_only_form(107, "skill:1", 10730, 10735));
         assert!(!verified_button_only_form(106, "skill:2", 10730, 10735));
+    }
+    #[test]
+    fn floryn_global_heal_is_button_only() {
+        use super::verified_button_only_form;
+        assert!(verified_button_only_form(112, "skill:2", 11235, 11235));
+        assert!(!verified_button_only_form(112, "skill:0", 11225, 11225));
+        assert!(!verified_button_only_form(112, "skill:1", 11215, 11215));
+        assert!(!verified_button_only_form(111, "skill:2", 11235, 11235));
     }
     #[test]
     fn granger_rhapsody_stop_is_only_its_current_native_recast() {
