@@ -54,11 +54,14 @@ curl --fail --location --progress-bar --show-error --proto '=https' --proto-redi
     "https://api.github.com/repos/$CLBB_REPO/releases?per_page=20" -o "$CLBB_TMP/releases.json"
 python3 - "$CLBB_TMP/releases.json" > "$CLBB_TMP/tag" <<'PY'
 import json,re,sys
-rows=json.load(open(sys.argv[1]));pattern=re.compile(r'^v(\d+)\.(\d+)\.(\d+)(?:-alpha\.(\d+))?$')
+rows=json.load(open(sys.argv[1]))
+pattern=re.compile(r'v([0-9]+)\.([0-9]+)\.([0-9]+)(?:-(alpha|beta)\.([0-9]+))?')
+phase={'alpha':0,'beta':1,None:2}
 found=[]
 for row in rows:
  m=pattern.fullmatch(row.get('tag_name',''))
- if m and not row.get('draft',True):found.append(((int(m[1]),int(m[2]),int(m[3]),m[4] is None,int(m[4] or 0)),row['tag_name']))
+ if m and not row.get('draft',True):
+    found.append(((int(m[1]),int(m[2]),int(m[3]),phase[m[4]],int(m[5] or 0)),row['tag_name']))
 if not found:raise SystemExit('No CLBB release published / Нет опубликованной сборки CLBB')
 print(max(found)[1])
 PY

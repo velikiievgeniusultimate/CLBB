@@ -83,7 +83,7 @@ def main():
     parser.add_argument('--main-library',type=Path,help='Fresh ATL main library to stage without installing over a running developer copy')
     args=parser.parse_args();args.output.mkdir(parents=True,exist_ok=True)
     tag=(ROOT/'VERSION').read_text().strip()
-    if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-alpha\.\d+)?',tag):raise ValueError('Invalid release version')
+    if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-(?:alpha|beta)\.\d+)?',tag):raise ValueError('Invalid release version')
     source= args.output/f'clbb-{tag}-sources.tar.gz'
     if args.source_only:source_archive(source,tag);return
     for manifest in ['distribution/manager','launcher','mapper/runtime']:

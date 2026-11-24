@@ -35,11 +35,26 @@ fn fetch(url: &str, output: Option<&Path>) -> Result<Vec<u8>> {
     }
     Err(fail(&last_error))
 }
-fn version(tag:&str)->Option<(u32,u32,u32,bool,u32)> {
-    let tag=tag.strip_prefix('v')?;let (number,pre)=tag.split_once('-').unwrap_or((tag,""));
-    let n:Vec<_>=number.split('.').collect();if n.len()!=3{return None;}
-    let seq=if pre.is_empty(){0}else{pre.strip_prefix("alpha.")?.parse().ok()?};
-    Some((n[0].parse().ok()?,n[1].parse().ok()?,n[2].parse().ok()?,pre.is_empty(),seq))
+fn version(tag: &str) -> Option<(u32, u32, u32, u8, u32)> {
+    let tag = tag.strip_prefix('v')?;
+    let (number, prerelease) = tag.split_once('-').map_or((tag, None), |(n, p)| (n, Some(p)));
+    let mut parts = number.split('.');
+    let digits = |part: &str| {
+        part.bytes().all(|c| c.is_ascii_digit()).then(|| part.parse::<u32>().ok()).flatten()
+    };
+    let major = digits(parts.next()?)?;
+    let minor = digits(parts.next()?)?;
+    let patch = digits(parts.next()?)?;
+    if parts.next().is_some() { return None; }
+    let (phase, sequence) = match prerelease {
+        None => (2, 0),
+        Some(pre) => {
+            let (phase, sequence) = pre.split_once('.')?;
+            let phase = match phase { "alpha" => 0, "beta" => 1, _ => return None };
+            (phase, digits(sequence)?)
+        }
+    };
+    Some((major, minor, patch, phase, sequence))
 }
 fn release(raw:&[u8])->Result<Value> {
     let rows:Vec<Value>=serde_json::from_slice(raw)?;
@@ -231,8 +246,19 @@ fn main(){match execute(){Ok(v)=>println!("{v}"),Err(e)=>{println!("{}",json!({"
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]fn version_order_and_tag_path_safety(){assert!(version("v0.1.0-alpha.2")>version("v0.1.0-alpha.1"));assert!(version("v0.1.0")>version("v0.1.0-alpha.99"));for tag in ["../../tmp","v1.2.3/evil","1.2.3","v1.2","v1.2.3-beta.1"]{assert!(version(tag).is_none());}}
+    #[test]
+    fn version_order_and_tag_path_safety() {
+        let releases = ["v0.1.0-alpha.2", "v0.1.0-alpha.99", "v0.1.0-beta.1",
+                        "v0.1.0-beta.10", "v0.1.0", "v0.1.1-alpha.1"];
+        for pair in releases.windows(2) {
+            assert!(version(pair[0]).unwrap() < version(pair[1]).unwrap());
+        }
+        for tag in ["../../tmp", "v1.2.3/evil", "1.2.3", "v1.2", "v1.2.3-",
+                    "v1.2.3-beta.+1", "v1.2.3-beta.", "v1.2.3-rc.1", "v1.2.3-beta.1/evil"] {
+            assert!(version(tag).is_none(), "{tag}");
+        }
+    }
     #[test]fn reject_checksum_ambiguity(){let hash="a".repeat(64);assert_eq!(checksum(&format!("{hash}  runtime.tar.gz\n"),"runtime.tar.gz").unwrap(),hash);assert!(checksum(&format!("{hash}  x\n{hash}  x\n"),"x").is_err());assert!(checksum("bad x","x").is_err());}
-    #[test]fn selects_highest_release_and_rejects_drafts(){let data=br#"[{"tag_name":"v0.1.0","draft":true},{"tag_name":"v0.1.0-alpha.2","draft":false},{"tag_name":"v0.1.0-alpha.1","draft":false}]"#;assert_eq!(release(data).unwrap()["tag_name"],"v0.1.0-alpha.2");}
+    #[test]fn selects_highest_release_and_rejects_drafts(){let data=br#"[{"tag_name":"v0.1.0","draft":true},{"tag_name":"v0.1.0-alpha.81","draft":false},{"tag_name":"v0.1.0-beta.1","draft":false}]"#;assert_eq!(release(data).unwrap()["tag_name"],"v0.1.0-beta.1");}
     #[test]fn enforces_release_origin(){let rel=json!({"tag_name":"v0.1.0","assets":[{"name":ASSET,"browser_download_url":"https://example.org/evil"}]});assert!(asset(&rel,ASSET).is_err());}
 }

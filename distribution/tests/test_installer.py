@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess,sys,tempfile,unittest
 ROOT=Path(__file__).resolve().parents[2]
 class InstallerTests(unittest.TestCase):
-    def run_installer(self, *, existing=False, override=None, manifest_url='https://fixture.invalid/game.apk', desktop='legacy'):
+    def run_installer(self, *, existing=False, override=None, manifest_url='https://fixture.invalid/game.apk', desktop='legacy', tags=None):
         with tempfile.TemporaryDirectory(prefix='clbb-installer-test-')as temp:
             p=Path(temp);bin=p/'bin';bin.mkdir();home=p/'home';home.mkdir();install=p/'installation'
             if existing:
@@ -22,7 +22,7 @@ class InstallerTests(unittest.TestCase):
                 entry=home/'.local/share/applications/org.clbb.CLBB.desktop'
                 entry.parent.mkdir(parents=True);entry.write_text('[Desktop Entry]\nName=CLBB\n')
             (p/'SHA256SUMS').write_text(digest+'  clbb-manager-linux-x86_64\n')
-            (p/'releases.json').write_text(json.dumps([{'tag_name':'v0.1.0-alpha.3','draft':False}]))
+            (p/'releases.json').write_text(json.dumps(tags if tags is not None else [{'tag_name':'v0.1.0-alpha.3','draft':False}]))
             (p/'game-apk.json').write_text(json.dumps({'package':'com.mobile.legends','download_url':manifest_url,'sha256':'a'*64}))
             curl=bin/'curl';curl.write_text('#!'+sys.executable+'''\nimport os,sys,shutil
 from pathlib import Path
@@ -45,6 +45,15 @@ flag='--output'if '--output'in args else '-o';shutil.copyfile(p/name,args[args.i
         result,calls,requests,_=self.run_installer();self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(calls,[['--install'],['--import-game-url','https://fixture.invalid/game.apk','a'*64]])
         self.assertTrue(any(url.endswith('/game-apk.json')for url in requests))
+    def test_bootstrap_selects_beta_over_alpha_and_skips_drafts(self):
+        tags = [{'tag_name': tag, 'draft': draft} for tag, draft in (
+            ('v0.1.0', True), ('v0.1.0-beta.2', True),
+            ('v0.1.0-beta.1', False), ('v0.1.0-alpha.81', False))]
+        result, calls, requests, preserved = self.run_installer(existing=True, tags=tags)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [['--install']])
+        self.assertEqual(preserved, b'preserved')
+        self.assertTrue(any('/v0.1.0-beta.1/clbb-manager-linux-x86_64' in u for u in requests))
     def test_existing_game_is_preserved_without_a_game_download(self):
         result,calls,requests,preserved=self.run_installer(existing=True);self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(calls,[['--install']]);self.assertEqual(preserved,b'preserved');self.assertFalse(any(url.endswith('/game-apk.json')for url in requests))

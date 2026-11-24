@@ -50,6 +50,9 @@ See [installation and distribution](distribution/README.md).
 
 ## Controls and updates
 
+**Upgrading from alpha to beta.** Close CLBB and run the install command above once. It preserves your game data, account and settings. Later beta updates are available from F7.
+
+- **F5** opens the interactive binding map. Use the gear to edit the current hero and right-click empty space to create a global or hero-specific point.
 - **F7**: input, hero, audio, display and update settings.
 - **F11**: windowed / fullscreen mode.
 - **F12**: confine the cursor to the game area.
