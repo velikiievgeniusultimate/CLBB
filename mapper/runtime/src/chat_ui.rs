@@ -1,6 +1,5 @@
-//! Locations of the game's own chat buttons and input fields.
+//! Locations of the battle chat buttons and input field.
 use crate::{
-    account_chooser::named,
     optional_ui::button_widget,
     platform::Memory,
     reflection::{Reflection, Result},
@@ -8,7 +7,6 @@ use crate::{
 };
 
 const DEFAULT_LIMIT: i32 = 60;
-const LOBBY_TEAM_CHANNEL: i32 = 2;
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u32)]
@@ -21,7 +19,6 @@ enum SendState {
 #[derive(Clone, Copy, Debug)]
 pub struct Target {
     pub owner: u64,
-    pub site: u32,
     pub channel: i32,
     pub editing: bool,
     pub point: [f64; 2],
@@ -33,9 +30,8 @@ impl Target {
     pub fn encode(self) -> String {
         let [x, y] = self.point.map(|v| (v * 1e6).round() as u32);
         format!(
-            "{} {} {} {} {x} {y} {} {}",
+            "{} 1 {} {} {x} {y} {} {}",
             self.owner,
-            self.site,
             self.channel,
             u32::from(self.editing),
             self.limit,
@@ -90,22 +86,6 @@ fn configured_limit(value: Option<i32>) -> Option<i32> {
     value.filter(|n| (1..=4096).contains(n))
 }
 
-fn lobby_send_state<M: Memory>(r: &mut Reflection<M>, chat: u64, channel: i32) -> SendState {
-    // The room's Team tab identifies one recipient. Other tabs can have
-    // conversations within a tab that this source does not identify.
-    if channel != LOBBY_TEAM_CHANNEL {
-        return SendState::Unknown;
-    }
-    let value = r
-        .link(chat, "currentInputValue")
-        .and_then(|p| if p == 0 { Ok(0) } else { r.integer(p + 16) });
-    match value {
-        Ok(0) => SendState::Ready,
-        Ok(1..) => SendState::Pending,
-        _ => SendState::Unknown,
-    }
-}
-
 fn battle_send_state<M: Memory>(
     r: &mut Reflection<M>,
     chat: u64,
@@ -125,98 +105,26 @@ fn battle_send_state<M: Memory>(
     }
 }
 
-fn lobby_bar<M: Memory>(r: &mut Reflection<M>, frame: u64) -> Option<[f64; 2]> {
-    let root = r.link(frame, "panel").ok()?;
-    let panels = r.link(root, "list").and_then(|list| r.list(list)).ok()?;
-    for panel in panels.into_iter().filter(|p| *p != 0) {
-        let mut parent = panel;
-        for _ in 0..8 {
-            if parent == root || parent == 0 {
-                break;
-            }
-            parent = r.link(parent, "mParentPanel").unwrap_or(0);
-        }
-        if parent != root {
-            continue;
-        }
-        let Ok(rows) = r
-            .link(panel, "widgets")
-            .and_then(|w| r.link(w, "m_InnerList"))
-            .and_then(|list| r.list(list))
-        else {
-            continue;
-        };
-        let channel = rows
-            .iter()
-            .copied()
-            .filter(|&w| w != 0)
-            .find(|&w| named(r, w, "mSpriteName", "ChatChannel_team"));
-        let Some([cx, cy]) = channel.and_then(|w| point(r, w).ok()) else {
-            continue;
-        };
-        for obj in rows.into_iter().filter(|w| *w != 0) {
-            if named(r, obj, "mSpriteName", "com_pic_baifangkuai8px") {
-                if let Ok([x, y]) = point(r, obj) {
-                    // The chat bar is the background immediately to the right of
-                    // the team's channel icon. Other room widgets share this sprite.
-                    if x > cx && x - cx < 0.20 && (y - cy).abs() < 0.012 {
-                        return Some([x, y]);
-                    }
-                }
-            }
-        }
-    }
-    None
+fn battle_hud(class: &str) -> bool {
+    matches!(class, "UIBattleInfo" | "UIBattleInfo_EGC")
 }
 
-pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64], in_match: bool) -> Option<Target> {
+pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64]) -> Option<Target> {
     let top = frames.iter().rev().copied().find(|v| *v != 0)?;
-    if in_match {
-        // A full-screen modal, the scoreboard or hero selection must own its input.
-        let top_class = r.class_name(r.pointer(top).ok()?).ok()?;
-        if !matches!(
+    // A full-screen modal, the scoreboard or hero selection must own its input.
+    let top_class = r.class_name(r.pointer(top).ok()?).ok()?;
+    if !battle_hud(top_class)
+        && !matches!(
             top_class,
-            "UIBattleInfo"
-                | "UIBattleInfoTips"
+            "UIBattleInfoTips"
                 | "UITrainGM"
                 | "UIMiniMap"
+                | "UIMiniMap_EGC"
                 | "UIMiniMapToolButton"
                 | "UIBattleSpecialEffPanelNew"
                 | "UIJoyStick"
-        ) {
-            return None;
-        }
-        let owner = frames
-            .iter()
-            .rev()
-            .copied()
-            .filter(|p| *p != 0)
-            .find(|&p| named(r, p, "name", "UI_BattleInfo"))?;
-        let chat = r.link(owner, "uiBattleChatInfo").ok()?;
-        let ui = r.link(chat, "m_UIFrameInfo").ok()?;
-        let field = r.link(ui, "m_zLabel_InputChat").ok()?;
-        let send = r.link(ui, "m_button_Send").ok()?;
-        let (editing, point) = if let Some(p) = input_point(r, field, send) {
-            (true, p)
-        } else {
-            let icon = r.link(ui, "m_sprite_SendMessage1").ok()?;
-            (false, point(r, icon).ok()?)
-        };
-        let controller = r.link(chat, "m_sendChat").ok().filter(|&p| p != 0);
-        let limit = controller.and_then(|p| integer(r, p, "chatMaxInputNum"));
-        let channel = controller.and_then(|p| integer(r, p, "m_currentChannel"));
-        return Some(Target {
-            owner,
-            site: 1,
-            channel: channel.unwrap_or(0),
-            editing,
-            point,
-            limit: configured_limit(limit).unwrap_or(DEFAULT_LIMIT),
-            send_state: battle_send_state(r, chat, channel),
-        });
-    }
-    let open = named(r, top, "name", "UI_Chat");
-    if !open && !named(r, top, "name", "UI_MatchRoom") {
+        )
+    {
         return None;
     }
     let owner = frames
@@ -224,33 +132,31 @@ pub fn locate<M: Memory>(r: &mut Reflection<M>, frames: &[u64], in_match: bool) 
         .rev()
         .copied()
         .filter(|p| *p != 0)
-        .find(|&p| named(r, p, "name", "UI_MatchRoom"))?;
-    if !open {
-        return Some(Target {
-            owner,
-            site: 2,
-            channel: 0,
-            editing: false,
-            point: lobby_bar(r, owner)?,
-            limit: DEFAULT_LIMIT,
-            send_state: SendState::Unknown,
-        });
-    }
-    let input = r.link(top, "localInput").ok()?;
-    let label = r.link(input, "label").ok()?;
-    let ui = r.link(top, "m_FrameUI").ok()?;
-    let send = r.link(ui, "m_Button_Send").ok()?;
-    let chat_limit = configured_limit(integer(r, top, "maxInputSize")).unwrap_or(DEFAULT_LIMIT);
-    let limit = configured_limit(integer(r, input, "characterLimit"))
-        .map_or(chat_limit, |n| n.min(chat_limit));
-    let channel = integer(r, top, "_chosenTabType").unwrap_or(0);
+        .find(|&p| {
+            r.pointer(p)
+                .ok()
+                .and_then(|class| r.class_name(class).ok())
+                .is_some_and(battle_hud)
+        })?;
+    let chat = r.link(owner, "uiBattleChatInfo").ok()?;
+    let ui = r.link(chat, "m_UIFrameInfo").ok()?;
+    let field = r.link(ui, "m_zLabel_InputChat").ok()?;
+    let send = r.link(ui, "m_button_Send").ok()?;
+    let (editing, point) = if let Some(p) = input_point(r, field, send) {
+        (true, p)
+    } else {
+        let icon = r.link(ui, "m_sprite_SendMessage1").ok()?;
+        (false, point(r, icon).ok()?)
+    };
+    let controller = r.link(chat, "m_sendChat").ok().filter(|&p| p != 0);
+    let limit = controller.and_then(|p| integer(r, p, "chatMaxInputNum"));
+    let channel = controller.and_then(|p| integer(r, p, "m_currentChannel"));
     Some(Target {
         owner,
-        site: 2,
-        channel,
-        editing: true,
-        point: input_point(r, label, send)?,
-        limit,
-        send_state: lobby_send_state(r, top, channel),
+        channel: channel.unwrap_or(0),
+        editing,
+        point,
+        limit: configured_limit(limit).unwrap_or(DEFAULT_LIMIT),
+        send_state: battle_send_state(r, chat, channel),
     })
 }

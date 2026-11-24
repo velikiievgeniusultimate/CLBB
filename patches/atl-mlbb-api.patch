@@ -568,7 +568,7 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..cf23eea 100644
+index 3eb505c..36bce60 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
 @@ -1,5 +1,8 @@
@@ -580,7 +580,7 @@ index 3eb505c..cf23eea 100644
  
  #include "../defines.h"
  #include "../util.h"
-@@ -8,6 +11,603 @@
+@@ -8,9 +11,626 @@
  /* main app window */
  extern GtkWindow *window;
  
@@ -628,6 +628,31 @@ index 3eb505c..cf23eea 100644
 +	return unity;
 +}
 +
++static gboolean cancel_text_dialog(GtkWindow *dialog)
++{
++	if (!g_object_get_data(G_OBJECT(dialog), "atl-editor-last-submit"))
++		return FALSE;
++	if (g_object_get_data(G_OBJECT(dialog), "atl-editor-cancelling"))
++		return TRUE;
++	g_object_set_data(G_OBJECT(dialog), "atl-editor-cancelling", GINT_TO_POINTER(1));
++	JNIEnv *env = get_jni_env();
++	jobject peer = g_object_get_data(G_OBJECT(dialog), "atl-dialog-peer");
++	jclass type = (*env)->GetObjectClass(env, peer);
++	jmethodID cancel = (*env)->GetMethodID(env, type, "cancel", "()V");
++	if (cancel)
++		(*env)->CallVoidMethod(env, peer, cancel);
++	if ((*env)->ExceptionCheck(env))
++		(*env)->ExceptionDescribe(env);
++	(*env)->DeleteLocalRef(env, type);
++	return TRUE;
++}
++
++static gboolean text_dialog_escape(GtkEventControllerKey *keys, guint keyval, guint code,
++                                   GdkModifierType modifiers, GtkWindow *dialog)
++{
++	return keyval == GDK_KEY_Escape && cancel_text_dialog(dialog);
++}
++
 +static GtkWidget *text_dialog_prepare(GtkWindow *dialog)
 +{
 +	if (!g_object_get_data(G_OBJECT(dialog), "atl-unity-dialog"))
@@ -642,7 +667,14 @@ index 3eb505c..cf23eea 100644
 +		return NULL;
 +	gtk_window_set_modal(dialog, TRUE);
 +	g_object_set_data(G_OBJECT(owner), "atl-text-dialog", dialog);
-+	g_object_set_data_full(G_OBJECT(dialog), "atl-editor-last-submit", g_new0(gint64, 1), g_free);
++	if (!g_object_get_data(G_OBJECT(dialog), "atl-editor-last-submit")) {
++		g_object_set_data_full(G_OBJECT(dialog), "atl-editor-last-submit", g_new0(gint64, 1), g_free);
++		GtkEventController *keys = gtk_event_controller_key_new();
++		gtk_event_controller_set_propagation_phase(keys, GTK_PHASE_CAPTURE);
++		g_signal_connect(keys, "key-pressed", G_CALLBACK(text_dialog_escape), dialog);
++		gtk_widget_add_controller(GTK_WIDGET(dialog), keys);
++	}
++	g_object_set_data(G_OBJECT(dialog), "atl-editor-cancelling", NULL);
 +	return controls.text;
 +}
 +
@@ -667,7 +699,8 @@ index 3eb505c..cf23eea 100644
 +		return FALSE;
 +	gint64 *last_submit = g_object_get_data(G_OBJECT(dialog), "atl-editor-last-submit");
 +	gint64 now = g_get_monotonic_time();
-+	if (!last_submit || now - *last_submit < 200 * G_TIME_SPAN_MILLISECOND)
++	if (!last_submit || g_object_get_data(G_OBJECT(dialog), "atl-editor-cancelling") ||
++	    now - *last_submit < 200 * G_TIME_SPAN_MILLISECOND)
 +		return TRUE;
 +	TextDialog controls = {0};
 +	find_text_controls(gtk_window_get_child(dialog), &controls);
@@ -704,7 +737,6 @@ index 3eb505c..cf23eea 100644
 +typedef struct {
 +	ClbbChatTarget target;
 +	gint64 sent_at;
-+	gboolean saw_pending;
 +} ChatBatch;
 +
 +static InlineChat *inline_chat(GtkWindow *owner)
@@ -792,11 +824,8 @@ index 3eb505c..cf23eea 100644
 +	int horizontal_margin = MIN(16, (int)area.size.width / 20);
 +	out->width = MIN(505, (int)area.size.width - 2 * horizontal_margin);
 +	out->height = natural_height;
-+	out->x = area.origin.x + horizontal_margin;
-+	if (chat->target.site == 1)
-+		out->x += (int)area.size.width - out->width - 2 * horizontal_margin;
-+	out->y = area.origin.y + (int)(area.size.height * (chat->target.site == 1 ? .69 : 1.))
-+	         - out->height - 12;
++	out->x = area.origin.x + (int)area.size.width - out->width - horizontal_margin;
++	out->y = area.origin.y + (int)(area.size.height * .69) - out->height - 12;
 +	return out->width > 0 && out->height > 0;
 +}
 +
@@ -887,8 +916,6 @@ index 3eb505c..cf23eea 100644
 +static void refresh_chat_channel(InlineChat *chat)
 +{
 +	ClbbChatTarget live;
-+	// The ranked room can finish selecting its Team tab after the editor
-+	// opens. Use its actual channel before indexing or discarding a draft.
 +	if (query_chat_site(chat->owner, &live, TRUE) &&
 +	    live.site == chat->target.site && live.owner == chat->target.owner) {
 +		chat->target.channel = live.channel;
@@ -994,7 +1021,7 @@ index 3eb505c..cf23eea 100644
 +gboolean atl_chat_begin(GtkWindow *owner, const ClbbChatTarget *target)
 +{
 +	GtkWidget *overlay = gtk_window_get_child(owner);
-+	if (!GTK_IS_OVERLAY(overlay) || inline_chat(owner))
++	if (target->site != CLBB_CHAT_BATTLE_SITE || !GTK_IS_OVERLAY(overlay) || inline_chat(owner))
 +		return FALSE;
 +	atl_chat_cancel_batch(owner);
 +	InlineChat *chat = g_new0(InlineChat, 1);
@@ -1069,22 +1096,14 @@ index 3eb505c..cf23eea 100644
 +	if (!batch)
 +		return FALSE;
 +	if (now - batch->sent_at >= 8000000 ||
-+	    (target && (target->owner != batch->target.owner || target->site != batch->target.site ||
-+	                (target->site == 2 && !target->editing) ||
++	    (target && (target->site != CLBB_CHAT_BATTLE_SITE ||
++	                target->owner != batch->target.owner ||
 +	                (target->channel && target->channel != batch->target.channel)))) {
 +		atl_chat_cancel_batch(owner);
 +		return FALSE;
 +	}
-+	if (target && target->ready == 1)
-+		batch->saw_pending = TRUE;
-+	// The lobby also rejects consecutive sends in adjacent game-clock seconds,
-+	// even if the first draft has already cleared.
-+	gint64 delay = batch->target.site == 2 ? 2100000 : 500000;
-+	if (!target || target->ready != 2 || now - batch->sent_at < delay)
-+		return FALSE;
-+	// The team tab stays open and clears its input after the send. In battle
-+	// the game closes the panel after accepting the text from Android.
-+	if ((target->site == 2 && !batch->saw_pending) || (target->site == 1 && target->editing))
++	// The battle panel closes after accepting a submitted draft.
++	if (!target || target->ready != 2 || target->editing || now - batch->sent_at < 500000)
 +		return FALSE;
 +	ClbbChatTarget original = batch->target;
 +	ChatDraft *draft = g_object_get_data(G_OBJECT(owner), "atl-chat-draft");
@@ -1130,7 +1149,7 @@ index 3eb505c..cf23eea 100644
 +	if (controls.texts != 1 || controls.buttons != 1)
 +		return FALSE;
 +	ClbbChatTarget target = {0};
-+	if (!query_chat_site(owner, &target, FALSE))
++	if (!query_chat_site(owner, &target, FALSE) || target.site != CLBB_CHAT_BATTLE_SITE)
 +		return FALSE;
 +	if (!chat && !atl_chat_begin(owner, &target))
 +		return FALSE;
@@ -1147,7 +1166,7 @@ index 3eb505c..cf23eea 100644
 +		                   gtk_editable_get_text(GTK_EDITABLE(controls.text));
 +		gtk_editable_set_text(GTK_EDITABLE(chat->entry), text);
 +		gtk_editable_set_position(GTK_EDITABLE(chat->entry), -1);
-+		// Opening the team bar can initially display another tab in UI_Chat.
++		// The channel can settle after the battle panel opens.
 +		chat->restore_draft_when_ready = !*text && !matched && draft &&
 +			draft->target.site == target.site && draft->target.owner == target.owner;
 +	}
@@ -1183,8 +1202,22 @@ index 3eb505c..cf23eea 100644
 +
  static gboolean on_close_request(GtkWidget *dialog, jobject jobj)
  {
- 	printf("on_close_request\n");
-@@ -56,8 +656,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
+-	printf("on_close_request\n");
++	if (cancel_text_dialog(GTK_WINDOW(dialog)))
++		return TRUE;
+ 	JNIEnv *env = get_jni_env();
+ 	J__DialogInterface__dismiss(env, jobj);
+ 	return FALSE;
+@@ -27,6 +647,8 @@ static gboolean on_touch_outside(GtkEventControllerLegacy *controller, GdkEvent
+ {
+ 	GdkEventType event_type = gdk_event_get_event_type(event);
+ 	if ((event_type == GDK_BUTTON_PRESS || event_type == GDK_TOUCH_BEGIN) && gtk_widget_get_visible(GTK_WIDGET(outside->dialog))) {
++		if (cancel_text_dialog(outside->dialog))
++			return TRUE;
+ 		JNIEnv *env = get_jni_env();
+ 		jmethodID dismiss = _METHOD(_CLASS(outside->jobj), "dismiss", "()V");
+ 		(*env)->CallVoidMethod(env, outside->jobj, dismiss);
+@@ -56,8 +678,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
  	GtkWidget *decor_view = GTK_WIDGET(_PTR(decor_view_ptr));
  	GtkWidget *dialog = gtk_window_new();
  	gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
@@ -1202,7 +1235,7 @@ index 3eb505c..cf23eea 100644
  	return _INTPTR(g_object_ref(dialog));
  }
  
-@@ -74,26 +681,39 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,26 +703,43 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
@@ -1225,14 +1258,19 @@ index 3eb505c..cf23eea 100644
  {
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	remove_touch_outside(dialog);
+-	gtk_window_close(dialog);
 +	GtkWindow *owner = gtk_window_get_transient_for(dialog);
 +	InlineChat *chat = inline_chat(owner);
 +	if (chat && chat->dialog == dialog) {
 +		g_object_set_data(G_OBJECT(owner), "atl-chat-editor", NULL);
 +		gtk_window_destroy(dialog);
-+		return;
++	} else if (g_object_get_data(G_OBJECT(dialog), "atl-editor-last-submit")) {
++		/* Android is already dismissing. Do not send a second close request back. */
++		text_dialog_unmap(GTK_WIDGET(dialog), NULL);
++		gtk_window_destroy(dialog);
++	} else {
++		gtk_window_close(dialog);
 +	}
- 	gtk_window_close(dialog);
  }
  
  JNIEXPORT jboolean JNICALL Java_android_app_Dialog_nativeIsShowing(JNIEnv *env, jobject this, jlong ptr)
@@ -8653,7 +8691,7 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..2c6f1b5
+index 0000000..079e1bc
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
 @@ -0,0 +1,1671 @@
@@ -9107,7 +9145,7 @@ index 0000000..2c6f1b5
 +            &target->owner, &target->site, &target->channel, &target->editing,
 +            &target->x, &target->y, &target->limit, &target->ready) >= 6 &&
 +        target->limit > 0 && target->limit <= 4096 &&
-+        target->owner && (target->site == 1 || target->site == 2) &&
++        target->owner && target->site == CLBB_CHAT_BATTLE_SITE &&
 +        target->editing <= 1 && target->x > 0 && target->x < 1000000 &&
 +        target->y > 0 && target->y < 1000000;
 +}

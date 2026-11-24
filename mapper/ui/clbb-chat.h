@@ -3,6 +3,7 @@
 #include <gtk/gtk.h>
 
 #define CLBB_CHAT_DEFAULT_LIMIT 60
+#define CLBB_CHAT_BATTLE_SITE 1
 
 typedef struct {
     guint64 owner;

@@ -251,12 +251,13 @@ impl Worker {
                         let mut out = out.lock().unwrap();
                         out.sample = None;
                         out.mesh = None;
+                        out.chat = None;
                     }
                     if active {
                         if now >= chat_at {
                             chat_at = now + Duration::from_millis(55);
                             let target = frames.active_frames(&mut source.reflection)
-                                .and_then(|visible| crate::chat_ui::locate(&mut source.reflection, &visible, true));
+                                .and_then(|visible| crate::chat_ui::locate(&mut source.reflection, &visible));
                             out.lock().unwrap().chat = target.map(|v| (v, Instant::now()));
                         }
                         if !wait.is_zero() { std::thread::sleep(wait); }
@@ -266,12 +267,7 @@ impl Worker {
                         while Instant::now() < deadline && !quit.load(Ordering::Relaxed) {
                             let visible = frames.active_frames(&mut source.reflection).unwrap_or_default();
                             let state = crate::account_chooser::Reader::locate(&mut source.reflection, &visible);
-                            let target = crate::chat_ui::locate(&mut source.reflection, &visible, false);
-                            {
-                                let mut shared = out.lock().unwrap();
-                                shared.update_chooser(state);
-                                shared.chat = target.map(|v| (v, Instant::now()));
-                            }
+                            out.lock().unwrap().update_chooser(state);
                             std::thread::sleep(Duration::from_millis(70).min(deadline.saturating_duration_since(Instant::now())));
                         }
                     }
