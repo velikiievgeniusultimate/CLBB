@@ -1803,7 +1803,6 @@ impl<M: Memory> Source<M> {
         let plain_owner=plan.ui.buttons.iter().find(|b|b.slot=="attack")
             .and_then(|b|r.pointer(b.object).and_then(|c|r.class(c)).ok()).is_some_and(|c|c.name=="CommonAttack");
         let aimed_attack = !matches!(hero, 71 | 105) && attack_mode == Some(true) && plain_owner;
-        let mut beatrix_point_attack = false;
         if matches!(hero, 71 | 105) {
             // These weapons have their own native attack behavior regardless
             // of the shared precise-targeting preference.
@@ -1833,7 +1832,6 @@ impl<M: Memory> Source<M> {
                 if let Some((proof, kind)) = plan.behaviors.get(&id).filter(|(_, kind)| *kind == expected) {
                     consumed.extend(proof.iter().cloned());
                     control_types.insert("attack".into(), *kind);
-                    beatrix_point_attack = hero == 105 && id == 10560 && *kind == 3;
                 }
             }
         } else if let Some(mode) = attack_mode {
@@ -2092,8 +2090,9 @@ impl<M: Memory> Source<M> {
             }
             if let Some(m) = plan.motions.get_mut(&skill) {
                 m.refresh_visual(r);
-                let allow_fixed_range = control_holds.get(frame.ui.active_slot.as_str()) == Some(&false)
-                    || (beatrix_point_attack && attack_binding && skill == 10560);
+                // Beatrix's bazooka attack uses the live drag range. Its
+                // static rectangle is smaller than the native drag result.
+                let allow_fixed_range = control_holds.get(frame.ui.active_slot.as_str()) == Some(&false);
                 match m.sample_bracketed_with_fixed_range(r, &mut frame, &mut consumed,allow_fixed_range) {
                     Ok(p) => aim = p,
                     Err(_) => {
