@@ -42,9 +42,10 @@ struct ClbbSettings {
   GtkWidget *audio_input, *audio_output, *audio_status;
   GPtrArray *audio_input_ids, *audio_output_ids;
   char *audio_inventory[2];
-  GtkWidget *panel, *sidebar, *close;
+  GtkWidget *panel;
+  GtkWidget *menu, *menu_content, *menu_message;
+  int menu_hero;
   ClbbEditor *editor;
-  gboolean return_to_editor;
   char *point_list;
   GWeakRef previous_focus;
   ClbbSettingsCallbacks callbacks;
@@ -96,6 +97,14 @@ static const char css[] =
     "button.clbb-map-button, button.clbb-map-done { min-height: 28px; padding: 2px 10px; border-radius: 8px; background: #34212d; color: #fff1f7; border: 1px solid #764958; }"
     "button.clbb-map-done { background: #a02c54; border-color: #db5b82; font-weight: bold; }"
     "button.clbb-map-button:hover, button.clbb-map-done:hover { background: #66324a; }"
+    "popover.clbb-map-menu > contents { background: #201921; color: #fff3f8; border: 1px solid #795064; border-radius: 14px; padding: 0; box-shadow: 0 6px 20px rgba(0,0,0,.4); }"
+    "popover.clbb-map-menu > arrow { background: #201921; border-color: #795064; }"
+    ".clbb-settings.clbb-map-sheet { background: transparent; padding: 14px 16px; }"
+    ".clbb-map-title { color: #fff4f8; font-size: 19px; font-weight: 750; }"
+    ".clbb-map-sheet stackswitcher button { background: #2b222d; color: #cbb8c6; border: 1px solid #513c4c; padding: 4px 10px; min-height: 23px; box-shadow: none; }"
+    ".clbb-map-sheet stackswitcher button:checked { background: #54283e; border-color: #cc698b; color: #fff2f7; }"
+    ".clbb-map-sheet .clbb-row { padding: 5px 0; } .clbb-map-sheet .clbb-bind { min-width: 46px; }"
+    ".clbb-map-sheet .clbb-muted { color: #c2aebc; font-size: 12px; }"
     ".clbb-settings { background: #141216; color: #f2edf0; font-family: "
     "Cantarell, sans-serif; font-size: 14px; }"
     ".clbb-shell { background: #141216; } .clbb-header { padding: 20px 26px; "
@@ -202,10 +211,11 @@ static const char css[] =
     ".clbb-override { font-size: 11px; color: #c5b4c0; }";
 
 static char *read_text(ClbbSettings *s, const char *key, const char *fallback) {
-  g_autofree char *profile_key = s->selected_profile > 0 && g_str_has_prefix(key,"hero.")
+  int profile = s->menu_hero > 0 ? s->menu_hero : s->selected_profile;
+  g_autofree char *profile_key = profile > 0 && g_str_has_prefix(key,"hero.")
       && (g_str_has_prefix(key,"hero.bindings.") || g_str_has_prefix(key,"hero.movement.")
           || g_str_has_prefix(key,"hero.cancel_key"))
-      ? g_strdup_printf("profile.%d.%s",s->selected_profile,key) : NULL;
+      ? g_strdup_printf("profile.%d.%s",profile,key) : NULL;
   const char *v =
       s->callbacks.read ? s->callbacks.read(s->callbacks.user, profile_key ? profile_key : key) : NULL;
   return g_strdup(v && *v ? v : fallback);
@@ -229,16 +239,21 @@ static gboolean write_value(ClbbSettings *s, const char *key,
                             const char *value) {
   if (s->refreshing)
     return TRUE;
-  g_autofree char *profile_key = s->selected_profile > 0 && g_str_has_prefix(key,"hero.")
+  int profile = s->menu_hero > 0 ? s->menu_hero : s->selected_profile;
+  g_autofree char *profile_key = profile > 0 && g_str_has_prefix(key,"hero.")
       && (g_str_has_prefix(key,"hero.bindings.") || g_str_has_prefix(key,"hero.movement.")
           || g_str_has_prefix(key,"hero.cancel_key"))
-      ? g_strdup_printf("profile.%d.%s",s->selected_profile,key) : NULL;
+      ? g_strdup_printf("profile.%d.%s",profile,key) : NULL;
   gboolean ok =
       s->callbacks.write && s->callbacks.write(s->callbacks.user, profile_key ? profile_key : key, value);
   gtk_label_set_text(GTK_LABEL(s->message),
                      ok ? "Изменения сохранены"
                         : "Не удалось сохранить: проверьте назначение кнопки");
-  if (!ok)
+  if (s->menu_message) {
+    gtk_widget_set_visible(s->menu_message,!ok);
+    if(!ok)gtk_label_set_text(GTK_LABEL(s->menu_message),"Не удалось сохранить назначение");
+  }
+  if (!ok || s->menu_content)
     clbb_settings_refresh(s);
   return ok;
 }
@@ -638,7 +653,7 @@ static void reset_inheritance(GtkButton *button, gpointer data) {
 }
 static void add_inheritance(Control *c) {
   c->inherit_key = g_strdup_printf("%s.override", c->key);
-  if (gtk_widget_get_ancestor(c->row,GTK_TYPE_FLOW_BOX)) {
+  if (gtk_widget_get_ancestor(c->row,GTK_TYPE_FLOW_BOX) || c->owner->menu_content) {
     c->inherit_status=label("Наследует общее","clbb-muted");
     gtk_box_append(GTK_BOX(gtk_widget_get_first_child(c->row)),c->inherit_status);
   }
@@ -717,14 +732,24 @@ char *clbb_editor_slot_title(const char *slot) {
   if(!strcmp(slot,"attack:quick"))return g_strdup("Быстрая атака");
   return g_strdup(action_title(slot,0,slot));
 }
+static GtkWidget *scope_box(ClbbSettings *s,GtkWidget *parent,gboolean personal) {
+  GtkWidget *box=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
+  gtk_widget_set_hexpand(box,TRUE);
+  const char *title=personal && s->palette_hero_name ? s->palette_hero_name :
+                    personal ? "Для этого героя" : "Для всех героев";
+  if(GTK_IS_STACK(parent)) {
+    gtk_stack_add_titled(GTK_STACK(parent),box,personal?"hero":"common",title);
+  } else {
+    gtk_widget_add_css_class(box,"clbb-binding-scope");
+    gtk_flow_box_insert(GTK_FLOW_BOX(parent),box,-1);
+    gtk_box_append(GTK_BOX(box),label(title,"clbb-section-title"));
+  }
+  return box;
+}
 static void action_scope(ClbbSettings *s,GtkWidget *flow,const char *prefix,const char *config,const char *mode_config,const char *slot,int type,gboolean cancel) {
   (void)type;
   gboolean personal=!strcmp(prefix,"hero");
-  GtkWidget *box=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
-  gtk_widget_add_css_class(box,"clbb-binding-scope");
-  gtk_widget_set_hexpand(box,TRUE);
-  gtk_flow_box_insert(GTK_FLOW_BOX(flow),box,-1);
-  gtk_box_append(GTK_BOX(box),label(personal?(s->palette_hero_name?s->palette_hero_name:"Для этого героя"):"Для всех героев","clbb-section-title"));
+  GtkWidget *box=scope_box(s,flow,personal);
   guint first=s->controls->len;
   const char *binding=g_str_has_prefix(config,"spell:")?config:slot;
   char *key=cancel?g_strdup_printf("%s.cancel_key",prefix):g_strdup_printf("%s.bindings.%s.key",prefix,binding);
@@ -799,10 +824,7 @@ static void action_body(ClbbSettings *s,GtkWidget *content,const char *slot,cons
     gtk_box_append(GTK_BOX(content),wrap_label("Результат навыка зависит от длительности удержания. Применение — только при отпускании.","clbb-muted"));
 }
 static void movement_scope(ClbbSettings *s,GtkWidget *flow,gboolean personal) {
-  GtkWidget *box=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
-  gtk_widget_add_css_class(box,"clbb-binding-scope");gtk_widget_set_hexpand(box,TRUE);
-  gtk_flow_box_insert(GTK_FLOW_BOX(flow),box,-1);
-  gtk_box_append(GTK_BOX(box),label(personal?(s->palette_hero_name?s->palette_hero_name:"Для этого героя"):"Для всех героев","clbb-section-title"));
+  GtkWidget *box=scope_box(s,flow,personal);
   guint first=s->controls->len;
   const char *prefix=personal?"hero.movement":"movement";
   char *key=g_strdup_printf("%s.click_mode",prefix);mode_control(s,box,"Режим",key,0,TRUE);g_free(key);
@@ -813,7 +835,7 @@ static void movement_scope(ClbbSettings *s,GtkWidget *flow,gboolean personal) {
   c->visible_if=g_strdup_printf("%s.click_mode",prefix);
   c->widget=gtk_spin_button_new_with_range(0,500,1);gtk_widget_set_size_request(c->widget,100,-1);
   g_signal_connect(c->widget,"value-changed",G_CALLBACK(changed_number),c);gtk_box_append(GTK_BOX(c->row),c->widget);
-  if (!personal) s->movement_distance_row=c->row;
+  if (!personal && GTK_IS_FLOW_BOX(flow)) s->movement_distance_row=c->row;
   key=g_strdup_printf("%s.hold_ms",prefix);c=new_control(s,box,"Порог удержания, мс",key,CONTROL_NUMBER,150);g_free(key);
   c->widget=gtk_spin_button_new_with_range(40,600,10);gtk_widget_set_size_request(c->widget,100,-1);
   g_signal_connect(c->widget,"value-changed",G_CALLBACK(changed_number),c);gtk_box_append(GTK_BOX(c->row),c->widget);
@@ -948,6 +970,12 @@ static void remove_point(GtkButton *button,gpointer data) {
   const char *key=g_object_get_data(G_OBJECT(button),"clbb-remove");
   if(write_value(s,key,"1")) clbb_settings_refresh(s);
 }
+static void point_controls(ClbbSettings *s,GtkWidget *box,int id) {
+  g_autofree char *key=g_strdup_printf("points.%d.key",id);
+  g_autofree char *mode=g_strdup_printf("points.%d.cast_mode",id);
+  bind_control(s,box,"Клавиша",key,0);
+  mode_control(s,box,"Нажатие",mode,0,FALSE);
+}
 static void point_panes(ClbbSettings *s) {
   g_auto(GStrv) rows=g_strsplit(s->point_list?s->point_list:"","\n",-1);
   for(guint i=0;rows[i];i++) {
@@ -955,14 +983,12 @@ static void point_panes(ClbbSettings *s) {
     g_autofree char *slot=g_strdup_printf("point:%d",id);
     g_autofree char *title=clbb_editor_slot_title(slot);
     g_autofree char *key=g_strdup_printf("points.%d.key",id);
-    g_autofree char *mode=g_strdup_printf("points.%d.cast_mode",id);
     GtkWidget *pane=palette_pane(s,slot,title,PALETTE_BASIC,key,0);
     GtkWidget *box=gtk_box_new(GTK_ORIENTATION_VERTICAL,8);
     gtk_widget_add_css_class(box,"clbb-binding-scope");
     gtk_box_append(GTK_BOX(pane),box);
     gtk_box_append(GTK_BOX(box),label("Для всех героев","clbb-section-title"));
-    bind_control(s,box,"Клавиша",key,0);
-    mode_control(s,box,"Нажатие",mode,0,FALSE);
+    point_controls(s,box,id);
     GtkWidget *remove=gtk_button_new_with_label("Удалить точку");
     gtk_widget_set_halign(remove,GTK_ALIGN_START);
     gtk_widget_add_css_class(remove,"clbb-secondary");
@@ -1070,6 +1096,17 @@ static gboolean on_key(GtkEventControllerKey *controller, guint keyval,
     write_int(s, c->key, code);
     clbb_settings_refresh(s);
     return TRUE;
+  }
+  if (clbb_settings_editor_menu_visible(s)) {
+    if (keyval == GDK_KEY_Escape) {
+      clbb_settings_close_editor_menu(s);
+      return TRUE;
+    }
+    if (clbb_settings_keycode(keyval)==read_int(s,"hotkeys.editor",KEY_F1+4)) {
+      clbb_settings_hide(s);
+      return TRUE;
+    }
+    return FALSE;
   }
   if (keyval == GDK_KEY_Escape) {
     clbb_settings_hide(s);
@@ -1726,27 +1763,96 @@ static void display_refresh(ClbbSettings *s) {
     display_update_draft(s);
 }
 
-static void editor_details(ClbbSettings *s,const char *slot) {
-  g_autofree char *destination=g_strdup(slot);
-  if(g_str_has_prefix(slot,"upgrade:")) {
-    g_free(destination);destination=g_strdup_printf("skill:%s",slot+8);
-  } else if(g_str_has_prefix(slot,"movement.")) {
-    g_free(destination);destination=g_strdup("movement");
+gboolean clbb_settings_editor_menu_visible(const ClbbSettings *s) {
+  return s && s->menu && gtk_widget_get_visible(s->menu);
+}
+void clbb_settings_close_editor_menu(ClbbSettings *s) {
+  if(clbb_settings_editor_menu_visible(s))gtk_popover_popdown(GTK_POPOVER(s->menu));
+}
+static void menu_closed(GtkPopover *popover,gpointer data) {
+  (void)popover;
+  ClbbSettings *s=data;
+  if(s->menu_content)clear_dynamic(s,s->menu_content);
+  s->menu_hero=0;s->menu_content=NULL;s->menu_message=NULL;
+}
+static void scope_changed(GObject *stack,GParamSpec *spec,gpointer data) {
+  (void)stack;(void)spec;
+  ClbbSettings *s=data;
+  if(s->capture) {stop_capture(s);clbb_settings_refresh(s);}
+}
+static gboolean menu_capture_key(GtkEventControllerKey *keys,guint keyval,guint keycode,
+                                 GdkModifierType modifiers,gpointer data) {
+  ClbbSettings *s=data;
+  return s->capture && on_key(keys,keyval,keycode,modifiers,s);
+}
+static void editor_details(ClbbSettings *s,GtkWidget *canvas,const GdkRectangle *anchor,const char *slot) {
+  if(!s->menu) {
+    s->menu=gtk_popover_new();
+    gtk_widget_add_css_class(s->menu,"clbb-map-menu");
+    gtk_widget_set_parent(s->menu,canvas);
+    gtk_popover_set_position(GTK_POPOVER(s->menu),GTK_POS_BOTTOM);
+    g_signal_connect(s->menu,"closed",G_CALLBACK(menu_closed),s);
+    GtkEventController *capture_keys=gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(capture_keys,GTK_PHASE_CAPTURE);
+    g_signal_connect(capture_keys,"key-pressed",G_CALLBACK(menu_capture_key),s);
+    gtk_widget_add_controller(s->menu,capture_keys);
+    GtkEventController *keys=gtk_event_controller_key_new();
+    g_signal_connect(keys,"key-pressed",G_CALLBACK(on_key),s);
+    gtk_widget_add_controller(s->menu,keys);
+    GtkEventController *mouse=gtk_event_controller_legacy_new();
+    gtk_event_controller_set_propagation_phase(mouse,GTK_PHASE_CAPTURE);
+    g_signal_connect(mouse,"event",G_CALLBACK(on_mouse),s);
+    gtk_widget_add_controller(s->menu,mouse);
   }
-  clbb_editor_hide(s->editor);
-  s->return_to_editor=TRUE;
-  gtk_button_set_label(GTK_BUTTON(s->close),"К карте кнопок");
+  if(s->menu_content)menu_closed(GTK_POPOVER(s->menu),s);
   gtk_drop_down_set_selected(GTK_DROP_DOWN(s->profile_picker),0);
-  gtk_list_box_select_row(GTK_LIST_BOX(s->sidebar),gtk_list_box_get_row_at_index(GTK_LIST_BOX(s->sidebar),1));
   clbb_settings_refresh(s);
-  for(GtkWidget *pane=gtk_widget_get_first_child(s->hero_box);pane;pane=gtk_widget_get_next_sibling(pane)) {
-    if(g_strcmp0(destination,g_object_get_data(G_OBJECT(pane),"clbb-slot")))continue;
-    int group=GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pane),"clbb-group"));
-    palette_tab_clicked(GTK_BUTTON(s->palette_tabs[group]),s);
-    g_free(s->palette_selected);s->palette_selected=g_strdup(destination);palette_update(s);
-    break;
+  s->menu_hero=s->hero;
+  GtkWidget *body=gtk_box_new(GTK_ORIENTATION_VERTICAL,9);
+  gtk_widget_add_css_class(body,"clbb-settings");
+  gtk_widget_add_css_class(body,"clbb-map-sheet");
+  gtk_popover_set_child(GTK_POPOVER(s->menu),body);
+  s->menu_content=body;
+  gboolean movement=!strcmp(slot,"movement") || g_str_has_prefix(slot,"movement.");
+  gboolean point=g_str_has_prefix(slot,"point:");
+  gboolean personal=s->hero>0 && !point && strcmp(slot,"match:statistics");
+  g_autofree char *title=clbb_editor_slot_title(movement?"movement":slot);
+  gtk_box_append(GTK_BOX(body),label(title,"clbb-map-title"));
+  GtkWidget *stack=gtk_stack_new();
+  gtk_stack_set_vhomogeneous(GTK_STACK(stack),FALSE);
+  if(personal) {
+    GtkWidget *switcher=gtk_stack_switcher_new();
+    gtk_stack_switcher_set_stack(GTK_STACK_SWITCHER(switcher),GTK_STACK(stack));
+    gtk_box_append(GTK_BOX(body),switcher);
+  } else gtk_box_append(GTK_BOX(body),label("Для всех героев","clbb-muted"));
+  GtkWidget *scroll=gtk_scrolled_window_new();
+  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),GTK_POLICY_NEVER,GTK_POLICY_AUTOMATIC);
+  gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll),MAX(96,MIN(320,gtk_widget_get_height(canvas)-110)));
+  gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll),TRUE);
+  gtk_widget_set_size_request(scroll,MIN(338,MAX(170,gtk_widget_get_width(canvas)-52)),-1);
+  gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll),stack);
+  gtk_box_append(GTK_BOX(body),scroll);
+  for(int n=0;n<=(int)personal;n++) {
+    if(point)point_controls(s,scope_box(s,stack,FALSE),atoi(slot+6));
+    else if(movement)movement_scope(s,stack,n);
+    else if(g_str_has_prefix(slot,"upgrade:")) {
+      GtkWidget *box=scope_box(s,stack,n);
+      g_autofree char *key=g_strdup_printf("%s.bindings.%s.key",n?"hero":"common",slot);
+      Control *c=bind_control(s,box,"Клавиша",key,action_key(slot));
+      if(n)add_inheritance(c);
+    } else {
+      const char *role=g_str_has_prefix(slot,"spell:")?"extra:2":slot;
+      action_scope(s,stack,n?"hero":"common",slot,slot,role,0,!strcmp(slot,"cancel"));
+    }
   }
-  gtk_widget_set_visible(s->panel,TRUE);gtk_widget_grab_focus(s->panel);
+  gtk_stack_set_visible_child_name(GTK_STACK(stack),personal?"hero":"common");
+  g_signal_connect(stack,"notify::visible-child",G_CALLBACK(scope_changed),s);
+  s->menu_message=label("","clbb-accent");
+  gtk_widget_set_visible(s->menu_message,FALSE);
+  gtk_box_append(GTK_BOX(body),s->menu_message);
+  clbb_settings_refresh(s);
+  gtk_popover_set_pointing_to(GTK_POPOVER(s->menu),anchor);
+  gtk_popover_popup(GTK_POPOVER(s->menu));
 }
 static void open_editor_clicked(GtkButton *button,gpointer data) {
   (void)button;clbb_settings_show_editor(data);
@@ -1783,7 +1889,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
                  label("COMPUTER LEGENDS BANG BANG", "clbb-caption"));
   gtk_widget_set_hexpand(branding, TRUE);
   gtk_box_append(GTK_BOX(header), branding);
-  GtkWidget *close = s->close = gtk_button_new_with_label("Вернуться в игру");
+  GtkWidget *close = gtk_button_new_with_label("Вернуться в игру");
   gtk_widget_add_css_class(close, "clbb-close");
   g_signal_connect(close, "clicked", G_CALLBACK(close_clicked), s);
   gtk_box_append(GTK_BOX(header), close);
@@ -1791,7 +1897,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
   GtkWidget *body = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
   gtk_widget_set_vexpand(body, TRUE);
   gtk_box_append(GTK_BOX(root), body);
-  GtkWidget *sidebar = s->sidebar = gtk_list_box_new();
+  GtkWidget *sidebar = gtk_list_box_new();
   gtk_widget_add_css_class(sidebar, "clbb-sidebar");
   gtk_widget_set_size_request(sidebar, 185, -1);
   gtk_list_box_set_selection_mode(GTK_LIST_BOX(sidebar), GTK_SELECTION_SINGLE);
@@ -2143,8 +2249,6 @@ void clbb_settings_show_editor(ClbbSettings *s) {
     if(root)g_weak_ref_set(&s->previous_focus,gtk_root_get_focus(root));
     if(s->callbacks.visibility)s->callbacks.visibility(s->callbacks.user,TRUE);
   }
-  s->return_to_editor=FALSE;
-  gtk_button_set_label(GTK_BUTTON(s->close),"Вернуться в игру");
   clbb_editor_show(s->editor);
 }
 gboolean clbb_settings_editor_visible(ClbbSettings *s) { return s && clbb_editor_visible(s->editor); }
@@ -2166,7 +2270,6 @@ void clbb_settings_show(ClbbSettings *s) {
 void clbb_settings_hide(ClbbSettings *s) {
   if (!clbb_settings_is_visible(s))
     return;
-  if(s->return_to_editor) { clbb_settings_show_editor(s); return; }
   clbb_editor_hide(s->editor);
   stop_capture(s);
   gtk_widget_set_visible(s->panel, FALSE);
@@ -2189,7 +2292,10 @@ GtkWidget *clbb_settings_panel(ClbbSettings *s) {
 void clbb_settings_destroy(ClbbSettings *s) {
   if (!s)
     return;
-  s->return_to_editor=FALSE;clbb_settings_hide(s);
+  clbb_settings_hide(s);
+  if(s->menu) {
+    menu_closed(GTK_POPOVER(s->menu),s);gtk_widget_unparent(s->menu);s->menu=NULL;
+  }
   clbb_editor_free(s->editor);
   g_free(s->point_list);
   g_object_set_data(G_OBJECT(s->panel),"clbb-accounts-owner",NULL);

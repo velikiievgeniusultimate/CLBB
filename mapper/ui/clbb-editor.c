@@ -15,14 +15,14 @@ struct ClbbEditor {
     ClbbSettings *owner;
     ClbbSettingsCallbacks cb;
     ClbbEditorDetails details;
-    GtkWidget *layer, *canvas, *viewport, *gear, *heading, *hint, *popup;
+    GtkWidget *layer, *canvas, *viewport, *heading, *hint, *popup;
     GPtrArray *markers;
     char *snapshot, *selected, *capture;
     guint timer;
     double add_u, add_v;
 };
 
-static const char help[] = "Дважды ЛКМ — назначить клавишу     ·     ПКМ по карте — добавить точку";
+static const char help[] = "Дважды ЛКМ — клавиша    ·    ⚙ — настройки    ·    ПКМ по пустому месту — новая точка";
 
 static void free_marker(gpointer data) {
     Marker *m = data;
@@ -44,7 +44,7 @@ static void hint(ClbbEditor *e, const char *text) {
 static void update_selection(ClbbEditor *e) {
     Marker *m = selected(e);
     gtk_label_set_text(GTK_LABEL(e->heading), m ? m->title : "Карта кнопок");
-    gtk_widget_set_sensitive(e->gear, m != NULL);
+
     gtk_widget_queue_draw(e->canvas);
 }
 
@@ -66,6 +66,7 @@ static gboolean refresh(gpointer data) {
         g_ptr_array_add(e->markers, m);
     }
     if (!selected(e)) {
+        if (e->selected) clbb_settings_close_editor_menu(e->owner);
         g_clear_pointer(&e->selected, g_free);
         g_clear_pointer(&e->capture, g_free);
         hint(e, help);
@@ -90,6 +91,50 @@ static void pill(cairo_t *cr, GdkRectangle r) {
     cairo_close_path(cr);
 }
 
+enum { BADGE_SIZE = 22, BADGE_RADIUS = BADGE_SIZE / 2 };
+typedef enum { MARK_BODY, MARK_GEAR, MARK_DELETE } MarkerPart;
+
+static gboolean custom_marker(const Marker *m) {
+    return g_str_has_prefix(m->slot, "point:");
+}
+
+static GdkRectangle badge(const Marker *m, MarkerPart part) {
+    const int cx = part == MARK_DELETE ? m->box.x : m->box.x + m->box.width;
+    return (GdkRectangle){cx - BADGE_RADIUS, m->box.y - BADGE_RADIUS, BADGE_SIZE, BADGE_SIZE};
+}
+
+static GdkRectangle footprint(const Marker *m) {
+    int left = custom_marker(m) ? BADGE_RADIUS : 0;
+    return (GdkRectangle){m->box.x - left, m->box.y - BADGE_RADIUS,
+        m->box.width + left + BADGE_RADIUS, m->box.height + BADGE_RADIUS};
+}
+
+static void paint_badge(cairo_t *cr, const Marker *m, MarkerPart part) {
+    GdkRectangle b = badge(m, part);
+    cairo_save(cr);
+    cairo_translate(cr, b.x + BADGE_RADIUS, b.y + BADGE_RADIUS);
+    cairo_arc(cr, 0, 0, BADGE_RADIUS - 1, 0, 2 * G_PI);
+    cairo_set_source_rgb(cr, .15, .09, .14); cairo_fill_preserve(cr);
+    cairo_set_line_width(cr, 1.25);
+    cairo_set_source_rgb(cr, .87, .55, .66); cairo_stroke(cr);
+    cairo_set_source_rgb(cr, 1, .89, .93);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    if (part == MARK_DELETE) {
+        cairo_set_line_width(cr, 1.8);
+        cairo_move_to(cr, -3.2, -3.2); cairo_line_to(cr, 3.2, 3.2);
+        cairo_move_to(cr, 3.2, -3.2); cairo_line_to(cr, -3.2, 3.2); cairo_stroke(cr);
+    } else {
+        for (int i = 0; i < 8; i++) {
+            cairo_rectangle(cr, -1.05, -5.8, 2.1, 2.6);
+            cairo_rotate(cr, G_PI / 4);
+        }
+        cairo_fill(cr);
+        cairo_set_line_width(cr, 2.6);
+        cairo_arc(cr, 0, 0, 3.6, 0, 2*G_PI); cairo_stroke(cr);
+    }
+    cairo_restore(cr);
+}
+
 static void paint(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer data) {
     (void)area; (void)w; (void)h;
     ClbbEditor *e = data;
@@ -108,10 +153,13 @@ static void paint(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer data
         const char *text = !g_strcmp0(e->capture,m->path) ? "…" : m->label;
         pango_layout_set_text(layout,text,-1);
         int tw, th; pango_layout_get_pixel_size(layout,&tw,&th);
-        int mw = MAX(30,tw+20), mh = 28;
+        int mw = MAX(38,tw+22), mh = 28;
+        int inset = custom_marker(m) ? BADGE_RADIUS : 0;
+        double min_x = left+inset, max_x = MAX(min_x,right-mw-BADGE_RADIUS);
+        double min_y = top+BADGE_RADIUS, max_y = MAX(min_y,bottom-mh);
         double x = left+m->u*r.size.width, y = top+m->v*r.size.height;
-        GdkRectangle base = {(int)CLAMP(x-mw/2., left, MAX(left,right-mw)),
-            (int)CLAMP(y-mh/2.,top,MAX(top,bottom-mh)), mw,mh};
+        GdkRectangle base = {(int)CLAMP(x-mw/2., min_x, max_x),
+            (int)CLAMP(y-mh/2.,min_y,max_y), mw,mh};
         m->box=base;
         // Two actions may share one native sprite. Keep both labels reachable
         // and connect the displaced label to the measured touch location.
@@ -119,11 +167,12 @@ static void paint(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer data
             gboolean overlaps=FALSE;
             for (guint j=0;j<i && !overlaps;j++) {
                 Marker *prior=g_ptr_array_index(e->markers,j);
-                overlaps=gdk_rectangle_intersect(&prior->box,&m->box,NULL);
+                GdkRectangle a=footprint(prior), b=footprint(m);
+                overlaps=gdk_rectangle_intersect(&a,&b,NULL);
             }
             if (!overlaps) break;
-            int shift=(int)(step/2+1)*(mh+3)*(step%2 ? 1 : -1);
-            m->box.y=(int)CLAMP(base.y+shift,top,MAX(top,bottom-mh));
+            int shift=(int)(step/2+1)*(mh+BADGE_RADIUS+3)*(step%2 ? 1 : -1);
+            m->box.y=(int)CLAMP(base.y+shift,min_y,max_y);
         }
         if (m->box.y != base.y) {
             cairo_set_source_rgba(cr,1,.75,.84,.9); cairo_set_line_width(cr,1.5);
@@ -141,18 +190,30 @@ static void paint(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer data
         cairo_set_line_width(cr,focus?2.5:1.55); cairo_stroke(cr);
         cairo_set_source_rgb(cr,1,.98,.99); cairo_move_to(cr,m->box.x+(mw-tw)/2.,m->box.y+(mh-th)/2.);
         pango_cairo_show_layout(cr,layout);
+        paint_badge(cr,m,MARK_GEAR);
+        if (custom_marker(m)) paint_badge(cr,m,MARK_DELETE);
     }
     g_object_unref(layout);
 }
 
-static Marker *hit(ClbbEditor *e, double x,double y) {
+static gboolean on_badge(const Marker *m, MarkerPart part, double x, double y) {
+    GdkRectangle b = badge(m, part);
+    double dx = x - (b.x + BADGE_RADIUS), dy = y - (b.y + BADGE_RADIUS);
+    return dx*dx + dy*dy <= BADGE_RADIUS*BADGE_RADIUS;
+}
+
+static Marker *hit(ClbbEditor *e, double x, double y, MarkerPart *part) {
     for (guint i=e->markers->len;i>0;i--) {
         Marker *m=g_ptr_array_index(e->markers,i-1); GdkRectangle r=m->box;
-        if (x>=r.x && x<r.x+r.width && y>=r.y && y<r.y+r.height) return m;
+        if (!r.width) continue;
+        if (custom_marker(m) && on_badge(m,MARK_DELETE,x,y)) *part=MARK_DELETE;
+        else if (on_badge(m,MARK_GEAR,x,y)) *part=MARK_GEAR;
+        else if (x>=r.x && x<r.x+r.width && y>=r.y && y<r.y+r.height) *part=MARK_BODY;
+        else continue;
+        return m;
     }
     return NULL;
 }
-
 static void capture(ClbbEditor *e, Marker *m) {
     g_free(e->capture); e->capture=g_strdup(m->path);
     hint(e, "Нажмите клавишу или кнопку мыши    ·    Esc — отмена    ·    Backspace — очистить");
@@ -179,7 +240,8 @@ static void add_point(GtkButton *button, gpointer data) {
 
 static void click(GtkGestureClick *gesture,int count,double x,double y,gpointer data) {
     ClbbEditor *e=data;
-    Marker *m=hit(e,x,y);
+    MarkerPart part=MARK_BODY;
+    Marker *m=hit(e,x,y,&part);
     guint button=gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
     if(button==3 && !m) {
         graphene_rect_t r;
@@ -190,19 +252,32 @@ static void click(GtkGestureClick *gesture,int count,double x,double y,gpointer 
         gtk_popover_popup(GTK_POPOVER(e->popup));
         return;
     }
-    if(button!=1 && button!=3)return;
+    if(button!=1)return;
+    if(m && part==MARK_DELETE) {
+        if(count!=1)return;
+        g_autofree char *key=g_strdup_printf("points.%s.remove",m->slot+6);
+        gboolean ok=e->cb.write(e->cb.user,key,"1");
+        if(ok)refresh(e);
+        hint(e, ok ? "Точка удалена" : "Не удалось удалить точку");
+        return;
+    }
     g_clear_pointer(&e->capture,g_free);
     g_free(e->selected);e->selected=m?g_strdup(m->path):NULL;
     hint(e, m && m->conflict ? "Конфликт клавиш    ·    Дважды ЛКМ — переназначить" : help);
     update_selection(e);
-    if(m && button==1 && count==2) capture(e,m);
-    if(m && button==3) e->details(e->owner,m->slot);
+    if(m && part==MARK_GEAR && count==1) {
+        GdkRectangle anchor=badge(m,MARK_GEAR);
+        e->details(e->owner,e->canvas,&anchor,m->slot);
+    } else if(m && part==MARK_BODY && count==2) capture(e,m);
 }
 
 static gboolean tooltip(GtkWidget *widget,int x,int y,gboolean keyboard,GtkTooltip *tooltip,gpointer data) {
     (void)widget; if(keyboard)return FALSE;
-    Marker *m=hit(data,x,y); if(!m)return FALSE;
-    gtk_tooltip_set_text(tooltip,m->title);
+    MarkerPart part=MARK_BODY;
+    Marker *m=hit(data,x,y,&part); if(!m)return FALSE;
+    g_autofree char *text = part==MARK_DELETE ? g_strdup_printf("Удалить · %s",m->title) :
+        part==MARK_GEAR ? g_strdup_printf("Настройки · %s",m->title) : g_strdup(m->title);
+    gtk_tooltip_set_text(tooltip,text);
     return TRUE;
 }
 
@@ -227,10 +302,6 @@ gboolean clbb_editor_input(ClbbEditor *e,int code,gboolean down,gboolean repeat)
     return TRUE;
 }
 
-static void gear_clicked(GtkButton *button,gpointer data) {
-    (void)button; ClbbEditor *e=data; Marker *m=selected(e);
-    if(m)e->details(e->owner,m->slot);
-}
 static void done_clicked(GtkButton *button,gpointer data) {
     (void)button; ClbbEditor *e=data; clbb_settings_hide(e->owner);
 }
@@ -267,11 +338,6 @@ ClbbEditor *clbb_editor_new(GtkOverlay *overlay,const ClbbSettingsCallbacks *cal
     gtk_widget_set_margin_top(bar,10);gtk_widget_set_margin_end(bar,10);
     gtk_widget_add_css_class(bar,"clbb-map-bar");
     e->heading=gtk_label_new("Карта кнопок");gtk_box_append(GTK_BOX(bar),e->heading);
-    e->gear=gtk_button_new_from_icon_name("preferences-system-symbolic");
-    gtk_widget_set_tooltip_text(e->gear,"Настройки выбранной кнопки");
-    gtk_widget_add_css_class(e->gear,"clbb-map-button");
-    g_signal_connect(e->gear,"clicked",G_CALLBACK(gear_clicked),e);
-    gtk_box_append(GTK_BOX(bar),e->gear);
     GtkWidget *done=gtk_button_new_with_label("Готово");
     gtk_widget_add_css_class(done,"clbb-map-done");
     g_signal_connect(done,"clicked",G_CALLBACK(done_clicked),e);
@@ -293,6 +359,7 @@ void clbb_editor_show(ClbbEditor *e) {
 }
 void clbb_editor_hide(ClbbEditor *e) {
     if(!clbb_editor_visible(e))return;
+    clbb_settings_close_editor_menu(e->owner);
     g_clear_handle_id(&e->timer,g_source_remove);
     g_clear_pointer(&e->capture,g_free);
     gtk_popover_popdown(GTK_POPOVER(e->popup));

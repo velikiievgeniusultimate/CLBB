@@ -77,6 +77,7 @@ ClbbSettings *clbb_settings_create(GtkOverlay *overlay,
 void clbb_settings_show(ClbbSettings *settings);
 void clbb_settings_show_editor(ClbbSettings *settings);
 gboolean clbb_settings_editor_visible(ClbbSettings *settings);
+gboolean clbb_settings_editor_menu_visible(const ClbbSettings *settings);
 gboolean clbb_settings_editor_input(ClbbSettings *settings, int code, gboolean down, gboolean repeat);
 void clbb_settings_hide(ClbbSettings *settings);
 void clbb_settings_refresh(ClbbSettings *settings);

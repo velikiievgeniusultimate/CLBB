@@ -8653,10 +8653,10 @@ index 0000000..36e61bd
 +}
 diff --git a/src/main-executable/clbb_mapper.c b/src/main-executable/clbb_mapper.c
 new file mode 100644
-index 0000000..86c1e98
+index 0000000..2c6f1b5
 --- /dev/null
 +++ b/src/main-executable/clbb_mapper.c
-@@ -0,0 +1,1670 @@
+@@ -0,0 +1,1671 @@
 +/* Native GTK/X11 adapter only. Control, projection and configuration live in
 + * Rust. */
 +#define _GNU_SOURCE
@@ -9268,6 +9268,7 @@ index 0000000..86c1e98
 +    ClbbHost *h = data;
 +    if (h->dispatching || h->closing)
 +        return FALSE;
++    if (clbb_settings_editor_menu_visible(h->settings)) return FALSE;
 +    gboolean editing = refresh_text_input(h);
 +    if (!clbb_settings_is_visible(h->settings) && quick_chat_key(h, event, editing)) return TRUE;
 +    if (editing) return FALSE;
