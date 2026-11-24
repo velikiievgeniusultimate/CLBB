@@ -22,7 +22,8 @@ pub(crate) fn audit_backend<M:Memory>(r:&mut Reflection<M>,ui:u64,owned_camera:u
     if name!="KeySkillLogicExtra"{return Err("target_audit_logic_type".into());}
     let backend=ptr(r,&mut checks,address(logic,&lf,"m_UiLockHeroSkill",&[18])?.0)?;
     let(name,bf)=fields(r,&mut checks,backend)?;
-    if name!="UILockHeroSkill"{return Err("target_audit_backend_type".into());}
+    let portal = name == "UILockWarmholeSkill";
+    if name!="UILockHeroSkill" && !portal {return Err("target_audit_backend_type".into());}
     let mut values=serde_json::Map::new();
     for name in ["<iUseSkillId>k__BackingField","m_eState"] {
         values.insert(name.into(),serde_json::json!(int(r,&mut checks,address(backend,&bf,name,&[8,17])?.0)?));
@@ -51,9 +52,9 @@ pub(crate) fn audit_backend<M:Memory>(r:&mut Reflection<M>,ui:u64,owned_camera:u
         .and_then(|plan|plan.sample(r,&mut checks));
     let list=ptr(r,&mut checks,address(backend,&bf,"lNearHeroIcon",&[21])?.0)?;
     let icons=(||->Result<serde_json::Value>{
-        let mut plan=IconListPlan::new(r,list)?;plan.topology(r,&mut checks)?;let mut rows=Vec::new();
+        let mut plan=IconListPlan::new(r,list,portal)?;plan.topology(r,&mut checks)?;let mut rows=Vec::new();
         for icon in &mut plan.icons {
-            let observed=icon.sample(r,&mut checks,icon.self_go.object)?;
+            let observed=icon.sample(r,&mut checks,icon.self_go.object,portal)?;
             let uv=crate::target_cancel_geometry::CachedCancelWidgetPlan::discover(r,observed.self_id)
                 .and_then(|plan|plan.sample(r,&mut checks));
             rows.push(serde_json::json!({"owner":format!("{:#x}",observed.owner),"self":format!("{:#x}",observed.self_id),
@@ -220,10 +221,10 @@ struct IconObservation {
     collider: bool,
 }
 impl IconPlan {
-    fn new<M: Memory>(r: &mut Reflection<M>, object: u64) -> Result<Self> {
+    fn new<M: Memory>(r: &mut Reflection<M>, object: u64, portal: bool) -> Result<Self> {
         let mut checks = Vec::new();
         let (name, f) = fields(r, &mut checks, object)?;
-        if name != "NearIconInfo" {
+        if name != if portal { "NearWarmholeIconInfo" } else { "NearIconInfo" } {
             return Err("target_icon_type".into());
         }
         let self_id = ptr(r, &mut checks, address(object, &f, "m_Self", &[18])?.0)?;
@@ -247,6 +248,7 @@ impl IconPlan {
         r: &mut Reflection<M>,
         consumed: &mut Checks,
         current_go: u64,
+        portal: bool,
     ) -> Result<IconObservation> {
         check(r, &self.checks)?;
         consumed.extend(self.checks.iter().cloned());
@@ -274,7 +276,7 @@ impl IconPlan {
                 {
                     let mut checks = Vec::new();
                     let (name, pf) = fields(r, &mut checks, player)?;
-                    if name != "ShowPlayer" {
+                    if name != if portal { "ShowSummons" } else { "ShowPlayer" } {
                         return Err("target_player_type".into());
                     }
                     self.player = Some(PlayerPlan {
@@ -324,7 +326,7 @@ struct IconListPlan {
     icons: Vec<IconPlan>,
 }
 impl IconListPlan {
-    fn new<M: Memory>(r: &mut Reflection<M>, list: u64) -> Result<Self> {
+    fn new<M: Memory>(r: &mut Reflection<M>, list: u64, portal: bool) -> Result<Self> {
         let mut checks = Vec::new();
         let (name, f) = fields(r, &mut checks, list)?;
         if name != "List`1" {
@@ -361,7 +363,7 @@ impl IconListPlan {
                 return Err("target_duplicate_icon".into());
             }
             objects[i] = object;
-            icons.push(IconPlan::new(r, object)?);
+            icons.push(IconPlan::new(r, object, portal)?);
         }
         let plan = Self {
             checks,
@@ -407,6 +409,7 @@ impl IconListPlan {
 pub(crate) struct TargetPlan {
     checks: Checks,
     staged_aldous: bool,
+    chip_portals: bool,
     initial_go: Option<GameObjectPlan>,
     data: u64,
     backend: u64,
@@ -418,6 +421,7 @@ pub(crate) struct TargetPlan {
     icon_list: u64,
     state: u64,
     target_guid: (u64, u8),
+    portal_selected: Option<u64>,
     native_cancel: u64,
     unselectable: u64,
     owned_camera: u64,
@@ -510,7 +514,11 @@ impl TargetPlan {
             &&int(r,&mut checks,address(data,&df,"m_InitSkillID",&[8])?.0)?==6430
             &&int(r,&mut checks,address(show,&sf,"m_ID",&[8])?.0)?==64
             &&int(r,&mut checks,address(button,&bf,"m_iIndex",&[8])?.0)?==2;
-        if use_type!=1 || (bits!=64&&!staged_aldous) {
+        let chip_portals = use_type == 1 && bits == 0 && class == "KeySkillLockHero"
+            && int(r, &mut checks, address(data, &df, "m_InitSkillID", &[8])?.0)? == 12485
+            && int(r, &mut checks, address(show, &sf, "m_ID", &[8])?.0)? == 124
+            && int(r, &mut checks, address(button, &bf, "m_iIndex", &[8])?.0)? == 3;
+        if use_type!=1 || (bits!=64&&!staged_aldous&&!chip_portals) {
             return Err("target_frontend_mode_unqualified".into());
         }
         let initial_go=if staged_aldous {
@@ -531,7 +539,7 @@ impl TargetPlan {
             address(logic, &lf, "m_UiLockHeroSkill", &[18])?.0,
         )?;
         let (name, f) = fields(r, &mut checks, backend)?;
-        if name != "UILockHeroSkill" {
+        if name != if chip_portals { "UILockWarmholeSkill" } else { "UILockHeroSkill" } {
             return Err("target_backend_unqualified".into());
         }
         let contacts = target_contacts::discover_ui_camera_class(r, owned_camera)
@@ -541,6 +549,7 @@ impl TargetPlan {
         Ok(Self {
             checks,
             staged_aldous,
+            chip_portals,
             initial_go,
             data,
             backend,
@@ -552,6 +561,9 @@ impl TargetPlan {
             icon_list: address(backend, &f, "lNearHeroIcon", &[21])?.0,
             state: address(backend, &f, "m_eState", &[8, 17])?.0,
             target_guid: address(backend, &f, "iSkillTargetGuid", &[8, 9])?,
+            portal_selected: if chip_portals {
+                Some(address(backend, &f, "m_bHasCastSelectSkill", &[2])?.0)
+            } else { None },
             native_cancel: address(backend, &f, "m_bCancelSkill", &[2])?.0,
             unselectable: address(backend, &f, "m_bSelectUnselectableTarget", &[2])?.0,
             owned_camera,
@@ -640,10 +652,20 @@ impl TargetPlan {
         let state = int(r, consumed, self.state)?;
         let reveal=self.reveal_phase(frame.hero_id.int(),slot,base,active);
         let staged_selector=self.staged_aldous&&frame.hero_id.int()==64&&slot=="skill:2"&&base==6430&&active==6431;
-        let attempt_active=use_skill==base&&if self.staged_aldous {
-            (reveal&&state==7)||(staged_selector&&state==6)
-        }else{active==base&&state==4};
-        let closed=use_skill==base&&if self.staged_aldous {matches!(state,0|8)}else{state==3};
+        let chip_selector = self.chip_portals && frame.hero_id.int() == 124
+            && slot == "skill:3" && base == 12485 && active == 2012498 && use_skill == active;
+        let (attempt_active, closed) = if self.chip_portals {
+            (chip_selector && state == 2, chip_selector && state == 0)
+        } else if self.staged_aldous {
+            (use_skill == base && ((reveal && state == 7) || (staged_selector && state == 6)),
+             use_skill == base && matches!(state, 0 | 8))
+        } else {
+            (use_skill == base && active == base && state == 4, use_skill == base && state == 3)
+        };
+        // Target input uses 4 for active and 3 for closed across backends.
+        let backend_state = if self.chip_portals {
+            if attempt_active { number(4.) } else if closed { number(3.) } else { Default::default() }
+        } else { number(state as f64) };
         let native_cancel = optional(r, consumed, |r, c| boolean(r, c, self.native_cancel));
         let unselectable = optional(r, consumed, |r, c| boolean(r, c, self.unselectable));
         let selected_guid = optional(r, consumed, |r, c| guid(r, c, self.target_guid));
@@ -652,7 +674,7 @@ impl TargetPlan {
             ready: flag(true),
             coherent: flag(true),
             source: text(SOURCE),
-            reason: text(if active == base {
+            reason: text(if active == base || chip_selector {
                 "target_contact_unavailable"
             } else {
                 "selector_phase_complete"
@@ -674,7 +696,7 @@ impl TargetPlan {
             } else {
                 Default::default()
             },
-            backend_state: number(state as f64),
+            backend_state,
             target_guid: selected_guid.map(|v| number(v as f64)).unwrap_or_default(),
             native_cancel: native_cancel.map(flag).unwrap_or_default(),
             native_unselectable: unselectable.map(flag).unwrap_or_default(),
@@ -683,7 +705,8 @@ impl TargetPlan {
         // The observed ConstantShow mode has state4 during the panel capture,
         // state3 idle/end; unknown and native blocked7/8 are not false absence.
         // This qualification belongs only to the exact UILock frontend mode.
-        let native_scope = use_skill==base&&(if self.staged_aldous {reveal||staged_selector}else{active==base});
+        let native_scope = if self.chip_portals { attempt_active }
+            else { use_skill==base&&(if self.staged_aldous {reveal||staged_selector}else{active==base}) };
         if !attempt_active {
             packet.input_ready = flag(false);
             self.was_held = false;
@@ -700,7 +723,7 @@ impl TargetPlan {
         }else{optional(r, consumed, |r, c| ptr(r, c, self.follow)).unwrap_or(0)};
         let cancel = optional(r, consumed, |r, c| ptr(r, c, self.cancel_go)).unwrap_or(0);
         if follow == 0 {
-            if self.staged_aldous&&closed {
+            if (self.staged_aldous || self.chip_portals) && closed {
                 packet.contact_present=flag(false);packet.has_drag=flag(false);packet.input_ready=flag(false);
             }
             return Ok(packet);
@@ -782,7 +805,7 @@ impl TargetPlan {
         let contact_result=if self.staged_aldous&&((staged_selector&&attempt_active)||closed) {
             let list=ptr(r,consumed,self.icon_list)?;
             if self.icons.as_ref().is_none_or(|(object,plan)|*object!=list||plan.topology(r,&mut Vec::new()).is_err()) {
-                self.icons=Some((list,IconListPlan::new(r,list)?));
+                self.icons=Some((list,IconListPlan::new(r,list,false)?));
             }
             let icons=&self.icons.as_ref().unwrap().1;icons.topology(r,consumed)?;
             let mut owners=vec![follow];
@@ -838,6 +861,16 @@ impl TargetPlan {
             packet.reason = text("target_unselectable");
             return Ok(packet);
         }
+        if self.chip_portals && selected_guid == Some(0) {
+            packet.target_valid = flag(false);
+            packet.reason = text("target_no_portal");
+            return Ok(packet);
+        }
+        if let Some(at) = self.portal_selected {
+            if !boolean(r, consumed, at)? {
+                return Ok(packet);
+            }
+        }
         let icon_checkpoint = consumed.len();
         let list = match ptr(r, consumed, self.icon_list) {
             Ok(list) => list,
@@ -850,7 +883,7 @@ impl TargetPlan {
             *object == list && plan.topology(r, &mut Vec::new()).is_ok()
         });
         if !topology_ok {
-            match IconListPlan::new(r, list) {
+            match IconListPlan::new(r, list, self.chip_portals) {
                 Ok(plan) => self.icons = Some((list, plan)),
                 Err(_) => {
                     consumed.truncate(icon_checkpoint);
@@ -867,7 +900,7 @@ impl TargetPlan {
         }
         let mut target = None;
         for icon in &mut icons.icons {
-            let observed = match icon.sample(r, consumed, contact.current_go) {
+            let observed = match icon.sample(r, consumed, contact.current_go, self.chip_portals) {
                 Ok(value) => value,
                 Err(_) => {
                     consumed.truncate(icon_checkpoint);
@@ -898,6 +931,11 @@ impl TargetPlan {
             }
             // Allowed portrait with an unsettled backend GUID stays Unknown,
             // not a positive invalid target or a delayed/cached authorization.
+        } else if self.chip_portals {
+            // The wheel can retain its previous GUID after the cursor leaves
+            // all live icons. That sticky GUID cannot authorize a teleport.
+            packet.target_valid = flag(false);
+            packet.reason = text("target_no_portal_under_cursor");
         }
         Ok(packet)
     }
@@ -1113,6 +1151,7 @@ mod tests {
         let plan = TargetPlan {
             checks: Vec::new(),
             staged_aldous:false,
+            chip_portals: false,
             initial_go:None,
             data: 2000,
             backend: 3000,
@@ -1124,6 +1163,7 @@ mod tests {
             icon_list: 96,
             state: 72,
             target_guid: (80, 9),
+            portal_selected: None,
             native_cancel: 88,
             unselectable: 89,
             owned_camera: 4000,
@@ -1282,7 +1322,7 @@ mod tests {
         let mut r = r;
         write(&r, 30, &[2]);
         let mut consumed = Vec::new();
-        let observed = icon.sample(&mut r, &mut consumed, 999).unwrap();
+        let observed = icon.sample(&mut r, &mut consumed, 999, false).unwrap();
         assert!(observed.player_matches.is_none());
         // This unused entry's player is deliberately unreadable; candidate-only
         // player validation preserves independently owned target receipts.
@@ -1290,7 +1330,7 @@ mod tests {
         icon.player_link = 40;
         write(&r, 30, &[0]);
         write(&r, 16, &0u32.to_le_bytes());
-        let unbound = icon.sample(&mut r, &mut Vec::new(), 101).unwrap();
+        let unbound = icon.sample(&mut r, &mut Vec::new(), 101, false).unwrap();
         assert_eq!(unbound.guid, 0);
         assert!(unbound.player_matches.is_none());
     }

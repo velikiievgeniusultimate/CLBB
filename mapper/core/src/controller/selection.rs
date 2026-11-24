@@ -88,10 +88,16 @@ impl Controller {
             && (1..=MAX_SKILL_ID).contains(&b.skillId)
             && (self.active_variant(b) == b.skillId || {
                 let s=&self.selectionInput_;
-                self.heroId_==64&&b.slot=="skill:2"&&b.skillId==6430&&self.active_variant(b)==6431
+                let active = self.active_variant(b);
+                let phase = match (self.heroId_, b.slot.as_str(), b.skillId, active) {
+                    (64, "skill:2", 6430, 6431) => integer(s.backend_state, 6, 6),
+                    (124, "skill:3", 12485, 2012498) => integer(s.backend_state, 3, 4),
+                    _ => false,
+                };
+                phase
                     &&s.ready.get()&&s.coherent.get()&&selection_kind(s)==Some(2)
-                    &&s.hero_id.int()==64&&s.slot.as_str()==b.slot&&s.base_skill_id.int()==6430
-                    &&s.active_skill_id.int()==6431&&integer(s.backend_state,6,6)
+                    &&s.hero_id.int()==self.heroId_&&s.slot.as_str()==b.slot&&s.base_skill_id.int()==b.skillId
+                    &&s.active_skill_id.int()==active
                     &&s.token.as_str()==self.frameEpoch_&&s.owner_id!=0&&s.backend_owner_id!=0
             })
     }

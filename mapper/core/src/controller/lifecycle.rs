@@ -340,6 +340,7 @@ impl Controller {
             (98, "skill:0", 9810) => &[209810], // Khaleed is still executing his first skill.
             (108, "skill:1", 10820) => &[10820, 10824], // Aulus's ultimate locks W.
             (123, "skill:0", 12310) => &[12370], // Cici's active yo-yo.
+            (124, "skill:3", 12485) => &[2012498], // Combat disables Chip's portal selector.
             _ => &[],
         };
         if !enhancement_forms.is_empty()

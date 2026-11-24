@@ -46,7 +46,7 @@ impl Host for TestHost {
             (_, "extra", _) => 70,
             (17 | 22 | 27 | 33 | 46 | 59 | 63 | 64 | 75 | 83 | 93 | 108, "skill", "skill:1") => 87,
             (22 | 33 | 50 | 64 | 67 | 83, "skill", "skill:2") => 69,
-            (27 | 50 | 94, "skill", "skill:3") => 82,
+            (27 | 50 | 94 | 124, "skill", "skill:3") => 82,
             _ => 81,
         };
         let aim_type = if (hero, button.skillId) == (33, 3320) { 1 } else { self.aim_type };
@@ -210,6 +210,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
     let khaleed_q = Skill { hero: 98, base: 9810, form: 9810, slot: "skill:0" };
     let aulus_w = Skill { hero: 108, base: 10820, form: 10820, slot: "skill:1" };
     let cici_q = Skill { hero: 123, base: 12310, form: 12310, slot: "skill:0" };
+    let chip_portals = Skill { hero: 124, base: 12485, form: 2012498, slot: "skill:3" };
     for (skill, code, form) in [
         (miya, 81, 111), (layla_q, 81, 201812), (freya, 69, 2254),
         (sun_q, 81, 2710), (sun_q, 81, 2705), (sun_q, 81, 2708),
@@ -233,6 +234,7 @@ fn locked_enhancements_block_repeat_without_cancelling_movement() {
         (khaleed_q, 81, 209810),
         (aulus_w, 87, 10820), (Skill { form: 10824, ..aulus_w }, 87, 10824),
         (cici_q, 81, 12370),
+        (chip_portals, 82, 2012498),
     ] {
         let (mut c, mut h) = setup(skill, Some(false), 1, 0);
         let movement = c.movementTouch_;
