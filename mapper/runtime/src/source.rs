@@ -401,6 +401,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         || (hero == 117 && slot == "skill:3" && base == 11750 && active == 11750)
         // Ixia ends the barrage with a tap on the original ultimate button.
         || (hero == 121 && slot == "skill:2" && base == 12130 && active == 2012150)
+        // Zetian's global ultimate is an ordinary press.
+        || (hero == 129 && slot == "skill:2" && base == 12930 && active == 12930)
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
