@@ -568,7 +568,7 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..565cccc 100644
+index 3eb505c..3e5cf81 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
 @@ -1,5 +1,8 @@
@@ -580,7 +580,7 @@ index 3eb505c..565cccc 100644
  
  #include "../defines.h"
  #include "../util.h"
-@@ -8,9 +11,699 @@
+@@ -8,9 +11,701 @@
  /* main app window */
  extern GtkWindow *window;
  
@@ -1099,10 +1099,12 @@ index 3eb505c..565cccc 100644
 +		g_signal_connect(close, "clicked", G_CALLBACK(cancel_inline), chat);
 +		update_chat_limit(chat);
 +	} else {
-+		/* The game already draws its input panel and actions. Render only
-+		 * the editable text and caret over its own field. */
++		/* The lobby draws the live draft from Unity's EditText buffer.
++		 * Keep GTK focused for typing and IME without drawing a second copy. */
 +		gboolean (*field)(GtkWindow *, guint *) = dlsym(RTLD_DEFAULT, "clbb_lobby_chat_field");
-+		if (field && !field(owner, chat->lobby_field))
++		if (field && field(owner, chat->lobby_field))
++			gtk_widget_set_opacity(chat->entry, 0.);
++		else
 +			chat->lobby_field[2] = 0;
 +		gtk_widget_add_css_class(chat->entry, "clbb-plain-input");
 +		gtk_entry_set_has_frame(GTK_ENTRY(chat->entry), FALSE);
@@ -1281,7 +1283,7 @@ index 3eb505c..565cccc 100644
  	JNIEnv *env = get_jni_env();
  	J__DialogInterface__dismiss(env, jobj);
  	return FALSE;
-@@ -27,6 +720,8 @@ static gboolean on_touch_outside(GtkEventControllerLegacy *controller, GdkEvent
+@@ -27,6 +722,8 @@ static gboolean on_touch_outside(GtkEventControllerLegacy *controller, GdkEvent
  {
  	GdkEventType event_type = gdk_event_get_event_type(event);
  	if ((event_type == GDK_BUTTON_PRESS || event_type == GDK_TOUCH_BEGIN) && gtk_widget_get_visible(GTK_WIDGET(outside->dialog))) {
@@ -1290,7 +1292,7 @@ index 3eb505c..565cccc 100644
  		JNIEnv *env = get_jni_env();
  		jmethodID dismiss = _METHOD(_CLASS(outside->jobj), "dismiss", "()V");
  		(*env)->CallVoidMethod(env, outside->jobj, dismiss);
-@@ -56,8 +751,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
+@@ -56,8 +753,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
  	GtkWidget *decor_view = GTK_WIDGET(_PTR(decor_view_ptr));
  	GtkWidget *dialog = gtk_window_new();
  	gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
@@ -1308,7 +1310,7 @@ index 3eb505c..565cccc 100644
  	return _INTPTR(g_object_ref(dialog));
  }
  
-@@ -74,26 +776,43 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,26 +778,43 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
