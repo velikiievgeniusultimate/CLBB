@@ -629,6 +629,11 @@ impl Host for Adapter {
         {
             binding.key = 0;
         }
+        if hero == 110 && matches!(button.kind.as_str(), "skill" | "attack") && binding.aim_type == 0
+            && !matches!(button.slot.as_str(), "attack:minion" | "attack:tower")
+        {
+            binding.key = 0;
+        }
         if self.conflict_blocks(binding.key, hero) { binding.key=0; }
         binding
     }
@@ -1252,7 +1257,7 @@ impl Runtime {
                 serde_json::json!({"fresh":true,"frame":sample.frame.encode(),"projection":sample.projection,
                     "hero":sample.frame.hero_id.int(),"epoch":sample.frame.token.as_str(),
                     "game_clock_ms":sample.game_clock_ms,"plan_revision":sample.plan_revision,
-                    "control_holds":sample.control_holds,"types":sample.control_types}).to_string()
+                    "control_holds":sample.control_holds,"types":sample.control_types,"borrowed_skill":sample.borrowed_skill}).to_string()
             }).unwrap_or_else(||"{\"fresh\":false}".into()),
             "diagnostics.cast_lock" => self.host.fresh().map(|sample| {
                 let state = &sample.frame.skill_state;
@@ -1632,6 +1637,7 @@ mod tests {
             projection: [0.; 16], logic: [0.; 2], indicator: 0,
             aim: None, direction_visual: None, direction_origin:None,
             control_types: BTreeMap::from([("skill:2".into(), kind)]), control_holds: BTreeMap::new(), linked: None, portrait:None,
+            borrowed_skill: None,
         }
     }
     #[test]

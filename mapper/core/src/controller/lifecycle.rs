@@ -5,7 +5,7 @@ const ALDOUS_SKILLS: [(&str, i32); 3] = [("skill:0", 6410), ("skill:1", 6420), (
 impl Controller {
     pub(crate) fn intrinsic_direction_attack(&self,b:&Button)->bool {
         b.kind == "attack" && b.slot == "attack" && b.aimType == 2
-            && matches!((self.heroId_, b.skillId), (71, 7100 | 107100 | 207100) | (105, 10500))
+            && matches!((self.heroId_, b.skillId), (71 | 110, 7100 | 107100 | 207100) | (105 | 110, 10500))
     }
     pub(crate) fn aimed_attack(&self,b:&Button)->bool {
         b.kind=="attack" && b.slot=="attack" && (b.aimType==3 || self.intrinsic_direction_attack(b))
@@ -69,7 +69,7 @@ impl Controller {
     }
     pub(crate) fn current_config_slot(&self, b: &Button) -> String {
         let variant = self.active_variant(b);
-        if b.kind == "skill" && variant > 0 && variant != b.skillId {
+        if b.kind == "skill" && b.slot != "valentina:return" && variant > 0 && variant != b.skillId {
             format!("{}:{variant}", b.slot)
         } else { b.slot.clone() }
     }
@@ -582,6 +582,7 @@ impl Controller {
         let request = QueuedSkill {
             slot: b.slot.clone(),
             key: b.key,
+            baseSkill: b.skillId,
             held: true,
             requestedNs: self.now_,
             arrowFollow: arrow_follow,
@@ -651,9 +652,14 @@ impl Controller {
             {
                 return;
             }
-            if b.key != self.queuedSkills_[0].key {
+            if b.key != self.queuedSkills_[0].key
+                || (self.heroId_ == 110 && b.skillId != self.queuedSkills_[0].baseSkill)
+            {
                 self.trace(host, "skill_queue", "binding_or_form_changed");
                 let q = self.queuedSkills_.remove(0);
+                if self.heroId_ == 110 && q.held {
+                    self.contextIgnoredKeys_.insert(q.key);
+                }
                 Self::drop_intent(host, &q.down);
                 Self::drop_intent(host, &q.up);
                 self.set_status(

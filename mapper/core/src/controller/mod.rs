@@ -88,6 +88,7 @@ pub struct SkillIntent {
 pub struct QueuedSkill {
     pub slot: String,
     pub key: i32,
+    pub(crate) baseSkill: i32,
     pub held: bool,
     pub requestedNs: i64,
     pub(crate) arrowFollow: bool,

@@ -390,6 +390,8 @@ fn verified_button_only_form(hero:i32, slot:&str, base:i32, active:i32)->bool {
         || (hero == 105 && slot == "skill:3" && base == 2010580 && active == 2010580)
         // Natan swaps with the existing clone. Only placement needs aim.
         || (hero == 107 && slot == "skill:2" && base == 10730 && active == 10735)
+        // Valentina may discard a stored ultimate or leave its current form.
+        || (hero == 110 && slot == "valentina:return" && base == 11070 && matches!(active, 11071 | 11076))
         // Native ordinary scythe recall; readiness remains game-owned.
         || (hero==72 && slot=="skill:0" && base==7210 && active==7260)
         // Kadita's observed wave dismount and wave-local breath have no
@@ -476,6 +478,31 @@ fn retain_choice_family(ui:&s::Ui,state:&s::VariantState,slot:&str,
 
 #[cfg(test)]
 mod control_kind_tests {
+    #[test]
+    fn borrowed_button_rules_preserve_the_donor_identity_and_current_form() {
+        use super::{BorrowedSkill, borrowed_button_only_form};
+        for (hero, ultimate, slot, base, recast) in [
+            (4, 430, "skill:0", 410, 411),
+            (8, 830, "skill:2", 830, 860),
+            (9, 930, "skill:2", 930, 938),
+            (23, 2330, "skill:2", 2330, 2333),
+            (26, 2630, "skill:2", 2630, 2632),
+            (42, 4230, "skill:1", 4220, 4221),
+            (46, 4630, "skill:2", 4630, 4681),
+            (52, 5250, "skill:2", 5250, 5256),
+            (53, 5330, "skill:2", 5330, 5396),
+            (55, 5530, "skill:2", 5530, 5534),
+            (61, 6130, "skill:2", 6130, 6146),
+            (107, 10730, "skill:2", 10730, 10735),
+        ] {
+            let copy = BorrowedSkill { hero, ultimate, attack: 0 };
+            assert!(borrowed_button_only_form(copy, slot, base, recast));
+            assert!(!borrowed_button_only_form(copy, slot, base, base));
+            assert!(!borrowed_button_only_form(BorrowedSkill { hero: 16, ..copy }, slot, base, recast));
+            assert!(!borrowed_button_only_form(copy, "valentina:return", base, recast));
+        }
+    }
+
     #[test]
     fn beatrix_attack_type_requires_its_own_current_weapon() {
         use super::beatrix_attack_type;
@@ -738,6 +765,7 @@ impl UiPlan {
             let native_index=index;
             let mut index=index;
             let mut cecilion_pair = false;
+            let mut valentina_return = false;
             if kind == "extra" && class.name == "KeySkillEquip" && index == 0 && skill != 0 {
                 let hero = r.integer(local_hero_address)?;
                 let base = r.integer(skill)?;
@@ -759,6 +787,15 @@ impl UiPlan {
                     index = 3;
                 }
             }
+            if class.name == "SkillButtonUltimateExtra" && native_index == 0 && skill != 0
+                && r.integer(local_hero_address)? == 110 && r.integer(skill)? == 11070
+            {
+                checks.push((local_hero_address, 110i32.to_le_bytes().to_vec()));
+                checks.push((skill, 11070i32.to_le_bytes().to_vec()));
+                kind = "skill";
+                index = 4;
+                valentina_return = true;
+            }
             if kind=="skill" && class.name=="KeySkillLockDeadHero" && skill!=0 {
                 let hero=r.integer(local_hero_address)?;
                 let base=r.integer(skill)?;
@@ -770,6 +807,8 @@ impl UiPlan {
             }
             let slot = if johnson_interactive.is_some() {
                 "ally:johnson".into()
+            } else if valentina_return {
+                "valentina:return".into()
             } else if kind == "assist" {
                 "ally:mathilda".into()
             } else if kind == "item" {
@@ -848,7 +887,7 @@ impl UiPlan {
                 timer,
                 widget: None,
                 johnson_interactive,
-                require_visible_icon: cecilion_pair || johnson_interactive.is_some(),
+                require_visible_icon: cecilion_pair || johnson_interactive.is_some() || valentina_return,
             });
         }
         let info = link(r, object, "m_UIFrameInfo", &mut checks)?;
@@ -1293,6 +1332,85 @@ pub struct Sample {
     pub control_holds: std::collections::BTreeMap<String, bool>,
     pub linked: Option<crate::linked_gesture::Observation>,
     pub portrait: Option<crate::portrait_picker::Observation>,
+    pub(crate) borrowed_skill: Option<BorrowedSkill>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct BorrowedSkill {
+    hero: i32,
+    ultimate: i32,
+    attack: i32,
+}
+#[derive(Default)]
+struct BorrowedSkillPlan {
+    fields: Option<(Checks, [u64; 5])>,
+    retry: i64,
+}
+impl BorrowedSkillPlan {
+    fn discover<M: Memory>(r: &mut Reflection<M>, actor: u64) -> Result<(Checks, [u64; 5])> {
+        use crate::skill_config::{owner, pointer, typed_field};
+        let mut checks = Vec::new();
+        let comp = pointer(r, &mut checks, actor, "m_StealSkillComp")?;
+        owner(r, &mut checks, comp, "StealBigSkillComp")?;
+        if pointer(r, &mut checks, comp, "m_pOwner")? != actor {
+            return Err("Borrowed skill component belongs to another actor".into());
+        }
+        let data = pointer(r, &mut checks, comp, "m_StealBigSkill")?;
+        owner(r, &mut checks, data, "StealBigSkillData")?;
+        let fields = [
+            typed_field(r, &mut checks, comp, "m_StealBigSkillID", &[8])?.0,
+            typed_field(r, &mut checks, data, "m_bActive", &[2])?.0,
+            typed_field(r, &mut checks, data, "m_BigSkillID", &[8])?.0,
+            typed_field(r, &mut checks, data, "m_TargetID", &[8])?.0,
+            typed_field(r, &mut checks, data, "m_AtkSkillID", &[8])?.0,
+        ];
+        check(r, &checks)?;
+        Ok((checks, fields))
+    }
+
+    fn sample<M: Memory>(&mut self, r: &mut Reflection<M>, now: i64, actor: u64, consumed: &mut Checks) -> Option<BorrowedSkill> {
+        if self.fields.as_ref().is_some_and(|(checks, _)| check(r, checks).is_err()) {
+            self.fields = None;
+            self.retry = 0;
+        }
+        if self.fields.is_none() && now >= self.retry {
+            self.fields = Self::discover(r, actor).ok();
+            self.retry = now + 250_000_000;
+        }
+        let (checks, [current, active, original, target, attack]) = self.fields.as_ref()?;
+        let mut reads = Vec::new();
+        let id = integer(r, &mut reads, *current).ok()?;
+        let value = if id > 0 && boolean(r, &mut reads, *active).ok()? {
+            let ultimate = integer(r, &mut reads, *original).ok()?;
+            let target = integer(r, &mut reads, *target).ok()?;
+            let attack = integer(r, &mut reads, *attack).ok()?;
+            if id != ultimate || id > 10_000_000 || target <= 0 { return None; }
+            // Training stakes use a synthetic hero ID even when they lend Zilong's skill.
+            let hero = if (target, ultimate, attack) == (9996, 1630, 1600) {16}
+                else if (1..1000).contains(&target) {target} else {0};
+            Some(BorrowedSkill { hero, ultimate, attack })
+        } else {None};
+        consumed.extend(checks.iter().cloned());
+        consumed.extend(reads);
+        value
+    }
+}
+
+fn borrowed_button_only_form(copy: BorrowedSkill, slot: &str, base: i32, active: i32) -> bool {
+    if !copy.owns_button(slot, base) { return false; }
+    if slot == "skill:2" && base == copy.ultimate {
+        // A copied ultimate can occupy a different UI slot from the donor's.
+        // Each exception must still match both its verified base and form IDs.
+        ["skill:0", "skill:1", "skill:2", "skill:3"].into_iter()
+            .any(|donor_slot| verified_button_only_form(copy.hero, donor_slot, base, active))
+    } else {
+        verified_button_only_form(copy.hero, slot, base, active)
+    }
+}
+impl BorrowedSkill {
+    fn owns_button(self, slot: &str, base: i32) -> bool {
+        self.hero > 0 && base > 0 && !matches!(base, 11010 | 11020 | 11030 | 11070)
+            && matches!(slot, "skill:0" | "skill:1" | "skill:2" | "skill:3")
+    }
 }
 struct Plan {
     checks: Checks,
@@ -1315,6 +1433,7 @@ struct Plan {
     attack_motion:Option<crate::aim::MotionPlan>,
     behaviors: std::collections::HashMap<i32,(Checks,u8)>,
     behavior_retry: std::collections::HashMap<i32,i64>,
+    borrowed_skill: BorrowedSkillPlan,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct MatchIdentity {
@@ -1610,7 +1729,7 @@ impl<M: Memory> Source<M> {
         let r=&mut self.reflection;let mut checks=Vec::new();
         check(r,&plan.match_checks)?;check(r,&plan.ui.checks)?;
         let mut rows=Vec::new();
-        for button in plan.ui.buttons.iter().filter(|b|b.kind=="skill") {
+        for button in plan.ui.buttons.iter().filter(|b|b.kind=="skill" && b.slot!="valentina:return") {
             let data=link(r,button.object,"m_SkillData",&mut checks)?;
             if data==0 || data!=button.data {return Err("Native skill level owner changed".into());}
             let base=integer_field(r,&mut checks,data,"m_InitSkillID")?;
@@ -1701,6 +1820,7 @@ impl<M: Memory> Source<M> {
             motions, attack_mode:None,attack_mode_retry:0,attack_motion:None,
             behaviors: Default::default(),
             behavior_retry: Default::default(),
+            borrowed_skill: Default::default(),
         })
     }
     pub fn sample(&mut self, now: i64, size: [f64; 2]) -> Result<Sample> {
@@ -1797,6 +1917,9 @@ impl<M: Memory> Source<M> {
                     .any(|b|b.slot.as_str()==v.endpoints[i] && b.ready.get() && b.on_cooldown.get());
             }
             consumed.extend(c);Some(v)} else {None};
+        let borrowed_skill = if hero == 110 {
+            plan.borrowed_skill.sample(r, now, plan.match_owners[3], &mut consumed)
+        } else {None};
         let mut control_types=std::collections::BTreeMap::new();
         let mut control_holds = std::collections::BTreeMap::new();
         let checkpoint=consumed.len();
@@ -1812,8 +1935,12 @@ impl<M: Memory> Source<M> {
         }
         let plain_owner=plan.ui.buttons.iter().find(|b|b.slot=="attack")
             .and_then(|b|r.pointer(b.object).and_then(|c|r.class(c)).ok()).is_some_and(|c|c.name=="CommonAttack");
-        let aimed_attack = !matches!(hero, 71 | 105) && attack_mode == Some(true) && plain_owner;
-        if matches!(hero, 71 | 105) {
+        let attack_hero = borrowed_skill
+            .filter(|copy| ui.buttons.iter().take(ui.button_count.min(32) as usize)
+                .any(|b| b.slot.as_str() == "attack" && b.skill_id.int() == copy.attack))
+            .map_or(hero, |copy| copy.hero);
+        let aimed_attack = !matches!(attack_hero, 71 | 105) && attack_mode == Some(true) && plain_owner;
+        if matches!(attack_hero, 71 | 105) {
             // These weapons have their own native attack behavior regardless
             // of the shared precise-targeting preference.
             let attack=ui.buttons.iter().take(ui.button_count.min(32)as usize)
@@ -1822,8 +1949,8 @@ impl<M: Memory> Source<M> {
                 .find(|v|v.slot.as_str()=="attack" && v.base_skill_id.int()==b.skill_id.int())
                 .map(|v|(b.skill_id.int(),v.active_skill_id.int())));
             let weapon = active.and_then(|(base, id)| {
-                let expected = if kimmy_attack_identity(hero, base, id) { Some(2) }
-                    else { beatrix_attack_type(hero, base, id) }?;
+                let expected = if kimmy_attack_identity(attack_hero, base, id) { Some(2) }
+                    else { beatrix_attack_type(attack_hero, base, id) }?;
                 Some((id, expected))
             });
             if let Some((id, expected)) = weapon {
@@ -1831,7 +1958,7 @@ impl<M: Memory> Source<M> {
                     plan.behaviors.remove(&id);plan.behavior_retry.remove(&id);
                 }
                 if !plan.behaviors.contains_key(&id) && now>=*plan.behavior_retry.get(&id).unwrap_or(&0) {
-                    let behavior = if hero == 71 {
+                    let behavior = if attack_hero == 71 {
                         crate::aim::MotionPlan::discover_kimmy_attack_behavior(r, plan.indicator, id)
                     } else {
                         crate::aim::MotionPlan::discover_behavior(r, plan.indicator, id)
@@ -1931,15 +2058,20 @@ impl<M: Memory> Source<M> {
                 .map(|v|v.active_skill_id.int()).filter(|id|*id>0).unwrap_or(entry.skill_id.int());
             let id=if !choice_family {held_indicator_behavior_id(entry.skill_id.int(),id,skill,
                 control_holds.get(entry.slot.as_str())==Some(&true),ui.active_slot.as_str()==entry.slot.as_str())}else{id};
-            let id = atlas_charge_entry_template_id(hero, entry.slot.as_str(), entry.skill_id.int(), id);
+            let copied_button = borrowed_skill
+                .filter(|copy| copy.owns_button(entry.slot.as_str(), entry.skill_id.int()));
+            let owner = copied_button.map_or(hero, |copy| copy.hero);
+            let id = atlas_charge_entry_template_id(owner, entry.slot.as_str(), entry.skill_id.int(), id);
             if id<=0 {continue;}
-            if !choice_family && hero == 84 && entry.slot.as_str() == "skill:2" && id == 8430 {
+            if !choice_family && owner == 84 && entry.slot.as_str() == "skill:2" && id == 8430 {
                 // Ling's ultimate rotates its blade landing arrangement even
                 // though its generic package is also used by plain tap skills.
                 control_types.insert(entry.slot.owned(), 2);
                 continue;
             }
-            if verified_button_only_form(hero,entry.slot.as_str(),entry.skill_id.int(),id) {
+            if verified_button_only_form(hero,entry.slot.as_str(),entry.skill_id.int(),id)
+                || copied_button.is_some_and(|copy| borrowed_button_only_form(copy, entry.slot.as_str(), entry.skill_id.int(), id))
+            {
                 // Explicitly verified recasts/ultimates are button presses,
                 // even when their original ability has directional geometry.
                 control_types.insert(entry.slot.owned(), 1);
@@ -1951,7 +2083,12 @@ impl<M: Memory> Source<M> {
             let held_current=ui.active_slot.as_str()==entry.slot.as_str() && skill==id;
             if !plan.behaviors.contains_key(&id) && behavior_retry_due(now,*plan.behavior_retry.get(&id).unwrap_or(&0),held_current) {
                 if let Ok(value)=crate::aim::MotionPlan::discover_behavior(r,plan.indicator,id) {plan.behaviors.insert(id,value);}
-                else {plan.behavior_retry.insert(id,now.saturating_add(behavior_retry_delay(held_current)));}
+                else {
+                    // The button can swap ahead of the copied indicator's
+                    // registration. Recheck quickly instead of hiding E for a second.
+                    let delay = if copied_button.is_some() {20_000_000} else {behavior_retry_delay(held_current)};
+                    plan.behavior_retry.insert(id, now.saturating_add(delay));
+                }
             }
             if let Some((checks,kind))=plan.behaviors.get(&id) {
                 consumed.extend(checks.iter().cloned());
@@ -2357,6 +2494,7 @@ impl<M: Memory> Source<M> {
             aim,
             direction_visual, direction_origin,
             control_types,
+            borrowed_skill,
             control_holds,
             linked, portrait,
         })

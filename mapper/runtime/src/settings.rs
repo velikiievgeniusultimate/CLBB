@@ -389,6 +389,7 @@ impl Settings {
             "skill:3" | "combo:1" => 82,
             "attack" => 32,
             "attack:quick" if hero == 105 => 32,
+            "valentina:return" if hero == 110 => 72,
             "attack:minion" => 65,
             "attack:tower" => 83,
             "extra:0" => 66,
