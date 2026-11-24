@@ -568,7 +568,7 @@ index fc12333..52f029e 100644
 +
 +GtkStack *activity_stack(void);
 diff --git a/src/api-impl-jni/app/android_app_Dialog.c b/src/api-impl-jni/app/android_app_Dialog.c
-index 3eb505c..36bce60 100644
+index 3eb505c..f968d06 100644
 --- a/src/api-impl-jni/app/android_app_Dialog.c
 +++ b/src/api-impl-jni/app/android_app_Dialog.c
 @@ -1,5 +1,8 @@
@@ -580,7 +580,7 @@ index 3eb505c..36bce60 100644
  
  #include "../defines.h"
  #include "../util.h"
-@@ -8,9 +11,626 @@
+@@ -8,9 +11,680 @@
  /* main app window */
  extern GtkWindow *window;
  
@@ -824,8 +824,12 @@ index 3eb505c..36bce60 100644
 +	int horizontal_margin = MIN(16, (int)area.size.width / 20);
 +	out->width = MIN(505, (int)area.size.width - 2 * horizontal_margin);
 +	out->height = natural_height;
-+	out->x = area.origin.x + (int)area.size.width - out->width - horizontal_margin;
-+	out->y = area.origin.y + (int)(area.size.height * .69) - out->height - 12;
++	gboolean battle = chat->target.site == CLBB_CHAT_BATTLE_SITE;
++	out->x = area.origin.x + horizontal_margin;
++	if (battle)
++		out->x = area.origin.x + (int)area.size.width - out->width - horizontal_margin;
++	out->y = area.origin.y + (int)(area.size.height * (battle ? .69 : 1.))
++	         - out->height - 12;
 +	return out->width > 0 && out->height > 0;
 +}
 +
@@ -845,6 +849,8 @@ index 3eb505c..36bce60 100644
 +
 +static void update_chat_count(GtkEditable *editable, InlineChat *chat)
 +{
++	if (chat->target.site != CLBB_CHAT_BATTLE_SITE)
++		return;
 +	const char *text = gtk_editable_get_text(editable);
 +	ClbbTextLimits limits = chat_limits(chat);
 +	ClbbChatParts parts = clbb_chat_parts(text, limits);
@@ -909,8 +915,12 @@ index 3eb505c..36bce60 100644
 +	if (!GTK_IS_WINDOW(root))
 +		return;
 +	InlineChat *chat = inline_chat(gtk_window_get_transient_for(GTK_WINDOW(root)));
-+	if (chat && chat->source_entry == text)
++	if (!chat || chat->source_entry != text)
++		return;
++	if (chat->target.site == CLBB_CHAT_BATTLE_SITE)
 +		update_chat_limit(chat);
++	else
++		clbb_text_set_limits(GTK_EDITABLE(chat->entry), clbb_text_limits(GTK_EDITABLE(text)));
 +}
 +
 +static void refresh_chat_channel(InlineChat *chat)
@@ -941,6 +951,19 @@ index 3eb505c..36bce60 100644
 +{
 +	if (chat->finishing)
 +		return;
++	if (chat->target.site != CLBB_CHAT_BATTLE_SITE) {
++		if (!chat->dialog)
++			return;
++		TextDialog controls = {0};
++		find_text_controls(gtk_window_get_child(chat->dialog), &controls);
++		if (controls.text != chat->source_entry || controls.texts != 1 || controls.buttons != 1 ||
++		    !gtk_widget_is_sensitive(controls.confirm))
++			return;
++		chat->finishing = TRUE;
++		gtk_widget_set_sensitive(chat->card, FALSE);
++		g_signal_emit_by_name(controls.confirm, "clicked");
++		return;
++	}
 +	refresh_chat_channel(chat);
 +	ClbbChatParts parts = clbb_chat_parts(gtk_editable_get_text(GTK_EDITABLE(chat->entry)),
 +	                                    chat_limits(chat));
@@ -996,7 +1019,7 @@ index 3eb505c..36bce60 100644
 +{
 +	if (chat->finishing)
 +		return;
-+	if (!chat->followup) {
++	if (chat->target.site == CLBB_CHAT_BATTLE_SITE && !chat->followup) {
 +		refresh_chat_channel(chat);
 +		if (!chat->restore_draft_when_ready)
 +			save_draft(chat->owner, &chat->target,
@@ -1018,10 +1041,10 @@ index 3eb505c..36bce60 100644
 +	return TRUE;
 +}
 +
-+gboolean atl_chat_begin(GtkWindow *owner, const ClbbChatTarget *target)
++static gboolean begin_inline_chat(GtkWindow *owner, const ClbbChatTarget *target)
 +{
 +	GtkWidget *overlay = gtk_window_get_child(owner);
-+	if (target->site != CLBB_CHAT_BATTLE_SITE || !GTK_IS_OVERLAY(overlay) || inline_chat(owner))
++	if (!GTK_IS_OVERLAY(overlay) || inline_chat(owner))
 +		return FALSE;
 +	atl_chat_cancel_batch(owner);
 +	InlineChat *chat = g_new0(InlineChat, 1);
@@ -1033,8 +1056,9 @@ index 3eb505c..36bce60 100644
 +	chat->card = g_object_ref_sink(gtk_box_new(GTK_ORIENTATION_VERTICAL, 5));
 +	GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
 +	gtk_widget_add_css_class(chat->card, "clbb-chat-entry");
++	gboolean battle = target->site == CLBB_CHAT_BATTLE_SITE;
 +	chat->entry = gtk_entry_new();
-+	gtk_entry_set_placeholder_text(GTK_ENTRY(chat->entry), "Сообщение");
++	gtk_entry_set_placeholder_text(GTK_ENTRY(chat->entry), battle ? "Сообщение" : "Введите текст");
 +	gtk_widget_set_hexpand(chat->entry, TRUE);
 +	gtk_editable_set_width_chars(GTK_EDITABLE(chat->entry), 18);
 +	gtk_editable_set_max_width_chars(GTK_EDITABLE(chat->entry), 36);
@@ -1043,9 +1067,10 @@ index 3eb505c..36bce60 100644
 +	chat->send = gtk_button_new_with_label("Отправить");
 +	gtk_widget_add_css_class(chat->send, "chat-send");
 +	GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
-+	gtk_widget_set_tooltip_text(close, "Закрыть и сохранить черновик (Esc)");
++	const char *close_title = battle ? "Закрыть и сохранить черновик" : "Отменить ввод";
++	gtk_widget_set_tooltip_text(close, close_title);
 +	gtk_accessible_update_property(GTK_ACCESSIBLE(close),
-+	                               GTK_ACCESSIBLE_PROPERTY_LABEL, "Закрыть и сохранить черновик", -1);
++	                               GTK_ACCESSIBLE_PROPERTY_LABEL, close_title, -1);
 +	chat->count = gtk_label_new(NULL);
 +	chat->hint = gtk_label_new(NULL);
 +	gtk_label_set_xalign(GTK_LABEL(chat->hint), 0);
@@ -1059,6 +1084,8 @@ index 3eb505c..36bce60 100644
 +	gtk_box_append(GTK_BOX(row), close);
 +	gtk_box_append(GTK_BOX(chat->card), row);
 +	gtk_box_append(GTK_BOX(chat->card), chat->hint);
++	gtk_widget_set_visible(chat->count, battle);
++	gtk_widget_set_visible(chat->hint, FALSE);
 +	g_signal_connect(chat->entry, "changed", G_CALLBACK(chat_entry_changed), chat);
 +	update_chat_limit(chat);
 +	g_signal_connect(chat->entry, "activate", G_CALLBACK(submit_inline), chat);
@@ -1088,6 +1115,11 @@ index 3eb505c..36bce60 100644
 +	gtk_overlay_add_overlay(chat->overlay, chat->card);
 +	gtk_widget_grab_focus(chat->entry);
 +	return TRUE;
++}
++
++gboolean atl_chat_begin(GtkWindow *owner, const ClbbChatTarget *target)
++{
++	return target->site == CLBB_CHAT_BATTLE_SITE && begin_inline_chat(owner, target);
 +}
 +
 +gboolean atl_chat_begin_followup(GtkWindow *owner, const ClbbChatTarget *target, gint64 now)
@@ -1149,11 +1181,33 @@ index 3eb505c..36bce60 100644
 +	if (controls.texts != 1 || controls.buttons != 1)
 +		return FALSE;
 +	ClbbChatTarget target = {0};
-+	if (!query_chat_site(owner, &target, FALSE) || target.site != CLBB_CHAT_BATTLE_SITE)
-+		return FALSE;
-+	if (!chat && !atl_chat_begin(owner, &target))
++	gboolean battle = query_chat_site(owner, &target, FALSE) && target.site == CLBB_CHAT_BATTLE_SITE;
++	if (chat && (!battle || chat->target.owner != target.owner || chat->target.site != target.site)) {
++		atl_chat_abort_pending(owner);
++		chat = NULL;
++	}
++	if (!battle)
++		target = (ClbbChatTarget){0};
++	if (!chat && !begin_inline_chat(owner, &target))
 +		return FALSE;
 +	chat = inline_chat(owner);
++	if (!battle) {
++		/* Keep the original Android EditText as the owner of the input.
++		 * Present an entry in the game window even when a menu has no chat target. */
++		chat->dialog = dialog;
++		chat->source_entry = controls.text;
++		GtkText *source = GTK_TEXT(controls.text);
++		GtkEntry *entry = GTK_ENTRY(chat->entry);
++		gtk_entry_set_buffer(entry, gtk_text_get_buffer(source));
++		gtk_entry_set_visibility(entry, gtk_text_get_visibility(source));
++		gtk_entry_set_input_purpose(entry, gtk_text_get_input_purpose(source));
++		const char *placeholder = gtk_text_get_placeholder_text(source);
++		if (placeholder && *placeholder)
++			gtk_entry_set_placeholder_text(entry, placeholder);
++		clbb_text_set_limits(GTK_EDITABLE(entry), clbb_text_limits(GTK_EDITABLE(source)));
++		gtk_editable_set_position(GTK_EDITABLE(entry), -1);
++		return TRUE;
++	}
 +	target.limit = MIN(chat->target.limit, target.limit);
 +	chat->target = target;
 +	chat->dialog = dialog;
@@ -1208,7 +1262,7 @@ index 3eb505c..36bce60 100644
  	JNIEnv *env = get_jni_env();
  	J__DialogInterface__dismiss(env, jobj);
  	return FALSE;
-@@ -27,6 +647,8 @@ static gboolean on_touch_outside(GtkEventControllerLegacy *controller, GdkEvent
+@@ -27,6 +701,8 @@ static gboolean on_touch_outside(GtkEventControllerLegacy *controller, GdkEvent
  {
  	GdkEventType event_type = gdk_event_get_event_type(event);
  	if ((event_type == GDK_BUTTON_PRESS || event_type == GDK_TOUCH_BEGIN) && gtk_widget_get_visible(GTK_WIDGET(outside->dialog))) {
@@ -1217,7 +1271,7 @@ index 3eb505c..36bce60 100644
  		JNIEnv *env = get_jni_env();
  		jmethodID dismiss = _METHOD(_CLASS(outside->jobj), "dismiss", "()V");
  		(*env)->CallVoidMethod(env, outside->jobj, dismiss);
-@@ -56,8 +678,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
+@@ -56,8 +732,15 @@ JNIEXPORT jlong JNICALL Java_android_app_Dialog_nativeInit(JNIEnv *env, jobject
  	GtkWidget *decor_view = GTK_WIDGET(_PTR(decor_view_ptr));
  	GtkWidget *dialog = gtk_window_new();
  	gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
@@ -1235,7 +1289,7 @@ index 3eb505c..36bce60 100644
  	return _INTPTR(g_object_ref(dialog));
  }
  
-@@ -74,26 +703,43 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
+@@ -74,26 +757,43 @@ JNIEXPORT void JNICALL Java_android_app_Dialog_nativeSetContentView(JNIEnv *env,
  	GtkWindow *dialog = GTK_WINDOW(_PTR(ptr));
  	GtkWidget *widget = GTK_WIDGET(_PTR(widget_ptr));
  
