@@ -70,7 +70,22 @@ impl Settings {
         if s.migrate_field_inheritance() { let _ = s.save(); }
         if s.install_directional_hero_defaults() { let _ = s.save(); }
         if s.install_guinevere_ultimate_default() { let _ = s.save(); }
+        if s.install_release_bindings() { let _ = s.save(); }
         s
+    }
+    fn install_release_bindings(&mut self) -> bool {
+        const MARK: &str = "migration.release_bindings.beta3";
+        if self.values.contains_key(MARK) { return false; }
+        let bindings: BTreeMap<String, String> =
+            serde_json::from_str(include_str!("release-bindings.json")).expect("valid built-in bindings");
+        for (key, value) in bindings {
+            let flag = format!("{key}.override");
+            if self.values.contains_key(&key) || self.values.contains_key(&flag) { continue; }
+            if key.starts_with("heroes.") { self.values.insert(flag, "true".into()); }
+            self.values.insert(key, value);
+        }
+        self.values.insert(MARK.into(), "1".into());
+        true
     }
     // Her channel is cancelled by movement. Retire the previous movement
     // intent on activation; the existing controller accepts fresh input again.

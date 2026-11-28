@@ -118,6 +118,7 @@ fn wants_update_window(success:bool,log:&str)->bool {
 fn update_window(root:&std::path::Path,state:&std::path::Path)->io::Result<()> {
     let status=std::process::Command::new(root.join("bin/clbb-update-ui"))
         .env("CLBB_ROOT",root).env("CLBB_ATL_ROOT",root).env("CLBB_STATE_ROOT",state)
+        .env_remove("CLBB_ACCOUNT_CHILD").env_remove("CLBB_ACCOUNTS_SOCKET")
         .env("CLBB_UPDATE_MANAGER",root.join("bin/clbb-manager"))
         .env("CLBB_RELEASE_VERSION",fs::read_to_string(root.join("VERSION"))?.trim())
         .env("CLBB_RELEASE_REVISION",fs::read_to_string(root.join("REVISION")).unwrap_or_default().trim())
@@ -166,6 +167,19 @@ fn main() {
         let command=if args[0]=="--check-updates"{"--check"}else{&args[0]};
         let result=runtime_root().and_then(|root|std::process::Command::new(root.join("bin/clbb-manager")).arg(command).args(&args[1..]).status());
         match result {Ok(status)=>std::process::exit(status.code().unwrap_or(1)),Err(e)=>{eprintln!("CLBB: {e}");std::process::exit(1);}}
+    }
+    #[cfg(target_os = "linux")]
+    if args.is_empty() && env::var("CLBB_MANAGED_INSTALL").as_deref() == Ok("1")
+        && env::var("CLBB_ACCOUNT_CHILD").as_deref() != Ok("1") {
+        if let Ok(root) = runtime_root() {
+            // The desktop wrapper in already-installed releases also reaches this entry point.
+            if env::var_os("CLBB_INSTALL_ROOT").is_some() && root.join("distribution/accounts.py").is_file() {
+                let error = Command::new("python3").arg("-B").arg(root.join("distribution/accounts.py"))
+                    .arg("desktop").exec();
+                eprintln!("CLBB profiles: {error}");
+                std::process::exit(1);
+            }
+        }
     }
     let mut failure_scope=None;
     #[cfg(target_os = "linux")]

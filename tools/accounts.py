@@ -17,11 +17,16 @@ import uuid
 from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("instances", ROOT / "tools/debug-instance.py")
-instances = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(instances)
+MANAGED = Path(__file__).parent.name == "distribution"
+if MANAGED:
+    import managed_profiles as instances
+    ROOT = instances.PRIMARY_STATE
+else:
+    spec = importlib.util.spec_from_file_location("instances", ROOT / "tools/debug-instance.py")
+    instances = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(instances)
 BASE = instances.BASE
-ADDRESS = BASE / ".accounts.sock"
+ADDRESS = instances.ADDRESS if MANAGED else BASE / ".accounts.sock"
 REGISTRY = BASE / ".accounts.json"
 PRIMARY = "primary"
 WRAPPER = ROOT / ".clbb-local-launch"
@@ -64,13 +69,13 @@ def names():
 
 def owned(account):
     try:
-        if account != PRIMARY:
+        if MANAGED or account != PRIMARY:
             return instances.probe(instances.profile(account))
         spec = importlib.util.spec_from_file_location("probe", ROOT / "tools/probe-hero-control.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.Probe(0, {"commands": [], "samples": []})
-    except (OSError, RuntimeError, ValueError):
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError):
         return None
 
 
@@ -89,7 +94,7 @@ def start(account):
     if sum(running(name) for name in names()) >= 2:
         raise ValueError("Уже открыты два окна CLBB.")
     started_ns = time.monotonic_ns()
-    if account == PRIMARY:
+    if account == PRIMARY and not MANAGED:
         env = dict(os.environ, CLBB_ACCOUNT_BYPASS="1")
         with (ROOT / "logs/account-launch.log").open("ab") as log:
             child = subprocess.Popen([str(WRAPPER)], env=env, stdin=subprocess.DEVNULL,
@@ -111,7 +116,7 @@ def desktop_close_requested(account, launch):
         with (logs / f"qemu-launch-{start}-{pid}" / "runtime.log").open("rb") as log:
             log.seek(max(0, log.seek(0, os.SEEK_END) - 4096))
             marker = b"[CLBB_EXIT] desktop_close"
-            return any(line.lstrip(b"\0") == marker for line in log.read().splitlines())
+            return any(line.lstrip(b"\0") in (marker, b"[CLBB_EXIT] update_requested") for line in log.read().splitlines())
     except (OSError, ValueError, TypeError, KeyError):
         return False
 
@@ -252,6 +257,7 @@ class Handler(socketserver.StreamRequestHandler):
 
 def serve():
     BASE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    ADDRESS.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.umask(0o077)
     with (BASE / ".accounts.lock").open("a+b") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -277,7 +283,11 @@ def desktop():
                 raise SystemExit(response.removeprefix("ERR\n").strip() or "Не удалось запустить CLBB.")
             return
         except (ConnectionRefusedError, FileNotFoundError):
-            if attempt == 0:
+            if attempt == 0 and MANAGED:
+                subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "serve"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            elif attempt == 0:
                 args = ["systemd-run", "--user", "--quiet", "--collect", "--unit=clbb-accounts"]
                 for key in ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"):
                     if key in os.environ:
